@@ -11,10 +11,10 @@
 - [x] Instalar **Navegador** (Chrome recomendado)  
 - [x] Instalar **MongoDB Server** (verificar con `mongod --version`)  
 - [x] Instalar **MongoDB Shell (mongosh)** (verificar con `mongosh --version`)  
-- [ ] Probar conexión MongoDB local (`mongosh`, crear DB y colección de prueba)  
-- [ ] Crear **repositorio Git** del proyecto (local + remoto en GitHub/GitLab)  
-- [ ] Clonar proyecto en el entorno de desarrollo  
-- [ ] Instalar dependencias iniciales del proyecto (`npm install`)  
+- [x] Probar conexión MongoDB local (`mongosh`, crear DB y colección de prueba)  
+- [x] Crear **repositorio Git** del proyecto (local + remoto en GitHub/GitLab)  
+- [x] Clonar proyecto en el entorno de desarrollo  
+- [x] Instalar dependencias iniciales del proyecto (`npm install`)  
 
 ---
 
@@ -22,13 +22,13 @@
 ✅ Objetivo: Crear el esqueleto del backend.  
 
 ### Checklist
-- [ ] Inicializar proyecto (`npm init -y`)  
-- [ ] Instalar dependencias básicas:  
+- [x] Inicializar proyecto (`npm init -y`)  
+- [x] Instalar dependencias básicas:  
   - `express` → servidor web  
   - `mongoose` → conexión MongoDB  
   - `dotenv` → manejo de variables de entorno  
   - `nodemon` (dev) → recarga automática  
-- [ ] Crear estructura de carpetas:  
+- [x] Crear estructura de carpetas:  
   ```
   /src
    ├── server.js
@@ -37,9 +37,9 @@
    ├── routes/
    └── controllers/
   ```  
-- [ ] Configurar **servidor Express básico** (endpoint `/ping`)  
-- [ ] Conectar backend a **MongoDB local**  
-- [ ] Probar endpoint con **Postman**  
+- [x] Configurar **servidor Express básico** (endpoint `/ping`)  
+- [x] Conectar backend a **MongoDB local**  
+- [x] Probar endpoint con **Postman**  
 
 ---
 
@@ -47,71 +47,102 @@
 ✅ Objetivo: Definir cómo se guardará la información.  
 
 ### Checklist
-- [ ] Definir colecciones necesarias:  
+- [x] Definir colecciones necesarias:  
   - `users` (usuarios del sistema)  
   - `contacts` (contactos destino de mensajes)  
   - `messages` (mensajes enviados y recibidos)  
   - `logs` (errores, eventos importantes)  
-- [ ] Crear modelos Mongoose para cada colección  
-- [ ] Implementar controladores y rutas básicas:  
+- [x] Crear modelos Mongoose para cada colección  
+- [x] Implementar controladores y rutas básicas:  
   - `/users` → CRUD  
   - `/contacts` → CRUD  
   - `/messages` → CRUD  
-- [ ] Probar cada ruta con **Postman**  
-- [ ] Validar entradas con `express-validator` (opcional)  
+- [x] Probar cada ruta con **Postman**  
+- [x] Validar entradas con `express-validator` (opcional)  
 
 ---
 
-## **Capítulo 4: Integración con WhatsApp API**
+## **Capítulo 4: Integración con WhatsApp API**  
 ✅ Objetivo: Poder enviar y recibir mensajes reales.  
 
 ### Checklist
-- [ ] Seleccionar API gratuita/rápida (ej: `whatsapp-web.js` o proveedor gratuito)  
-- [ ] Configurar autenticación (QR, token o key según API)  
-- [ ] Implementar envío de mensaje de prueba desde backend  
-- [ ] Implementar recepción de mensajes (listener/webhook)  
-- [ ] Guardar mensajes en MongoDB  
-- [ ] Probar flujo completo con Postman (enviar → recibir → guardar)  
+- [x] Seleccionar API (`whatsapp-web.js`)  
+- [ ] Configurar autenticación con **QR** (Req. 1)  
+- [x] Enviar mensaje de prueba (Req. 4)  
+- [ ] Listener para recepción de mensajes (Req. 13)  
+- [ ] Guardar mensajes recibidos en MongoDB (Req. 14)  
+- [ ] Validar números Argentina (Req. 3 ya cumplido en validator)  
 
 ---
 
-## **Capítulo 5: Frontend básico (opcional, React o similar)**
-✅ Objetivo: Tener una interfaz mínima para operar.  
+## **Capítulo 5: Funcionalidades de Mensajería Avanzada**  
+✅ Objetivo: Cubrir los requisitos del **2 al 22**.  
 
 ### Checklist
-- [ ] Crear proyecto frontend (ej: `create-react-app`)  
-- [ ] Pantalla de login (si aplica)  
-- [ ] Pantalla para enviar mensajes  
-- [ ] Pantalla para listar mensajes enviados/recibidos  
-- [ ] Conexión con backend vía REST o WebSocket  
-- [ ] Estilos básicos (Tailwind/Bootstrap)  
+- [ ] **CSV/XLSX import** de contactos (Req. 2)  
+- [ ] Cuadro de texto enriquecido con placeholders `{{campo}}` (Req. 4)  
+- [ ] Botones de **negrita/cursiva** (Req. 5–6)  
+- [ ] Caja de **emojis** con buscador (Req. 7)  
+- [ ] **Spintax parser** `{a|b|c}` (Req. 8)  
+- [ ] Vista previa mensaje (Req. 9)  
+- [ ] CRUD de **plantillas** de mensajes (Req. 10–11)  
+- [ ] Botones dinámicos con headers detectados (Req. 12)  
+- [ ] Auto-respuesta validada (Req. 13–14)  
+- [ ] Envíos con **delay aleatorio** entre mensajes (Req. 15)  
+- [ ] Envío en **lotes + descanso** entre lotes (Req. 16)  
+- [ ] Controles de **Iniciar/Cancelar/Detener/Reanudar** (Req. 17–20)  
+- [ ] Programar envíos con **fecha/hora** (Req. 21)  
+- [ ] **Métricas en tiempo real** (WebSocket: pendientes, éxito, fallos, ETA) (Req. 22)  
 
 ---
 
-## **Capítulo 6: Integración y pruebas completas**
-✅ Objetivo: Validar todo el flujo y afinar detalles.  
+## **Capítulo 6: Notificaciones y Logs**  
+✅ Objetivo: Requisitos **23–24**  
 
 ### Checklist
-- [ ] Flujo: Usuario → Frontend → Backend → WhatsApp → DB → Respuesta  
-- [ ] Manejo de errores en backend  
-- [ ] Logs de eventos críticos (ej: fallo de conexión, mensajes rechazados)  
-- [ ] Pruebas unitarias simples (Jest o Mocha)  
-- [ ] Documentar API con Swagger o Postman Collections  
+- [ ] **Toasts dinámicos** en frontend (Req. 23)  
+- [ ] **Log persistente** de sucesos en BD con exportación (Req. 24)  
 
 ---
 
-## **Capítulo 7: Consolidación y despliegue**
-✅ Objetivo: Subir el proyecto y dejarlo en producción.  
+## **Capítulo 7: Sesión y Seguridad**  
+✅ Objetivo: Requisitos **25–26**  
 
 ### Checklist
-- [ ] Configurar variables de entorno (`.env`)  
-- [ ] Crear build de frontend (si aplica)  
-- [ ] Elegir plataforma de despliegue (Railway, Render, Vercel, etc.)  
-- [ ] Desplegar backend conectado a MongoDB Atlas o servidor propio  
-- [ ] Probar flujo en producción  
-- [ ] Documentación final y checklist de entrega  
+- [ ] Cerrar sesión (revocar token, desconectar) (Req. 25)  
+- [ ] Reiniciar sesión (re-vincular QR/cliente) (Req. 26)  
 
 ---
 
-📌 **Nota operativa para ChatGPT:**  
-Cada 10 mensajes (aprox.) se recomienda refrescar el **Capítulo actual + tareas pendientes**.  
+## **Capítulo 8: Exportación final de resultados**  
+✅ Objetivo: Requisito **27**  
+
+### Checklist
+- [ ] Generar **.xls** con resultados finales (éxitos, fallos, métricas) (Req. 27)  
+
+---
+
+## **Capítulo 9: Frontend Básico (React + Tailwind)**  
+✅ Objetivo: Interfaz mínima.  
+
+### Checklist
+- [ ] Login básico (si aplica)  
+- [ ] Panel para importar contactos y ver headers detectados  
+- [ ] Editor de mensaje (con negrita/cursiva/emojis/spintax)  
+- [ ] Vista previa mensaje por contacto  
+- [ ] Panel de envío (batch, horarios, estado)  
+- [ ] Panel de métricas (WebSocket)  
+- [ ] Logs y exportaciones  
+
+---
+
+## **Capítulo 10: Integración y despliegue**  
+✅ Objetivo: Validar todo el flujo y preparar producción.  
+
+### Checklist
+- [ ] Flujo completo: CSV → Previsualizar → Enviar → WhatsApp → Guardar → Exportar  
+- [ ] Manejo de errores robusto  
+- [ ] Documentar API (Swagger/Postman)  
+- [ ] Configuración `.env`  
+- [ ] Deploy (Railway/Render con MongoDB Atlas)  
+- [ ] Pruebas en producción  
