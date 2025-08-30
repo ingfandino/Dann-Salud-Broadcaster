@@ -1,6 +1,8 @@
 // src/controllers/messageController.js
 
 const Message = require("../models/Message");
+const Contact = require("../models/Contact");
+const { parseSpintax } = require("../utils/spintax");
 
 // Crear mensaje
 exports.createMessage = async (req, res) => {
@@ -60,5 +62,72 @@ exports.deleteMessage = async (req, res) => {
         res.json({ message: "Mensaje eliminado" });
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+};
+
+// Vista previa con placeholders + spintax
+exports.previewMessage = async (req, res) => {
+    try {
+        const { template, contact } = req.body;
+        console.log("📩 Preview recibido:", req.body);
+
+        if (!template || !contact) {
+            return res.status(400).json({ error: "Debes enviar 'template' y 'contact'" });
+        }
+        if (!template || template.trim() === "") {
+            return res.status(400).json({ error: "El cuadro de texto está vacío" });
+        }
+        let rendered = template.replace(/{{(.*?)}}/g, (match, key) => {
+            const cleanKey = key.trim();
+            return contact[cleanKey] !== undefined ? contact[cleanKey] : match;
+        });
+
+        console.log("📝 Después de placeholders:", rendered);
+
+        if (typeof parseSpintax === "function") {
+            rendered = parseSpintax(rendered);
+            console.log("🎲 Después de spintax:", rendered);
+        } else {
+            console.warn("⚠️ parseSpintax no es función:", typeof parseSpintax);
+        }
+
+        res.json({ rendered });
+    } catch (err) {
+        console.error("❌ Error en previewMessage:", err.stack); // <--- stack real
+        res.status(500).json({ error: "Error interno en preview" });
+    }
+};
+
+// 🔹 Vista previa automática desde primer contacto importado
+exports.previewMessageFromImport = async (req, res) => {
+    try {
+        const { template } = req.body;
+        if (!template) {
+            return res.status(400).json({ error: "Debes enviar 'template'" });
+        }
+
+        const firstContact = await Contact.findOne();
+        if (!firstContact) {
+            return res.status(404).json({ error: "No hay contactos importados en la base de datos" });
+        }
+        if (!template || template.trim() === "") {
+            return res.status(400).json({ error: "El cuadro de texto está vacío" });
+        }
+
+        let rendered = template.replace(/{{(.*?)}}/g, (match, key) => {
+            const cleanKey = key.trim();
+            return firstContact[cleanKey] !== undefined ? firstContact[cleanKey] : match;
+        });
+
+        try {
+            rendered = parseSpintax ? parseSpintax(rendered) : rendered;
+        } catch (err) {
+            console.warn("⚠️ Error procesando spintax:", err.message);
+        }
+
+        res.json({ rendered, contactUsed: firstContact });
+    } catch (err) {
+        console.error("❌ Error en previewMessageFromImport:", err);
+        res.status(500).json({ error: "Error interno en previewFromImport" });
     }
 };

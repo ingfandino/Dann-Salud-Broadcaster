@@ -67,11 +67,11 @@
 
 ### Checklist
 - [x] Seleccionar API (`whatsapp-web.js`)  
-- [ ] Configurar autenticación con **QR** (Req. 1)  
+- [x] Configurar autenticación con **QR** (Req. 1)  
 - [x] Enviar mensaje de prueba (Req. 4)  
-- [ ] Listener para recepción de mensajes (Req. 13)  
-- [ ] Guardar mensajes recibidos en MongoDB (Req. 14)  
-- [ ] Validar números Argentina (Req. 3 ya cumplido en validator)  
+- [x] Listener para recepción de mensajes (Req. 13)  
+- [x] Guardar mensajes recibidos en MongoDB (Req. 14)  
+- [x] Validar números Argentina (Req. 3 ya cumplido en validator)  
 
 ---
 
@@ -79,19 +79,19 @@
 ✅ Objetivo: Cubrir los requisitos del **2 al 22**.  
 
 ### Checklist
-- [ ] **CSV/XLSX import** de contactos (Req. 2)  
-- [ ] Cuadro de texto enriquecido con placeholders `{{campo}}` (Req. 4)  
-- [ ] Botones de **negrita/cursiva** (Req. 5–6)  
-- [ ] Caja de **emojis** con buscador (Req. 7)  
-- [ ] **Spintax parser** `{a|b|c}` (Req. 8)  
-- [ ] Vista previa mensaje (Req. 9)  
-- [ ] CRUD de **plantillas** de mensajes (Req. 10–11)  
-- [ ] Botones dinámicos con headers detectados (Req. 12)  
-- [ ] Auto-respuesta validada (Req. 13–14)  
-- [ ] Envíos con **delay aleatorio** entre mensajes (Req. 15)  
-- [ ] Envío en **lotes + descanso** entre lotes (Req. 16)  
-- [ ] Controles de **Iniciar/Cancelar/Detener/Reanudar** (Req. 17–20)  
-- [ ] Programar envíos con **fecha/hora** (Req. 21)  
+- [x] **CSV/XLSX import** de contactos (Req. 2)  
+- [x] Cuadro de texto enriquecido con placeholders `{{campo}}` (Req. 4)  
+- [x] Botones de **negrita/cursiva** (Req. 5–6)  
+- [x] Caja de **emojis** con buscador (Req. 7)  
+- [x] **Spintax parser** `{a|b|c}` (Req. 8)  
+- [x] Vista previa mensaje (Req. 9)  
+- [x] CRUD de **plantillas** de mensajes (Req. 10–11)  
+- [x] Botones dinámicos con headers detectados (Req. 12)  
+- [x] Auto-respuesta validada (Req. 13–14)  
+- [x] Envíos con **delay aleatorio** entre mensajes (Req. 15)  
+- [x] Envío en **lotes + descanso** entre lotes (Req. 16)  
+- [x] Controles de **Iniciar/Cancelar/Detener/Reanudar** (Req. 17–20)  
+- [x] Programar envíos con **fecha/hora** (Req. 21)  
 - [ ] **Métricas en tiempo real** (WebSocket: pendientes, éxito, fallos, ETA) (Req. 22)  
 
 ---
