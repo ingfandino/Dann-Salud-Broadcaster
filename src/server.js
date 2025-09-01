@@ -1,4 +1,5 @@
 // src/server.js
+
 const cors = require("cors");
 const connectDB = require("./config/db");
 const express = require("express");
@@ -14,6 +15,7 @@ const autoresponseRoutes = require("./routes/autoresponseRoutes");
 const sendConfigRoutes = require("./routes/sendConfigRoutes");
 const sendJobRoutes = require("./routes/sendJobRoutes");
 const jobRoutes = require("./routes/jobRoutes");
+const logRoutes = require("./routes/logRoutes");
 
 dotenv.config();
 connectDB();
@@ -35,6 +37,7 @@ app.use("/autoresponses", autoresponseRoutes);
 app.use("/send-config", sendConfigRoutes);
 app.use("/send", sendJobRoutes);
 app.use("/jobs", jobRoutes);
+app.use("/logs", logRoutes);
 
 // Inicializa WhatsApp (QR sigue igual)
 require("./controllers/whatsappController");

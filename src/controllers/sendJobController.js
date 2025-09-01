@@ -10,7 +10,7 @@ exports.startJob = async (req, res) => {
         const { ownerUser, template, contacts, scheduledFor } = req.body;
 
         const job = new SendJob({
-            ownerUser,
+            ownerUser, // ⚠️ En producción, debería venir de req.user._id para asesores
             template,
             contacts,
             scheduledFor: scheduledFor || new Date(),
@@ -110,7 +110,7 @@ exports.getJob = async (req, res) => {
 exports.listJobs = async (_req, res) => {
     try {
         const jobs = await SendJob.find()
-            .populate("ownerUser", "nombre email")
+            .populate("ownerUser", "nombre email role")
             .populate("contacts", "nombre telefono")
             .sort({ scheduledFor: -1, createdAt: -1 });
 
