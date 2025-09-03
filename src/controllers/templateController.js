@@ -3,7 +3,7 @@
 const Template = require("../models/Template");
 const Contact = require("../models/Contact");
 const { parseSpintax } = require("../utils/spintax");
-const { sendMessageService } = require("../services/sendMessageService");
+const { sendSingleMessage } = require("../services/sendMessageService");
 
 // Crear plantilla
 exports.createTemplate = async (req, res) => {
@@ -91,8 +91,12 @@ exports.sendTemplate = async (req, res) => {
             rendered = parseSpintax(rendered);
 
             try {
-                await sendMessageService(contact.telefono, rendered);
-                results.push({ contact: contact._id, status: "success" });
+                const result = await sendSingleMessage(contact.telefono, rendered);
+                if (result.success) {
+                    results.push({ contact: contact._id, telefono: contact.telefono, status: "success" });
+                } else {
+                    results.push({ contact: contact._id, status: "failed", error: result.error });
+                }
             } catch (err) {
                 results.push({ contact: contact._id, status: "failed", error: err.message });
             }

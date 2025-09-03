@@ -39,4 +39,8 @@ router.post("/send", sendMessageValidator, validateRequest, async (req, res) => 
     }
 });
 
+// ✅ Endpoint para cerrar o reiniciar enlace con WhatsApp vía API
+router.post("/logout", whatsappController.logout);
+router.post("/relink", whatsappController.relink);
+
 module.exports = router;

@@ -1,19 +1,25 @@
 // src/services/metricsService.js
 
 const Message = require("../models/Message");
-const Job = require("../models/Job");
+const SendJob = require("../models/SendJob");
 const { emitMetrics } = require("../config/socket");
 
 async function collectMetrics() {
+    // Mensajes
     const totalEnviados = await Message.countDocuments({ status: "enviado" });
     const totalFallidos = await Message.countDocuments({ status: "fallido" });
     const totalPendientes = await Message.countDocuments({ status: "pendiente" });
     const totalRespuestas = await Message.countDocuments({ direction: "inbound" });
+
     const total = totalEnviados + totalFallidos + totalPendientes;
     const porcentajeExito = total > 0 ? ((totalEnviados / total) * 100).toFixed(2) : 0;
 
-    const jobsPendientes = await Job.countDocuments({ status: "pendiente" });
-    const jobsEjecutando = await Job.countDocuments({ status: "ejecutando" });
+    // Jobs (usando los estados reales del modelo SendJob)
+    const jobsPendientes = await SendJob.countDocuments({ status: "pending" });
+    const jobsEjecutando = await SendJob.countDocuments({ status: "running" });
+    const jobsCompletados = await SendJob.countDocuments({ status: "completed" });
+    const jobsFallidos = await SendJob.countDocuments({ status: "failed" });
+    const jobsCancelados = await SendJob.countDocuments({ status: "canceled" });
 
     return {
         mensajes: {
@@ -27,6 +33,9 @@ async function collectMetrics() {
         jobs: {
             pendientes: jobsPendientes,
             ejecutando: jobsEjecutando,
+            completados: jobsCompletados,
+            fallidos: jobsFallidos,
+            cancelados: jobsCancelados
         },
     };
 }

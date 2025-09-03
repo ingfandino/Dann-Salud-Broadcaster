@@ -3,32 +3,19 @@
 const User = require("../models/User");
 const { signToken } = require("../utils/jwt");
 
-// Registro
 exports.register = async (req, res) => {
   try {
-    const { nombre, email, password, rol, supervisor } = req.body;
+    const { nombre, email, password } = req.body;
 
     const exists = await User.findOne({ email });
     if (exists) return res.status(400).json({ error: "Email ya registrado" });
-
-    // 🔒 Restricción de roles
-    let finalRol = "asesor"; // por defecto
-    let finalSupervisor = supervisor || null;
-
-    if (rol && rol !== "asesor") {
-      // Solo admin autenticado puede crear supervisores/admins
-      if (!req.user || req.user.rol !== "admin") {
-        return res.status(403).json({ error: "No autorizado para crear usuarios con rol alto" });
-      }
-      finalRol = rol;
-    }
 
     const user = new User({
       nombre,
       email,
       password,
-      rol: finalRol,
-      supervisor: finalSupervisor,
+      role: "asesor", // <-- forzado
+      supervisor: null,
     });
     await user.save();
 
@@ -38,7 +25,7 @@ exports.register = async (req, res) => {
         _id: user._id,
         nombre: user.nombre,
         email: user.email,
-        rol: user.rol,
+        role: user.role,
         supervisor: user.supervisor || null,
       },
       token,
@@ -49,7 +36,7 @@ exports.register = async (req, res) => {
   }
 };
 
-// Login
+// Login — devolver role
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -66,7 +53,7 @@ exports.login = async (req, res) => {
         _id: user._id,
         nombre: user.nombre,
         email: user.email,
-        rol: user.rol,
+        role: user.role,
         supervisor: user.supervisor || null,
       },
       token,
@@ -77,17 +64,17 @@ exports.login = async (req, res) => {
   }
 };
 
-// WhoAmI
+// WhoAmI — coherente con role
 exports.me = async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
-      .populate("supervisor", "nombre email rol");
+      .populate("supervisor", "nombre email role");
     if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
     res.json({
       _id: user._id,
       nombre: user.nombre,
       email: user.email,
-      rol: user.rol,
+      role: user.role,
       supervisor: user.supervisor || null,
     });
   } catch (err) {

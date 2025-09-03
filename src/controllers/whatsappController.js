@@ -2,7 +2,7 @@
 
 const Message = require("../models/Message");
 const Autoresponse = require("../models/Autoresponse");
-const { whatsappClient, whatsappEvents } = require("../config/whatsapp");
+const { whatsappClient, whatsappEvents, connect } = require("../config/whatsapp");
 
 // Escucha de mensajes entrantes
 whatsappEvents.on("message", async (msg) => {
@@ -52,4 +52,23 @@ whatsappEvents.on("message", async (msg) => {
     }
 });
 
-module.exports = {};
+exports.logout = async (req, res) => {
+    try {
+        await whatsappClient.logout();
+        res.json({ message: "Sesión de WhatsApp cerrada" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+exports.relink = async (req, res) => {
+    try {
+        await whatsappClient.logout();
+        await connect();
+        res.json({ message: "Reiniciando sesión de WhatsApp, escanee el nuevo QR" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+module.exports = exports;

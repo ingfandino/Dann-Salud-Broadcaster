@@ -1,10 +1,8 @@
 // src/middlewares/authMiddleware.js
 
 const { verifyToken } = require("../utils/jwt");
-const { verifyToken } = require("../utils/jwt");
 const User = require("../models/User");
 
-// Verifica JWT. Debe ir antes de checks de rol
 exports.requireAuth = async (req, res, next) => {
   try {
     const header = req.headers.authorization || "";
@@ -17,7 +15,7 @@ exports.requireAuth = async (req, res, next) => {
 
     req.user = {
       _id: user._id,
-      rol: user.rol,
+      role: user.role || user.rol || "asesor",
       supervisor: user.supervisor,
     };
     next();

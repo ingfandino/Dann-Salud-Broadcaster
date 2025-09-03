@@ -3,7 +3,7 @@
 const User = require("../models/User");
 
 // Crear usuario (solo admin en rutas, pero aquí reforzamos lógica)
-exports.createUser = async (req, res) => {
+async function createUser(req, res) {
     try {
         const { nombre, email, password, role, supervisor } = req.body;
 
@@ -17,9 +17,7 @@ exports.createUser = async (req, res) => {
         let finalSupervisor = supervisor || null;
 
         if (req.user && req.user.role === "admin") {
-            // Admin puede crear cualquier rol
             finalRole = role || "asesor";
-
             if (supervisor) {
                 const supExists = await User.findById(supervisor);
                 if (!supExists) {
@@ -39,7 +37,6 @@ exports.createUser = async (req, res) => {
 
         await user.save();
 
-        // No devolvemos password
         const safeUser = {
             _id: user._id,
             nombre: user.nombre,
@@ -53,20 +50,18 @@ exports.createUser = async (req, res) => {
         console.error("❌ Error creando usuario:", err);
         res.status(400).json({ error: err.message });
     }
-};
+}
 
-// Obtener todos los usuarios
-exports.getUsers = async (req, res) => {
+async function getUsers(req, res) {
     try {
         const users = await User.find().select("-password");
         res.json(users);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
-};
+}
 
-// Obtener un usuario por ID
-exports.getUserById = async (req, res) => {
+async function getUserById(req, res) {
     try {
         const user = await User.findById(req.params.id).select("-password");
         if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
@@ -74,12 +69,10 @@ exports.getUserById = async (req, res) => {
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
-};
+}
 
-// Actualizar usuario
-exports.updateUser = async (req, res) => {
+async function updateUser(req, res) {
     try {
-        // No permitir cambiar directamente el password aquí
         if (req.body.password) {
             delete req.body.password;
         }
@@ -94,10 +87,9 @@ exports.updateUser = async (req, res) => {
     } catch (err) {
         res.status(400).json({ error: err.message });
     }
-};
+}
 
-// Eliminar usuario
-exports.deleteUser = async (req, res) => {
+async function deleteUser(req, res) {
     try {
         const user = await User.findByIdAndDelete(req.params.id).select("-password");
         if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
@@ -105,4 +97,12 @@ exports.deleteUser = async (req, res) => {
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
+}
+
+module.exports = {
+    createUser,
+    getUsers,
+    getUserById,
+    updateUser,
+    deleteUser,
 };

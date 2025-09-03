@@ -1,19 +1,25 @@
 // src/middlewares/validateRequest.js
+
 const { validationResult } = require("express-validator");
 
 const validateRequest = (req, res, next) => {
-    const errors = validationResult(req);
+    const result = validationResult(req);
+    if (result.isEmpty()) return next();
 
-    if (!errors.isEmpty()) {
-        return res.status(400).json({
-            errors: errors.array().map(err => ({
-                campo: err.param,
-                mensaje: err.msg,
-            })),
-        });
-    }
+    const errors = result.array().map(err => ({
+        field: err.param,
+        message: err.msg,
+        value: err.value === undefined ? null : err.value
+    }));
 
-    next();
+    return res.status(400).json({
+        ok: false,
+        error: {
+            code: "VALIDATION_ERROR",
+            message: "Errores de validación",
+            details: errors
+        }
+    });
 };
 
 module.exports = validateRequest;

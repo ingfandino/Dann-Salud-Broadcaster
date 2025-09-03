@@ -46,4 +46,4 @@ client.on("disconnected", reason => {
 
 client.initialize();
 
-module.exports = { client, isReady: () => isReady, whatsappEvents };
+module.exports = { client, whatsappClient: client, isReady: () => isReady, connect };

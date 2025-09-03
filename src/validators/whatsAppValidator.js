@@ -1,4 +1,4 @@
-// src/validators/whatsAppValidator.js
+// src/validators/whatsappValidator.js
 
 const { body } = require("express-validator");
 

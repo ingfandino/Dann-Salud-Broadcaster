@@ -24,7 +24,7 @@ const userSchema = new mongoose.Schema(
             select: false, // 🔒 no devolver por defecto
         },
         // 🔹 Roles globales: asesor, supervisor, admin
-        rol: {
+        role: {
             type: String,
             enum: ["admin", "supervisor", "asesor"],
             default: "asesor",

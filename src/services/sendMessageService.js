@@ -4,7 +4,8 @@ const SendConfig = require("../models/SendConfig");
 const Message = require("../models/Message");
 const SendJob = require("../models/SendJob");
 const { client } = require("../config/whatsapp");
-const { emitJobProgress } = require("../config/socket"); // 🟢 importar socket
+const { emitJobProgress } = require("../config/socket");
+const { addLog } = require("../services/logService");
 
 // 🔹 Delay utilitario
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -26,11 +27,16 @@ async function processJob(jobId) {
 
     if (!job) {
         console.error("❌ Job no encontrado:", jobId);
+        await addLog({ tipo: "error", mensaje: `Job no encontrado: ${jobId}` });
         return;
     }
 
     if (job.status !== "pending" && job.status !== "running") {
         console.log(`⚠️ Job ${jobId} en estado ${job.status}, no se procesará`);
+        await addLog({
+            tipo: "warning",
+            mensaje: `Job ${jobId} no procesado (estado=${job.status})`
+        });
         return;
     }
 
@@ -38,6 +44,11 @@ async function processJob(jobId) {
     await job.save();
 
     console.log(`🚀 Job iniciado (${job.contacts.length} destinatarios)`);
+    await addLog({
+        tipo: "info",
+        mensaje: `Job ${job._id} iniciado`,
+        metadata: { total: job.contacts.length }
+    });
 
     for (let i = job.currentIndex; i < job.contacts.length; i++) {
         job = await SendJob.findById(jobId).populate("contacts"); // 🔄 refrescar estado cada iteración
@@ -46,6 +57,12 @@ async function processJob(jobId) {
             console.log(`⏸️ Job detenido en índice ${i}, estado=${job?.status}`);
             job.currentIndex = i;
             await job.save();
+
+            await addLog({
+                tipo: "warning",
+                mensaje: `Job ${job?._id} detenido`,
+                metadata: { estado: job?.status, currentIndex: i }
+            });
             return;
         }
 
@@ -59,6 +76,7 @@ async function processJob(jobId) {
             const newMsg = new Message({
                 contact: contact._id,
                 ownerUser: job.ownerUser,
+                job: job._id, // 🔥 nuevo
                 contenido: messageText,
                 direction: "outbound",
                 status: "enviado",
@@ -67,8 +85,28 @@ async function processJob(jobId) {
             await newMsg.save();
 
             console.log(`✅ Enviado a ${to}`);
+            await addLog({
+                tipo: "info",
+                mensaje: `Mensaje enviado a ${to}`,
+                metadata: { jobId: job._id, contactId: contact._id }
+            });
         } catch (err) {
             console.error(`❌ Error enviando a ${to}:`, err.message);
+            const failedMsg = new Message({
+                contact: contact._id,
+                ownerUser: job.ownerUser,
+                job: job._id, // 🔥 nuevo
+                contenido: messageText,
+                direction: "outbound",
+                status: "fallido",
+                timestamp: new Date(),
+            });
+            await failedMsg.save();
+            await addLog({
+                tipo: "error",
+                mensaje: `Error enviando a ${to}: ${err.message}`,
+                metadata: { jobId: job._id, contactId: contact._id }
+            });
         }
 
         job.currentIndex = i + 1;
@@ -110,6 +148,24 @@ async function processJob(jobId) {
     });
 
     console.log("🎉 Job completado");
+    await addLog({
+        tipo: "info",
+        mensaje: `Job ${job._id} completado`,
+        metadata: { total: job.contacts.length }
+    });
 }
 
-module.exports = { processJob };
+async function sendSingleMessage(to, text) {
+    try {
+        const chatId = to.includes("@c.us") ? to : `${to}@c.us`;
+        await client.sendMessage(chatId, text);
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+}
+
+module.exports = {
+    processJob,
+    sendSingleMessage
+};

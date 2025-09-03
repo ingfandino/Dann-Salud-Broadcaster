@@ -2,55 +2,27 @@
 
 const express = require("express");
 const router = express.Router();
-const Job = require("../models/Job");
+const sendJobController = require("../controllers/sendJobController");
 
-// Crear un job programado
-router.post("/", async (req, res) => {
-    try {
-        const { ownerUser, template, contacts, scheduledFor } = req.body;
+// 🔹 Crear un job
+router.post("/", sendJobController.startJob);
 
-        if (!ownerUser || !template || !contacts?.length || !scheduledFor) {
-            return res.status(400).json({ error: "Faltan campos obligatorios" });
-        }
+// 🔹 Listar jobs
+router.get("/", sendJobController.listJobs);
 
-        const job = new Job({ ownerUser, template, contacts, scheduledFor });
-        await job.save();
+// 🔹 Obtener un job concreto (con progreso)
+router.get("/:id", sendJobController.getJob);
 
-        res.status(201).json(job);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+// 🔹 Pausar job
+router.post("/:id/pause", sendJobController.pauseJob);
 
-// Listar jobs
-router.get("/", async (_req, res) => {
-    try {
-        const jobs = await Job.find()
-            .populate("ownerUser", "nombre email")
-            .populate("contacts", "nombre telefono");
-        res.json(jobs);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+// 🔹 Reanudar job
+router.post("/:id/resume", sendJobController.resumeJob);
 
-// ❌ Cancelar job pendiente
-router.put("/:id/cancel", async (req, res) => {
-    try {
-        const job = await Job.findById(req.params.id);
+// 🔹 Cancelar job
+router.post("/:id/cancel", sendJobController.cancelJob);
 
-        if (!job) return res.status(404).json({ error: "Job no encontrado" });
-        if (job.status !== "pendiente") {
-            return res.status(400).json({ error: "Solo se pueden cancelar jobs pendientes" });
-        }
-
-        job.status = "cancelado";
-        await job.save();
-
-        res.json({ message: "Job cancelado con éxito", job });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+// 🔹 Exportar resultados del job a Excel
+router.get("/:id/export/excel", sendJobController.exportJobResultsExcel);
 
 module.exports = router;

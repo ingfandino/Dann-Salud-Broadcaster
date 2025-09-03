@@ -1,3 +1,5 @@
+// src/routes/userRoutes.js
+
 const express = require("express");
 const router = express.Router();
 const userController = require("../controllers/userController");
@@ -7,7 +9,6 @@ const { updateUserValidator } = require("../validators/updateUserValidator");
 const validateRequest = require("../middlewares/validateRequest");
 const { requireAuth } = require("../middlewares/authMiddleware");
 const { permit } = require("../middlewares/roleMiddleware");
-
 
 // 🔹 Autoregistro (asesores por defecto)
 router.post("/register", authController.register);

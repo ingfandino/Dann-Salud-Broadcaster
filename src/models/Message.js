@@ -7,31 +7,36 @@ const messageSchema = new mongoose.Schema(
         contact: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Contact",
-            required: false, // 🔹 en entrantes aún no siempre tendremos contacto registrado
+            required: false,
         },
         ownerUser: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
-            required: false, // 🔹 en entrantes no necesariamente sabemos qué usuario "dueño"
+            required: false,
+        },
+        job: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "SendJob",
+            required: false,
         },
         contenido: {
             type: String,
-            required: false, // 🔹 porque los mensajes entrantes pueden ser multimedia
+            required: false,
         },
         status: {
             type: String,
             enum: ["pendiente", "enviado", "fallido", "recibido"],
             default: "pendiente",
         },
-        from: { type: String },        // número origen (ej: 5491122334455@c.us)
-        to: { type: String },          // destinatario (puede ser "me" si entrante)
-        body: { type: String },        // texto puro del mensaje
+        from: { type: String },
+        to: { type: String },
+        body: { type: String },
         direction: {
             type: String,
             enum: ["inbound", "outbound"],
             default: "outbound",
         },
-        timestamp: { type: Date },     // fecha/hora del mensaje
+        timestamp: { type: Date },
     },
     { timestamps: true }
 );
