@@ -1,13 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* estilos globales mínimos */
 body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background: #f9fafb;
+  /* gris muy claro de base */
+  position: relative;
+  overflow-x: hidden;
+  /* evita scroll lateral por blobs */
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+/* 🎨 Blob superior izquierdo */
+body::before {
+  content: "";
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  background: #3b82f6;
+  /* azul vivo */
+  border-radius: 50%;
+  filter: blur(150px);
+  top: -100px;
+  left: -150px;
+  z-index: -1;
+  opacity: 0.6;
+}
+
+/* 🎨 Blob inferior derecho */
+body::after {
+  content: "";
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  background: #8b5cf6;
+  /* violeta */
+  border-radius: 50%;
+  filter: blur(150px);
+  bottom: -150px;
+  right: -150px;
+  z-index: -1;
+  opacity: 0.6;
 }

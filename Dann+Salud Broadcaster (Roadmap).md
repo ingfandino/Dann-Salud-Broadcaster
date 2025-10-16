@@ -118,7 +118,7 @@
 ✅ Objetivo: Requisito **27**
 
 ### Checklist
-- [ ] Generar **.xls** con resultados finales (éxitos, fallos, métricas) (Req. 27)
+- [x] Generar **.xls** con resultados finales (éxitos, fallos, métricas) (Req. 27)
 
 ---
 
@@ -126,9 +126,9 @@
 ✅ Objetivo: Interfaz mínima.
 
 ### Checklist
-- [ ] Login básico (si aplica)
-- [ ] Panel para importar contactos y ver headers detectados
-- [ ] Editor de mensaje (con negrita/cursiva/emojis/spintax)
+- [x] Login básico (si aplica)
+- [x] Panel para importar contactos y ver headers detectados
+- [x] Editor de mensaje (con negrita/cursiva/emojis/spintax)
 - [ ] Vista previa mensaje por contacto
 - [ ] Panel de envío (batch, horarios, estado)
 - [ ] Panel de métricas (WebSocket)
