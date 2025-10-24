@@ -57,6 +57,11 @@ export default function Dashboard() {
             { to: "/audits", icon: <SquareUserRound className="w-5 h-5" />, label: "Auditorías" },
             { to: "/admin/users", icon: <Users className="w-5 h-5" />, label: "Gestionar Usuarios" },
         ],
+        revendedor: [
+            { to: "/reports", icon: <BarChart2 className="w-5 h-5" />, label: "Reportes de mensajería" },
+            { to: "/bulk-messages", icon: <MessageSquare className="w-5 h-5" />, label: "Mensajería Masiva" },
+            { to: "/audits", icon: <SquareUserRound className="w-5 h-5" />, label: "Auditorías" },
+        ],
     };
 
     return (

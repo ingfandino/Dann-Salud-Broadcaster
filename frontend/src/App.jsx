@@ -23,6 +23,7 @@ import { AuthProvider } from "./context/AuthContext";
 import PrivateRoute from "./components/PrivateRoute";
 import AdminRoute from "./components/AdminRoute";
 import GerenciaRoute from "./components/GerenciaRoute";
+import RoleRoute from "./components/RoleRoute";
 import MetricsPanel from "./components/MetricsPanel";
 
 export default function App() {
@@ -50,9 +51,9 @@ export default function App() {
                 <Route
                     path="/reports"
                     element={
-                        <GerenciaRoute>
+                        <RoleRoute roles={["gerencia", "revendedor"]}>
                             <Reports />
-                        </GerenciaRoute>
+                        </RoleRoute>
                     }
                 />
 

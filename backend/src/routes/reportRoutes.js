@@ -8,7 +8,7 @@ const { permit } = require("../middlewares/roleMiddleware");
 const router = express.Router();
 
 // 🔒 proteger rutas, solo usuarios autenticados
-router.get("/", requireAuth, permit("gerencia"), getReports);
+router.get("/", requireAuth, permit("gerencia", "revendedor"), getReports);
 router.post("/", requireAuth, permit("gerencia"), createReport);
 
 module.exports = router;

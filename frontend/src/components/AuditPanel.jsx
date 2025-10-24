@@ -1,6 +1,6 @@
 // frontend/src/components/AuditPanel.jsx
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion } from "framer-motion";
 import FollowUp from "../pages/FollowUp";
 import SalesForm from "../pages/SalesForm";
@@ -11,6 +11,7 @@ import apiClient from "../services/api";
 
 export default function AuditPanel() {
     const { user } = useAuth();
+    const role = (user?.role || "").toLowerCase();
     const [activeTab, setActiveTab] = useState("seguimiento");
 
     // Estado para carga de multimedia
@@ -47,17 +48,35 @@ export default function AuditPanel() {
     // Tabs disponibles
     const isAdmin = user?.role === "admin" || user?.role === "Admin";
     const isGerencia = user?.role === "gerencia" || user?.role === "Gerencia";
-    const tabs = [
-        { id: "seguimiento", label: "📋 Seguimiento de Auditorías" },
-        // Ocultar 'pautar' para admin (permitido para resto, incluyendo gerencia)
-        ...(!isAdmin ? [{ id: "pautar", label: "🗓️ Pautar Nueva Venta/Auditoría" }] : []),
-        { id: "upload", label: "⬆️ Subir Archivo de Auditoría" },
-        // Pestañas de recuperación visibles para admin/auditor/revendedor/gerencia
-        ...(user && ["admin", "auditor", "revendedor", "gerencia"].includes((user.role || "").toLowerCase()) ? [
-            { id: "recovery", label: "♻️ Recuperación y reventas" },
-            { id: "recovery-form", label: "📝 Nueva reventa/renovación" },
-        ] : []),
-    ];
+    const isRevendedor = role === "revendedor";
+
+    const tabs = useMemo(() => {
+        if (isRevendedor) {
+            return [
+                { id: "upload", label: "⬆️ Subir Archivo de Auditoría" },
+                { id: "recovery", label: "♻️ Recuperación y reventas" },
+                { id: "recovery-form", label: "📝 Nueva reventa/renovación" },
+            ];
+        }
+
+        return [
+            { id: "seguimiento", label: "📋 Seguimiento de Auditorías" },
+            // Ocultar 'pautar' para admin (permitido para resto, incluyendo gerencia)
+            ...(!isAdmin ? [{ id: "pautar", label: "🗓️ Pautar Nueva Venta/Auditoría" }] : []),
+            { id: "upload", label: "⬆️ Subir Archivo de Auditoría" },
+            // Pestañas de recuperación visibles para admin/auditor/revendedor/gerencia
+            ...(user && ["admin", "auditor", "revendedor", "gerencia"].includes(role) ? [
+                { id: "recovery", label: "♻️ Recuperación y reventas" },
+                { id: "recovery-form", label: "📝 Nueva reventa/renovación" },
+            ] : []),
+        ];
+    }, [isAdmin, role, user, isRevendedor]);
+
+    useEffect(() => {
+        if (tabs.length && !tabs.some((tab) => tab.id === activeTab)) {
+            setActiveTab(tabs[0].id);
+        }
+    }, [tabs, activeTab]);
 
     // Base de URL para archivos del backend
     const API_BASE = import.meta.env.VITE_API_URL?.replace("/api", "") || "http://localhost:5000";
@@ -303,7 +322,7 @@ export default function AuditPanel() {
         );
     };
 
-    const allowedRoles = ["admin", "auditor", "supervisor", "gerencia"];
+    const allowedRoles = ["admin", "auditor", "supervisor", "gerencia", "revendedor"];
     const canUpload = allowedRoles.includes((user?.role || "").toLowerCase());
 
     return (
