@@ -6,6 +6,7 @@ const XLSX = require("xlsx");
 const ImportLog = require("../models/ImportLog");
 const fs = require("fs");
 const logger = require("../utils/logger");
+const { parseSpintax } = require("../utils/spintax");
 
 // 🔹 Validador de teléfono argentino más flexible (8–13 dígitos)
 const isValidPhone = (v) => {
@@ -146,12 +147,14 @@ exports.previewMessage = async (req, res) => {
 
         const render = (template, data = {}) => {
             try {
-                return template.replace(/{{\s*([^}]+)\s*}}/g, (match, key) => {
+                const withPlaceholders = template.replace(/{{\s*([^}]+)\s*}}/g, (match, key) => {
                     // intentamos con la key tal cual, y con su versión normalizada
                     const nk = normalizeHeader(key);
                     const rawVal = data[key] ?? data[nk];
                     return rawVal !== undefined && rawVal !== null ? String(rawVal) : "";
                 });
+                // Expandir Spintax {a|b|c}
+                return parseSpintax(withPlaceholders);
             } catch (err) {
                 // en caso de error de render fallback al template crudo
                 return template;
@@ -249,7 +252,7 @@ exports.previewMessageFromImport = async (req, res) => {
             const normalizedPhone = telefonoRaw ? String(telefonoRaw).replace(/\D/g, "") : null;
             const validPhone = normalizedPhone ? isValidPhone(normalizedPhone) : false;
 
-            const previewText = renderTemplate(contenido, rowData);
+            const previewText = parseSpintax(renderTemplate(contenido, rowData));
 
             previews.push({
                 index: i + 1,

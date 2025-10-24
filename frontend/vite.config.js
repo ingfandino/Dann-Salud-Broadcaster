@@ -8,6 +8,22 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: {
+      chunkSizeWarningLimit: 1200,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            react: ["react", "react-dom", "react-router-dom"],
+            motion: ["framer-motion"],
+            toast: ["react-toastify"],
+            xlsx: ["xlsx"],
+            emoji: ["@emoji-mart/react", "@emoji-mart/data"],
+            socket: ["socket.io-client"],
+            vendor: ["axios", "file-saver", "lucide-react"],
+          },
+        },
+      },
+    },
     server: {
       port: 5173,
       proxy: {

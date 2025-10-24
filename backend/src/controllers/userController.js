@@ -17,7 +17,7 @@ async function createUser(req, res) {
         let finalRole = "asesor";
         let finalSupervisor = supervisor || null;
 
-        if (req.user && req.user.role === "admin") {
+        if (req.user && (req.user.role === "admin" || req.user.role === "gerencia")) {
             finalRole = role || "asesor";
             if (supervisor) {
                 const supExists = await User.findById(supervisor);
@@ -56,16 +56,27 @@ async function getUsers(req, res) {
     try {
         let queryFilter = {};
         const { _id, role } = req.user;
+        const { scope } = req.query;
 
-        if (role === "supervisor") {
+        if (role === "supervisor" && scope === "group") {
+            // Supervisores: devolver asesores de su mismo numeroEquipo
+            let myGroup = req.user.numeroEquipo;
+            if (!myGroup) {
+                const me = await User.findById(_id).select("numeroEquipo");
+                myGroup = me?.numeroEquipo || null;
+            }
+            queryFilter = { role: "asesor", deletedAt: null };
+            if (myGroup !== null) queryFilter.numeroEquipo = myGroup;
+        } else if (role === "supervisor") {
+            // Por defecto: su equipo directo + él mismo
             const teamIds = await getTeamUserIds(_id);
-            queryFilter = { _id: { $in: [...teamIds, _id] } };
+            queryFilter = { _id: { $in: [...teamIds, _id] }, deletedAt: null };
         } else if (role === "asesor") {
-            queryFilter = { _id: _id };
+            queryFilter = { _id: _id, deletedAt: null };
+        } else {
+            // admin/auditor u otros: sin filtro especial pero sin soft-deleted
+            queryFilter = { deletedAt: null };
         }
-
-        // Excluir soft-deleted por defecto
-        queryFilter.deletedAt = null;
 
         const users = await User.find(queryFilter).select("-password");
         res.json(users);
@@ -95,7 +106,7 @@ async function updateUser(req, res) {
             delete updateData.password;
         }
 
-        if (req.user.role !== "admin") {
+        if (!(req.user.role === "admin" || req.user.role === "gerencia")) {
             delete updateData.role;
             delete updateData.supervisor;
         }
@@ -114,9 +125,16 @@ async function deleteUserAdmin(req, res) {
     try {
         const id = req.params.id;
         logger.info("🧭 Entrando a deleteUserAdmin", { id });
-
+        if (req.user.role !== "gerencia") {
+            return res.status(403).json({ error: "Acceso denegado" });
+        }
         const user = await User.findById(id);
         if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
+
+        // No permitir eliminar cuentas de Gerencia
+        if ((user.role || "").toLowerCase() === "gerencia") {
+            return res.status(403).json({ error: "No se puede eliminar una cuenta de Gerencia" });
+        }
 
         logger.info("🗑️ Eliminando usuario definitivamente", { userId: id, email: user.email });
 
@@ -135,8 +153,17 @@ async function deleteUser(req, res) {
         const { id } = req.params;
         logger.info("🧭 Entrando a deleteUser (soft delete)", { id });
 
-        const user = await User.findByIdAndDelete(id).select("-password");
+        if (req.user.role !== "gerencia") {
+            return res.status(403).json({ error: "Acceso denegado" });
+        }
+        const user = await User.findById(id).select("-password");
         if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
+
+        if ((user.role || "").toLowerCase() === "gerencia") {
+            return res.status(403).json({ error: "No se puede eliminar una cuenta de Gerencia" });
+        }
+
+        await User.findByIdAndDelete(id);
 
         res.json({ message: "Usuario eliminado permanentemente" });
     } catch (err) {
@@ -169,7 +196,7 @@ async function toggleActiveUser(req, res) {
 // Admin con filtros (ahora excluye soft-deleted)
 async function getUsersAdmin(req, res) {
     try {
-        if (req.user.role !== "admin") {
+        if (!(req.user.role === "admin" || req.user.role === "gerencia")) {
             return res.status(403).json({ error: "Acceso denegado" });
         }
 
@@ -214,13 +241,23 @@ async function updateUserRole(req, res) {
         const { id } = req.params;
         const { role } = req.body;
 
-        const validRoles = ["asesor", "supervisor", "auditor", "admin"];
+        if (!(req.user.role === "admin" || req.user.role === "gerencia")) {
+            return res.status(403).json({ error: "Acceso denegado" });
+        }
+
+        const validRoles = ["asesor", "supervisor", "auditor", "admin", "revendedor", "gerencia"];
         if (!validRoles.includes(role)) {
             return res.status(400).json({ error: "Rol no válido" });
         }
 
         if (req.user._id.toString() === id) {
             return res.status(403).json({ error: "No puedes cambiar tu propio rol" });
+        }
+
+        const target = await User.findById(id).select("role");
+        if (!target) return res.status(404).json({ error: "Usuario no encontrado" });
+        if ((target.role || "").toLowerCase() === "gerencia") {
+            return res.status(403).json({ error: "No puedes cambiar el rol de un usuario de Gerencia" });
         }
 
         const updatedUser = await User.findByIdAndUpdate(

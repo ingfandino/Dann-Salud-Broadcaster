@@ -2,6 +2,8 @@
 
 const Template = require("../models/Template");
 const Contact = require("../models/Contact");
+const User = require("../models/User");
+
 const { parseSpintax } = require("../utils/spintax");
 const { sendSingleMessage } = require("../services/sendMessageService");
 const logger = require("../utils/logger");
@@ -9,7 +11,8 @@ const logger = require("../utils/logger");
 // Crear plantilla
 exports.createTemplate = async (req, res) => {
     try {
-        const { nombre, contenido, createdBy } = req.body;
+        const { nombre, contenido } = req.body;
+        const createdBy = req.user?._id;
         const template = new Template({ nombre, contenido, createdBy });
         await template.save();
         res.status(201).json(template);
@@ -21,9 +24,29 @@ exports.createTemplate = async (req, res) => {
 // Listar todas las plantillas de un usuario
 exports.getTemplates = async (req, res) => {
     try {
-        const { createdBy } = req.query; // se puede pasar como filtro
-        const filter = createdBy ? { createdBy } : {};
-        const templates = await Template.find(filter).populate("createdBy", "nombre email");
+        const role = String(req.user?.role || '').toLowerCase();
+        const userId = req.user?._id;
+        const equipo = req.user?.numeroEquipo || null;
+
+        let filter = {};
+        if (["admin","gerencia"].includes(role)) {
+            filter = {};
+        } else if (role === "supervisor") {
+            // ver plantillas de todos los usuarios de su equipo (mismo numeroEquipo)
+            const teamUsers = await User.find({ numeroEquipo: equipo }).select("_id");
+            filter = { createdBy: { $in: teamUsers.map(u => u._id) } };
+        } else if (role === "asesor") {
+            // ver propias + de supervisores del mismo equipo
+            const supervisors = await User.find({ role: "supervisor", numeroEquipo: equipo }).select("_id");
+            const allowed = [userId, ...supervisors.map(u => u._id)];
+            filter = { createdBy: { $in: allowed } };
+        } else {
+            filter = { createdBy: userId };
+        }
+
+        const templates = await Template.find(filter)
+            .populate("createdBy", "nombre email numeroEquipo role")
+            .sort({ updatedAt: -1, createdAt: -1 });
         res.json(templates);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -44,9 +67,15 @@ exports.getTemplateById = async (req, res) => {
 // Actualizar plantilla
 exports.updateTemplate = async (req, res) => {
     try {
-        const template = await Template.findByIdAndUpdate(req.params.id, req.body, { new: true });
-        if (!template) return res.status(404).json({ error: "Plantilla no encontrada" });
-        res.json(template);
+        const tpl = await Template.findById(req.params.id);
+        if (!tpl) return res.status(404).json({ error: "Plantilla no encontrada" });
+        const role = String(req.user?.role || '').toLowerCase();
+        const isOwner = tpl.createdBy && tpl.createdBy.equals(req.user._id);
+        const isPrivileged = ["admin", "gerencia"].includes(role);
+        if (!isOwner && !isPrivileged) return res.status(403).json({ error: "No autorizado" });
+        if (req.body.createdBy) delete req.body.createdBy;
+        const updated = await Template.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        res.json(updated);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -55,15 +84,20 @@ exports.updateTemplate = async (req, res) => {
 // Eliminar plantilla
 exports.deleteTemplate = async (req, res) => {
     try {
-        const template = await Template.findByIdAndDelete(req.params.id);
-        if (!template) return res.status(404).json({ error: "Plantilla no encontrada" });
+        const tpl = await Template.findById(req.params.id);
+        if (!tpl) return res.status(404).json({ error: "Plantilla no encontrada" });
+        const role = String(req.user?.role || '').toLowerCase();
+        const isOwner = tpl.createdBy && tpl.createdBy.equals(req.user._id);
+        const isPrivileged = ["admin", "gerencia"].includes(role);
+        if (!isOwner && !isPrivileged) return res.status(403).json({ error: "No autorizado" });
+        await Template.findByIdAndDelete(req.params.id);
         res.json({ message: "Plantilla eliminada" });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 };
 
-// 🚀 Enviar plantilla a contactos seleccionados
+// Enviar plantilla a contactos seleccionados
 exports.sendTemplate = async (req, res) => {
     try {
         const { id } = req.params;

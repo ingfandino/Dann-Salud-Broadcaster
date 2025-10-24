@@ -45,12 +45,15 @@ export default function AuditPanel() {
     const [dateTo, setDateTo] = useState("");
 
     // Tabs disponibles
+    const isAdmin = user?.role === "admin" || user?.role === "Admin";
+    const isGerencia = user?.role === "gerencia" || user?.role === "Gerencia";
     const tabs = [
         { id: "seguimiento", label: "📋 Seguimiento de Auditorías" },
-        { id: "pautar", label: "🗓️ Pautar Nueva Venta/Auditoría" },
+        // Ocultar 'pautar' para admin (permitido para resto, incluyendo gerencia)
+        ...(!isAdmin ? [{ id: "pautar", label: "🗓️ Pautar Nueva Venta/Auditoría" }] : []),
         { id: "upload", label: "⬆️ Subir Archivo de Auditoría" },
-        // Nuevas pestañas visibles solo para admin/auditor/revendedor
-        ...(user && ["admin", "auditor", "revendedor"].includes(user.role) ? [
+        // Pestañas de recuperación visibles para admin/auditor/revendedor/gerencia
+        ...(user && ["admin", "auditor", "revendedor", "gerencia"].includes((user.role || "").toLowerCase()) ? [
             { id: "recovery", label: "♻️ Recuperación y reventas" },
             { id: "recovery-form", label: "📝 Nueva reventa/renovación" },
         ] : []),
@@ -293,15 +296,15 @@ export default function AuditPanel() {
                     <li>🔑 Clave Afiliado: <span className="font-mono ml-1">{afiliado}</span></li>
                 )}
 
-                {user?.role === "admin" && multimedia.afiliadoKeyDefinitiva && (
+                {((user?.role || '').toLowerCase() === "gerencia") && multimedia.afiliadoKeyDefinitiva && (
                     <li>🔐 Clave Afiliado (Definitiva): <span className="font-mono ml-1">{multimedia.afiliadoKeyDefinitiva}</span></li>
                 )}
             </ul>
         );
     };
 
-    const allowedRoles = ["admin", "auditor", "supervisor"];
-    const canUpload = allowedRoles.includes(user?.role);
+    const allowedRoles = ["admin", "auditor", "supervisor", "gerencia"];
+    const canUpload = allowedRoles.includes((user?.role || "").toLowerCase());
 
     return (
         <div className="max-w-7xl mx-auto p-6">
@@ -552,7 +555,7 @@ export default function AuditPanel() {
                                         />
                                     </div>
 
-                                    {user?.role === "admin" && (
+                                    {(isGerencia) && (
                                         <div>
                                             <label className="block font-medium mb-1">🔐 Clave de Afiliado (Definitiva)</label>
                                             <input

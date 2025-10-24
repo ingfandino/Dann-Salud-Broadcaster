@@ -8,6 +8,7 @@ const { pushMetrics } = require("../services/metricsService");
 const { addLog } = require("../services/logService");
 const ExcelJS = require("exceljs");
 const logger = require("../utils/logger");
+const { processJob } = require("../services/sendMessageService");
 
 // 🔹 Crear un job
 exports.startJob = async (req, res) => {
@@ -43,6 +44,15 @@ exports.startJob = async (req, res) => {
             return res.status(400).json({ error: "Debes especificar un templateId válido o un mensaje de texto" });
         }
 
+        // parámetros de envío
+        const delayMin = Number.isFinite(parseInt(req.body.delayMin, 10)) ? parseInt(req.body.delayMin, 10) : 2;
+        const delayMax = Number.isFinite(parseInt(req.body.delayMax, 10)) ? parseInt(req.body.delayMax, 10) : 5;
+        const batchSize = Number.isFinite(parseInt(req.body.batchSize, 10)) ? parseInt(req.body.batchSize, 10) : 10;
+        // el frontend envía pauseBetweenBatches en minutos; persistimos en minutes
+        const pauseBetweenBatchesMinutes = Number.isFinite(parseInt(req.body.pauseBetweenBatches, 10))
+            ? parseInt(req.body.pauseBetweenBatches, 10)
+            : 1;
+
         const job = new SendJob({
             name: name || finalMessage.slice(0, 30),
             createdBy,
@@ -51,6 +61,10 @@ exports.startJob = async (req, res) => {
             contacts,
             scheduledFor: scheduledFor || new Date(),
             status: "pendiente",
+            delayMin: Math.max(0, delayMin),
+            delayMax: Math.max(delayMin, delayMax),
+            batchSize: Math.max(1, batchSize),
+            pauseBetweenBatchesMinutes: Math.max(0, pauseBetweenBatchesMinutes),
             stats: {
                 total: contacts.length,
                 pending: contacts.length,
@@ -78,12 +92,18 @@ exports.startJob = async (req, res) => {
 
 exports.pauseJob = async (req, res) => {
     try {
-        const job = await SendJob.findByIdAndUpdate(
-            req.params.id,
-            { status: "pausado" },
-            { new: true }
-        );
+        const job = await SendJob.findById(req.params.id);
         if (!job) return res.status(404).json({ error: "Job no encontrado" });
+
+        const role = String(req.user?.role || '').toLowerCase();
+        const isPrivileged = ["admin", "supervisor", "gerencia"].includes(role);
+        const isOwner = job.createdBy && job.createdBy.equals(req.user._id);
+        if (!isPrivileged && !isOwner) {
+            return res.status(403).json({ error: "No tienes permisos para pausar este job" });
+        }
+
+        job.status = "pausado";
+        await job.save();
 
         await addLog({ tipo: "info", mensaje: `Job pausado: ${job._id}`, metadata: { jobId: job._id } });
         pushMetrics();
@@ -100,6 +120,13 @@ exports.resumeJob = async (req, res) => {
         const job = await SendJob.findById(req.params.id);
         if (!job) return res.status(404).json({ error: "Job no encontrado" });
 
+        const role = String(req.user?.role || '').toLowerCase();
+        const isPrivileged = ["admin", "supervisor", "gerencia"].includes(role);
+        const isOwner = job.createdBy && job.createdBy.equals(req.user._id);
+        if (!isPrivileged && !isOwner) {
+            return res.status(403).json({ error: "No tienes permisos para reanudar este job" });
+        }
+
         if (job.status !== "pausado") {
             return res.status(400).json({ error: "Solo se pueden reanudar jobs en pausa" });
         }
@@ -109,6 +136,11 @@ exports.resumeJob = async (req, res) => {
 
         await addLog({ tipo: "info", mensaje: `Job reanudado: ${job._id}`, metadata: { jobId: job._id } });
         pushMetrics();
+
+        // Re-despachar procesamiento en background (no bloquear la respuesta)
+        setTimeout(() => {
+            try { processJob(job._id).catch(() => {}); } catch (_) {}
+        }, 0);
 
         res.json(job);
     } catch (err) {
@@ -123,6 +155,13 @@ exports.cancelJob = async (req, res) => {
     try {
         const job = await SendJob.findById(req.params.id);
         if (!job) return res.status(404).json({ error: "Job no encontrado" });
+
+        const role = String(req.user?.role || '').toLowerCase();
+        const isPrivileged = ["admin", "supervisor", "gerencia"].includes(role);
+        const isOwner = job.createdBy && job.createdBy.equals(req.user._id);
+        if (!isPrivileged && !isOwner) {
+            return res.status(403).json({ error: "No tienes permisos para cancelar este job" });
+        }
 
         // 🗑️ Eliminar mensajes asociados
         await Message.deleteMany({ job: job._id });
@@ -149,8 +188,24 @@ exports.cancelJob = async (req, res) => {
 exports.getJob = async (req, res) => {
     try {
         const job = await SendJob.findById(req.params.id)
-            .populate("contacts", "nombre telefono");
+            .populate("contacts", "nombre telefono")
+            .populate("createdBy", "_id role numeroEquipo");
         if (!job) return res.status(404).json({ error: "Job no encontrado" });
+        const role = String(req.user?.role || '').toLowerCase();
+        const userId = req.user?._id?.toString();
+        const userEquipo = req.user?.numeroEquipo || null;
+        const allowAll = ["admin", "gerencia"].includes(role);
+        let allowed = allowAll;
+        if (!allowed) {
+            if (role === "supervisor") {
+                allowed = (job.createdBy?.numeroEquipo && job.createdBy.numeroEquipo === userEquipo);
+            } else if (role === "asesor") {
+                allowed = job.createdBy && job.createdBy._id && job.createdBy._id.toString() === userId;
+            } else {
+                allowed = false;
+            }
+        }
+        if (!allowed) return res.status(403).json({ error: "No autorizado" });
 
         const total = job.contacts.length || 0;
         const progress = total > 0 ? ((job.currentIndex / total) * 100).toFixed(2) : 0;
@@ -163,12 +218,34 @@ exports.getJob = async (req, res) => {
 };
 
 // 🔹 Listar todos los jobs con progreso
-exports.listJobs = async (_req, res) => {
+exports.listJobs = async (req, res) => {
     try {
-        const jobs = await SendJob.find()
-            .populate("createdBy", "nombre email role")
+        const role = String(req.user?.role || '').toLowerCase();
+        const userId = req.user?._id;
+        const userEquipo = req.user?.numeroEquipo || null;
+
+        let filter = {};
+        if (["admin", "gerencia"].includes(role)) {
+            filter = {};
+        } else if (role === "supervisor") {
+            // mostrar jobs creados por usuarios del mismo numeroEquipo (incluyéndose)
+            filter = { };
+        } else if (role === "asesor") {
+            filter = { createdBy: userId };
+        } else {
+            filter = { createdBy: userId };
+        }
+
+        let query = SendJob.find(filter)
+            .populate({ path: "createdBy", select: "nombre email role numeroEquipo" })
             .populate("contacts", "nombre telefono")
             .sort({ scheduledFor: -1, createdAt: -1 });
+        let jobs = await query.exec();
+
+        // Post-filtrado por equipo para supervisor (porque createdBy.numeroEquipo es en documento poblado)
+        if (role === "supervisor") {
+            jobs = jobs.filter(j => j.createdBy && j.createdBy.numeroEquipo === userEquipo);
+        }
 
         const enriched = jobs.map(job => {
             const total = job.contacts.length || 0;
@@ -186,6 +263,7 @@ exports.listJobs = async (_req, res) => {
                         nombre: job.createdBy.nombre,
                         email: job.createdBy.email,
                         role: job.createdBy.role,
+                        numeroEquipo: job.createdBy.numeroEquipo || null,
                     }
                     : null,
             };

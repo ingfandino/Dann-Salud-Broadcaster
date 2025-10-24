@@ -13,21 +13,21 @@ const { permit } = require("../middlewares/roleMiddleware");
 router.get(
     "/admin/users",
     requireAuth,
-    permit("admin"),
+    permit("gerencia"),
     userController.getUsersAdmin
 );
 
 router.delete(
     "/admin/users/:id",
     requireAuth,
-    permit("admin"),
+    permit("gerencia"),
     userController.deleteUserAdmin
 );
 
 router.patch(
     "/admin/users/:id/toggle",
     requireAuth,
-    permit("admin"),
+    permit("gerencia"),
     userController.toggleActiveUser
 );
 
@@ -35,7 +35,7 @@ router.patch(
 router.post(
     "/",
     requireAuth,
-    permit("admin"),
+    permit("gerencia"),
     createUserValidator,
     validateRequest,
     userController.createUser
@@ -44,7 +44,7 @@ router.post(
 router.put(
     "/:id",
     requireAuth,
-    permit("admin"),
+    permit("gerencia"),
     updateUserValidator,
     validateRequest,
     userController.updateUser
@@ -53,21 +53,21 @@ router.put(
 router.get(
     "/",
     requireAuth,
-    permit("supervisor", "admin"),
+    permit("supervisor", "admin", "auditor", "gerencia"),
     userController.getUsers
 );
 
 router.get(
     "/:id",
     requireAuth,
-    permit("supervisor", "admin"),
+    permit("supervisor", "admin", "gerencia"),
     userController.getUserById
 );
 
 router.patch(
     "/admin/users/:id/role",
     requireAuth,
-    permit("admin"),
+    permit("gerencia"),
     userController.updateUserRole
 );
 

@@ -2,16 +2,20 @@
 
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const EventEmitter = require("events");
+// Evitar warnings por listeners acumulados y permitir más suscriptores sin ruido
+EventEmitter.defaultMaxListeners = 50;
 const path = require("path");
 const logger = require("../utils/logger");
 
 let whatsappClient = null;
 const whatsappEvents = new EventEmitter();
+whatsappEvents.setMaxListeners(50);
 
 // 🔎 Estado actual
 let ready = false;
 let qrTimeout = null;
 let currentQR = null;
+let initInFlight = false; // mutex simple para evitar initialize() concurrentes
 
 function getSessionPath() {
     return process.env.WHATSAPP_SESSION_PATH || path.resolve(process.cwd(), ".wwebjs_auth");
@@ -28,11 +32,31 @@ async function initWhatsappClient() {
             whatsappClient = null;
         }
 
+        // Construir flags de Puppeteer más robustos para entornos restringidos/containers
+        const puppeteerArgs = [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--no-zygote",
+            "--ignore-certificate-errors",
+        ];
+        if (process.env.HTTPS_PROXY) {
+            puppeteerArgs.push(`--proxy-server=${process.env.HTTPS_PROXY}`);
+        }
+
+        const puppeteerConfig = {
+            headless: true,
+            args: puppeteerArgs,
+        };
+        if (process.env.WHATSAPP_CHROME_PATH) {
+            puppeteerConfig.executablePath = process.env.WHATSAPP_CHROME_PATH;
+        }
+
         whatsappClient = new Client({
             authStrategy: new LocalAuth({
                 dataPath: getSessionPath(),
             }),
-            puppeteer: { headless: true, args: ["--no-sandbox"] },
+            puppeteer: puppeteerConfig,
         });
 
         // Eventos base
@@ -72,6 +96,7 @@ async function initWhatsappClient() {
         whatsappClient.on("disconnected", (reason) => {
             ready = false;
             currentQR = null;
+            if (qrTimeout) { try { clearTimeout(qrTimeout); } catch {} qrTimeout = null; }
             logger.warn(`⚠️ Cliente desconectado: ${reason}`);
             whatsappEvents.emit("disconnected");
         });
@@ -79,6 +104,7 @@ async function initWhatsappClient() {
         whatsappClient.on("auth_failure", (msg) => {
             ready = false;
             currentQR = null;
+            if (qrTimeout) { try { clearTimeout(qrTimeout); } catch {} qrTimeout = null; }
             logger.error("❌ Fallo de autenticación:", msg);
             whatsappEvents.emit("auth_failure", msg);
         });
@@ -87,8 +113,18 @@ async function initWhatsappClient() {
         whatsappClient.on("message", (msg) => whatsappEvents.emit("message", msg));
 
         logger.info("⏳ Inicializando cliente de WhatsApp...");
-        await whatsappClient.initialize();
-        logger.info("✅ Cliente inicializado correctamente");
+        // Mutex: evitar doble initialize en paralelo
+        if (initInFlight) {
+            logger.warn("⚠️ initialize() ya en curso; evitando llamada concurrente");
+            return whatsappClient;
+        }
+        initInFlight = true;
+        try {
+            await whatsappClient.initialize();
+            logger.info("✅ Cliente inicializado correctamente");
+        } finally {
+            initInFlight = false;
+        }
 
         return whatsappClient;
     } catch (err) {
@@ -118,7 +154,7 @@ async function forceNewSession() {
     // 3. Pausa breve para asegurar que los recursos se liberen.
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // 4. Reinicializar el cliente.
+    // 4. Reinicializar el cliente (respetando el mutex para evitar carreras).
     try {
         await initWhatsappClient();
     } catch (err) {

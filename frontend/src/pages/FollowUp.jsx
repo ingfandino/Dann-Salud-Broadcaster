@@ -5,20 +5,53 @@ import apiClient from "../services/api";
 import { toast } from "react-toastify";
 import AuditEditModal from "../components/AuditEditModal";
 import * as XLSX from "xlsx";
+import { Pencil, Eye, Trash2 } from "lucide-react";
 
 const ARGENTINE_OBRAS_SOCIALES = [
-    "PAMI", "OSDE", "Swiss Medical", "Galeno", "Medifé", "OSDEPYM", "IOMA",
+    "OSDE", "Medifé", "OSDEPYM", "IOMA",
     "OSSEG", "OSDE 210", "OSFATUN", "OSDE GBA", "OSECAC", "OSPRERA",
-    "OMINT", "OSSEGUR", "OSPR", "OSUTGRA"
+    "OMINT", "OSSEGUR", "OSPR", "OSUTHGRA", "OSBLYCA", "UOM", "OSPM", "OSPECON",
+    "Elevar", "OSCHOCA", "OSPEP"
 ];
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "Medicenter"];
 const STATUS_OPTIONS = [
     "Mensaje enviado", "En videollamada", "Rechazada",
     "Falta documentación", "Falta clave", "Reprogramada", "Completa", "QR hecho"
 ];
-const TIPO_VENTA = ["alta", "cambio"];
+const TIPO_VENTA = ["Alta", "Cambio"];
 
 export default function FollowUp() {
+    const toTitleCase = (s) => {
+        if (!s || typeof s !== "string") return s || "";
+        return s
+            .toLowerCase()
+            .replace(/\s+/g, " ")
+            .trim()
+            .split(" ")
+            .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(" ");
+    };
+    const getObraVendidaClass = (obra) => {
+        const v = (obra || '').toLowerCase();
+        if (v === 'binimed') return 'bg-blue-100 text-blue-800';
+        if (v === 'meplife' || v === 'meplife ') return 'bg-green-200 text-green-800';
+        if (v === 'medicenter') return 'bg-lime-200 text-lime-800';
+        return 'bg-gray-100 text-gray-700';
+    };
+    const getCurrentUserRole = () => {
+        try {
+            const token = localStorage.getItem("token");
+            if (!token) return null;
+            const payload = JSON.parse(atob(token.split(".")[1]));
+            return (payload?.role || null);
+        } catch {
+            return null;
+        }
+    };
+    const currentRole = getCurrentUserRole();
+    const isSupervisor = currentRole === 'supervisor' || currentRole === 'Supervisor';
+    const isAdmin = currentRole === 'admin' || currentRole === 'Admin';
+    const isGerencia = currentRole === 'gerencia' || currentRole === 'Gerencia';
     // Filtros textuales (mantengo las keys que ya tenías: afiliado, cuil, obraAnterior...)
     const [audits, setAudits] = useState([]);
     const [filters, setFilters] = useState({
@@ -39,6 +72,7 @@ export default function FollowUp() {
     const [dateTo, setDateTo] = useState("");
 
     const [selectedAudit, setSelectedAudit] = useState(null);
+    const [detailsAudit, setDetailsAudit] = useState(null);
     const [loading, setLoading] = useState(false);
 
     const buildParams = () => {
@@ -121,9 +155,10 @@ export default function FollowUp() {
             "Obra Social Vendida": a.obraSocialVendida || "-",
             Estado: a.status || "-",
             Tipo: a.tipoVenta || "-",
-            Asesor: (a.asesor && (a.asesor.email || a.asesor.nombre || a.asesor.name)) || "-",
+            Asesor: (a.asesor && (a.asesor.nombre || a.asesor.name || a.asesor.email)) || "-",
+            Supervisor: (a.asesor && a.asesor.supervisor && (a.asesor.supervisor.nombre || a.asesor.supervisor.name || a.asesor.supervisor.email)) || "-",
             Grupo: (a.groupId && (a.groupId.nombre || a.groupId.name)) || "-",
-            Auditor: (a.auditor && (a.auditor.email || a.auditor.nombre || a.auditor.name)) || "-"
+            Auditor: (a.auditor && (a.auditor.nombre || a.auditor.name || a.auditor.email)) || "-"
         }));
 
         const ws = XLSX.utils.json_to_sheet(rows);
@@ -302,9 +337,6 @@ export default function FollowUp() {
                             <th className="px-3 py-2">Obra Social Vendida</th>
                             <th className="px-3 py-2">Estado</th>
                             <th className="px-3 py-2">Tipo</th>
-                            <th className="px-3 py-2">Asesor</th>
-                            <th className="px-3 py-2">Grupo</th>
-                            <th className="px-3 py-2">Datos extra</th>
                             <th className="px-3 py-2">Auditor</th>
                             <th className="px-3 py-2">Acciones</th>
                         </tr>
@@ -326,23 +358,37 @@ export default function FollowUp() {
                             audits.map((audit) => (
                                 <tr
                                     key={audit._id}
-                                    className="hover:bg-blue-50 transition border-b border-gray-100 text-center"
+                                    className="odd:bg-white even:bg-gray-50 hover:bg-blue-50 transition border-b border-gray-100 text-center"
                                 >
-                                    <td className="px-3 py-2 text-gray-600">
+                                    <td className="px-3 py-2">
                                         {audit.scheduledAt
-                                            ? new Date(audit.scheduledAt).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })
+                                            ? (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+                                                    {new Date(audit.scheduledAt).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                                                </span>
+                                            )
                                             : "-"}
                                     </td>
-                                    <td className="px-3 py-2 text-gray-600">
+                                    <td className="px-3 py-2">
                                         {audit.scheduledAt
-                                            ? new Date(audit.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                                            ? (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800">
+                                                    {new Date(audit.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}
+                                                </span>
+                                            )
                                             : "-"}
                                     </td>
-                                    <td className="px-3 py-2">{audit.nombre || "-"}</td>
+                                    <td className="px-3 py-2">{toTitleCase(audit.nombre) || "-"}</td>
                                     <td className="px-3 py-2">{audit.telefono || "-"}</td>
                                     <td className="px-3 py-2">{audit.cuil || "-"}</td>
                                     <td className="px-3 py-2">{audit.obraSocialAnterior || "-"}</td>
-                                    <td className="px-3 py-2">{audit.obraSocialVendida || "-"}</td>
+                                    <td className="px-3 py-2">
+                                        {audit.obraSocialVendida ? (
+                                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${getObraVendidaClass(audit.obraSocialVendida)}`}>
+                                                {audit.obraSocialVendida}
+                                            </span>
+                                        ) : '-' }
+                                    </td>
                                     <td className="px-3 py-2">
                                         <span
                                             className={`inline-flex items-center justify-center px-3 py-1 rounded text-xs font-medium ${getStatusColor(audit.status)}`}
@@ -353,24 +399,46 @@ export default function FollowUp() {
                                     </td>
                                     <td className="px-3 py-2">{audit.tipoVenta || "-"}</td>
                                     <td className="px-3 py-2">
-                                        {audit.asesor?.email || audit.asesor?.nombre || audit.asesor?.name || "-"}
+                                        {audit.auditor?.nombre ? toTitleCase(audit.auditor?.nombre) : (audit.auditor?.name ? toTitleCase(audit.auditor?.name) : (audit.auditor?.email || "-"))}
                                     </td>
                                     <td className="px-3 py-2">
-                                        {audit.groupId?.nombre || audit.groupId?.name || "-"}
-                                    </td>
-                                    <td className="px-3 py-2">
-                                        {audit.datosExtra || "-"}
-                                    </td>
-                                    <td className="px-3 py-2">
-                                        {audit.auditor?.email || audit.auditor?.nombre || audit.auditor?.name || "-"}
-                                    </td>
-                                    <td className="px-3 py-2">
-                                        <button
-                                            onClick={() => setSelectedAudit(audit)}
-                                            className="bg-green-500 hover:bg-green-600 text-white text-xs px-3 py-1 rounded-md transition"
-                                        >
-                                            Editar
-                                        </button>
+                                        <div className="flex items-center justify-center gap-2 whitespace-nowrap">
+                                            <button
+                                                onClick={() => setSelectedAudit(audit)}
+                                                className="inline-flex items-center justify-center bg-green-500 hover:bg-green-600 text-white text-xs p-2 rounded-md transition"
+                                                title="Editar"
+                                            >
+                                                <Pencil size={14} />
+                                            </button>
+                                            <button
+                                                onClick={() => setDetailsAudit(audit)}
+                                                className="inline-flex items-center justify-center bg-blue-500 hover:bg-blue-600 text-white text-xs p-2 rounded-md transition"
+                                                title="Detalles"
+                                            >
+                                                <Eye size={14} />
+                                            </button>
+                                            {(isSupervisor || isAdmin || isGerencia) && (
+                                                <button
+                                                    onClick={async () => {
+                                                        const name = toTitleCase(audit.nombre || "");
+                                                        const ok = window.confirm(`¿Está seguro de que quiere eliminar el turno para vídeo-auditoría de ${name || 'este afiliado'}?`);
+                                                        if (!ok) return;
+                                                        try {
+                                                            await apiClient.delete(`/audits/${audit._id}`);
+                                                            toast.success("Turno eliminado");
+                                                            fetchAudits();
+                                                        } catch (err) {
+                                                            console.error(err);
+                                                            toast.error("No se pudo eliminar el turno");
+                                                        }
+                                                    }}
+                                                    className="inline-flex items-center justify-center bg-red-500 hover:bg-red-600 text-white text-xs p-2 rounded-md transition"
+                                                    title="Eliminar"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            )}
+                                        </div>
                                     </td>
                                 </tr>
                             ))
@@ -385,6 +453,29 @@ export default function FollowUp() {
                     onClose={() => setSelectedAudit(null)}
                     onSave={fetchAudits}
                 />
+            )}
+
+            {detailsAudit && (
+                <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5">
+                        <div className="flex items-center justify-between mb-3 border-b pb-2">
+                            <h3 className="text-lg font-semibold">Detalles de la auditoría</h3>
+                            <button className="p-2 rounded hover:bg-gray-100" onClick={() => setDetailsAudit(null)}>✖</button>
+                        </div>
+                        <div className="space-y-2 text-sm">
+                            <div className="flex justify-between"><span className="text-gray-500">Asesor:</span><span className="font-medium">{detailsAudit.asesor?.nombre ? toTitleCase(detailsAudit.asesor?.nombre) : (detailsAudit.asesor?.name ? toTitleCase(detailsAudit.asesor?.name) : (detailsAudit.asesor?.email || "-"))}</span></div>
+                            <div className="flex justify-between"><span className="text-gray-500">Supervisor:</span><span className="font-medium">{detailsAudit.asesor?.supervisor?.nombre ? toTitleCase(detailsAudit.asesor?.supervisor?.nombre) : (detailsAudit.asesor?.supervisor?.name ? toTitleCase(detailsAudit.asesor?.supervisor?.name) : (detailsAudit.asesor?.supervisor?.email || "-"))}</span></div>
+                            <div className="flex justify-between"><span className="text-gray-500">Grupo:</span><span className="font-medium">{detailsAudit.groupId?.nombre ? toTitleCase(detailsAudit.groupId?.nombre) : (detailsAudit.groupId?.name ? toTitleCase(detailsAudit.groupId?.name) : "-")}</span></div>
+                            <div>
+                                <div className="text-gray-500 mb-1">Datos extra:</div>
+                                <div className="bg-gray-50 rounded p-2 min-h-[48px] whitespace-pre-wrap">{detailsAudit.datosExtra || "—"}</div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end mt-4">
+                            <button className="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700" onClick={() => setDetailsAudit(null)}>Cerrar</button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

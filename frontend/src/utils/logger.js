@@ -1,13 +1,15 @@
 // frontend/src/utils/logger.js
 
 import axios from "axios";
+import { API_URL } from "../config";
 
 const isDev = import.meta.env.MODE === "development";
-const apiBase = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const enableLogs = import.meta.env.VITE_ENABLE_FRONTEND_LOGS === "true";
+const apiBase = API_URL;
 
 // Función para enviar logs al backend (solo producción)
 const sendToBackend = async (level, message, extra = {}) => {
-    if (isDev) return; // en dev solo consola
+    if (isDev || !enableLogs) return; // en dev solo consola o si está deshabilitado
     try {
         await axios.post(`${apiBase}/logs/frontend`, {
             level,
@@ -16,8 +18,7 @@ const sendToBackend = async (level, message, extra = {}) => {
             timestamp: new Date().toISOString(),
         });
     } catch (err) {
-        // fallback sin romper el flujo
-        console.error("❌ Error enviando log al backend:", err.message);
+        // fallback silencioso
     }
 };
 

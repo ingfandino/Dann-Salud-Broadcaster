@@ -66,8 +66,8 @@ if (process.env.NODE_ENV !== "test") {
 const app = express();
 
 // 🔹 Configuración CORS
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(",")
+let allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map(s => s.trim()).filter(Boolean)
   : [];
 if (process.env.NODE_ENV === "development") {
   allowedOrigins.push("http://localhost:5173"); // Vite por defecto
@@ -78,19 +78,24 @@ if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
 }
 
 // Función para verificar si un origen coincide con los patrones permitidos (soporta comodines *)
+const toRegex = (pattern) => {
+  // Escapar caracteres regex especiales excepto '*'
+  const escaped = pattern.replace(/[-/\\^$+?.()|[\]{}]/g, "\\$&");
+  // Reemplazar '*' por '.*' para hacer de comodín
+  const wildcarded = escaped.replace(/\*/g, ".*");
+  return new RegExp(`^${wildcarded}$`);
+};
+
+logger.info(`CORS orígenes permitidos: ${allowedOrigins.join(" | ")}`);
+
 const corsOptions = {
   origin: function (origin, callback) {
     // Permitir solicitudes sin origen (como aplicaciones móviles o curl)
     if (!origin) return callback(null, true);
-    
+
     // Verificar si el origen coincide con alguno de los patrones permitidos
-    const isAllowed = allowedOrigins.some(pattern => {
-      // Convertir el patrón a expresión regular (reemplazando * por .*)
-      const regexPattern = pattern.replace(/\*/g, '.*').replace(/\./g, '\\.');
-      const regex = new RegExp(`^${regexPattern}$`);
-      return regex.test(origin);
-    });
-    
+    const isAllowed = allowedOrigins.some(pattern => toRegex(pattern).test(origin));
+
     if (isAllowed) {
       callback(null, true);
     } else {
@@ -163,7 +168,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Servir archivos estáticos del frontend en producción
 if (process.env.NODE_ENV === 'production') {
   const fs = require('fs');
-  
+
   // Intentar diferentes rutas posibles para el frontend
   const possiblePaths = [
     path.resolve(process.cwd(), '../../frontend/dist'),
@@ -173,18 +178,29 @@ if (process.env.NODE_ENV === 'production') {
     'C:/Users/Daniel/Downloads/frontend/dist',
     'C:/Users/Daniel/Downloads/Dann+Salud Online (DEV)/frontend/dist'
   ];
-  
+
   let frontendBuildPath = null;
-  
+
+  // 1) Prioridad: ruta definida por variable de entorno
+  const envFrontendPath = process.env.FRONTEND_BUILD_PATH
+    ? path.resolve(process.env.FRONTEND_BUILD_PATH)
+    : null;
+  if (envFrontendPath && fs.existsSync(envFrontendPath)) {
+    frontendBuildPath = envFrontendPath;
+    logger.info(`✅ FRONTEND_BUILD_PATH usado: ${frontendBuildPath}`);
+  }
+
   // Buscar la primera ruta que exista
-  for (const testPath of possiblePaths) {
-    if (fs.existsSync(testPath)) {
-      frontendBuildPath = testPath;
-      logger.info(`✅ Frontend encontrado en: ${frontendBuildPath}`);
-      break;
+  if (!frontendBuildPath) {
+    for (const testPath of possiblePaths) {
+      if (fs.existsSync(testPath)) {
+        frontendBuildPath = testPath;
+        logger.info(`✅ Frontend encontrado en: ${frontendBuildPath}`);
+        break;
+      }
     }
   }
-  
+
   if (!frontendBuildPath) {
     logger.error('❌ No se pudo encontrar el directorio del frontend en ninguna ubicación');
   } else {
@@ -192,26 +208,26 @@ if (process.env.NODE_ENV === 'production') {
     const assetsPath = path.join(frontendBuildPath, 'assets');
     if (fs.existsSync(assetsPath)) {
       logger.info(`✅ Carpeta de assets encontrada en: ${assetsPath}`);
-      
+
       // Listar archivos en la carpeta de assets para depuración
       const assetFiles = fs.readdirSync(assetsPath);
       logger.info(`📁 Archivos en assets: ${assetFiles.join(', ')}`);
     } else {
       logger.error(`❌ No se encontró la carpeta de assets en: ${assetsPath}`);
     }
-    
+
     // Configuración simple para servir archivos estáticos
     app.use(express.static(frontendBuildPath));
-    
+
     // Ruta específica para servir assets directamente
     app.use('/assets', express.static(path.join(frontendBuildPath, 'assets')));
-    
+
     // Para cualquier otra ruta que no sea API, enviar index.html
     app.get('*', (req, res) => {
       if (!req.path.startsWith('/api')) {
         const indexPath = path.join(frontendBuildPath, 'index.html');
         logger.info(`🔍 Sirviendo index.html desde: ${indexPath}`);
-        
+
         if (fs.existsSync(indexPath)) {
           res.sendFile(indexPath);
         } else {
@@ -333,7 +349,7 @@ async function seedAuditorRole() {
   if (process.env.NODE_ENV === 'production') {
     return;
   }
-  
+
   // Solo en desarrollo creamos un usuario auditor de prueba
   const existing = await User.findOne({ role: "auditor" });
   if (!existing) {

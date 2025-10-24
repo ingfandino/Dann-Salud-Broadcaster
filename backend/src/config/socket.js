@@ -42,7 +42,8 @@ function initSocket(server, app = null, allowedOrigins = []) {
 
     ioInstance.on("connection", (socket) => {
         const user = socket.user || {};
-        const userId = user.id;
+        // JWT payload usa 'sub' como subject; mantener compat con 'id' si existiera
+        const userId = user.sub || user.id;
 
         if (userId) {
             addUser(userId); // ✅ Agrega usuario conectado

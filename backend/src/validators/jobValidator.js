@@ -22,10 +22,6 @@ exports.createJobValidator = [
         .isArray({ min: 1 })
         .withMessage("Debes especificar al menos un contacto"),
 
-    body("createdBy")
-        .notEmpty()
-        .withMessage("El campo 'createdBy' es obligatorio"),
-
     // 🔹 Validación condicional: debe venir templateId o message
     body().custom((value) => {
         if (!value.templateId && !value.message) {
@@ -33,4 +29,28 @@ exports.createJobValidator = [
         }
         return true;
     }),
+
+    // Parámetros de envío
+    body("delayMin")
+        .optional()
+        .isInt({ min: 0 }).withMessage("delayMin debe ser un entero >= 0"),
+    body("delayMax")
+        .optional()
+        .isInt({ min: 1 }).withMessage("delayMax debe ser un entero >= 1"),
+    body().custom((value) => {
+        if (value.delayMin !== undefined || value.delayMax !== undefined) {
+            const min = parseInt(value.delayMin ?? 0, 10);
+            const max = parseInt(value.delayMax ?? 0, 10);
+            if (Number.isFinite(min) && Number.isFinite(max) && min > max) {
+                throw new Error("delayMin no puede ser mayor que delayMax");
+            }
+        }
+        return true;
+    }),
+    body("batchSize")
+        .optional()
+        .isInt({ min: 1 }).withMessage("batchSize debe ser un entero >= 1"),
+    body("pauseBetweenBatches")
+        .optional()
+        .isInt({ min: 0 }).withMessage("pauseBetweenBatches (minutos) debe ser un entero >= 0"),
 ];

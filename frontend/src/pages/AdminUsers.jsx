@@ -7,8 +7,10 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import logger from "../utils/logger";
 import { Edit, Trash2, Power, Eye, EyeOff, Key, RefreshCcw } from "lucide-react";
+import { useAuth } from "../context/AuthContext";
 
 export default function AdminUsers() {
+    const { user: authUser } = useAuth();
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState("");
@@ -69,7 +71,7 @@ export default function AdminUsers() {
         // eslint-disable-next-line
     }, [page, sort, order]);
 
-    // Obtener ID del usuario actual
+    // Obtener ID y rol del usuario actual
     const getCurrentUserId = () => {
         try {
             const token = localStorage.getItem("token");
@@ -81,6 +83,19 @@ export default function AdminUsers() {
         }
     };
     const currentUserId = getCurrentUserId();
+    const getCurrentUserRole = () => {
+        const ctxRole = (authUser?.role || "").toLowerCase();
+        if (ctxRole) return ctxRole;
+        try {
+            const token = localStorage.getItem("token");
+            if (!token) return "";
+            const payload = JSON.parse(atob(token.split(".")[1]));
+            return (payload?.role || "").toLowerCase();
+        } catch {
+            return "";
+        }
+    };
+    const currentUserRole = getCurrentUserRole();
 
     // Cerrar popup si clic afuera
     useEffect(() => {
@@ -207,7 +222,7 @@ export default function AdminUsers() {
                                                     >
                                                         <p className="text-sm text-gray-600 mb-2">Cambiar rol a:</p>
                                                         <div className="flex flex-col gap-1">
-                                                            {["asesor", "supervisor", "auditor", "admin"].map((r) => (
+                                                            {["asesor", "supervisor", "auditor", "admin", "revendedor", "gerencia"].map((r) => (
                                                                 <button
                                                                     key={r}
                                                                     onClick={() =>
@@ -219,15 +234,19 @@ export default function AdminUsers() {
                                                                             )
                                                                         )
                                                                     }
+                                                                    disabled={(u.role || '').toLowerCase() === "gerencia"}
                                                                     className={`p-1 rounded text-sm ${u.pendingRole === r
                                                                         ? "bg-blue-500 text-white"
                                                                         : "bg-gray-100 hover:bg-gray-200"
-                                                                        }`}
+                                                                        } ${(u.role || '').toLowerCase() === "gerencia" ? "opacity-50 cursor-not-allowed" : ""}`}
                                                                 >
                                                                     {r.charAt(0).toUpperCase() + r.slice(1)}
                                                                 </button>
                                                             ))}
                                                         </div>
+                                                        {(u.role || '').toLowerCase() === "gerencia" && (
+                                                            <p className="mt-2 text-xs text-red-600">No se puede modificar el rol de una cuenta de Gerencia.</p>
+                                                        )}
                                                         <div className="flex justify-end gap-2 mt-2">
                                                             <button
                                                                 onClick={() =>
@@ -335,7 +354,7 @@ export default function AdminUsers() {
                                         </button>
                                         <button
                                             onClick={() => confirmDelete(u._id)}
-                                            disabled={u.role === "admin" || u._id === currentUserId}
+                                            disabled={(u._id === currentUserId) || (u.role || '').toLowerCase() === "gerencia" || ((u.role || '').toLowerCase() === "admin" && currentUserRole !== "gerencia")}
                                             className="p-2 rounded bg-gray-500 hover:bg-gray-600 text-white disabled:opacity-50"
                                             title="Eliminar"
                                         >
@@ -463,16 +482,16 @@ export default function AdminUsers() {
                                     </button>
                                 </div>
 
-                                {/* Número de grupo */}
-                                <label className="text-sm text-gray-600">Número de grupo</label>
+                                {/* Grupo (alfanumérico) */}
+                                <label className="text-sm text-gray-600">Grupo</label>
                                 <input
-                                    type="number"
+                                    type="text"
                                     value={selectedUser.numeroEquipo || ""}
                                     onChange={(e) =>
                                         setSelectedUser({ ...selectedUser, numeroEquipo: e.target.value })
                                     }
                                     className="border p-2 rounded"
-                                    placeholder="Número de grupo"
+                                    placeholder="Grupo (alfanumérico)"
                                 />
 
                                 {/* Acciones */}

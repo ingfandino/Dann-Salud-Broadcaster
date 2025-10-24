@@ -16,12 +16,13 @@ const STATUS_OPTIONS = [
     "QR hecho",
 ];
 const ARGENTINE_OBRAS_SOCIALES = [
-    "PAMI", "OSDE", "Swiss Medical", "Galeno", "Medifé", "OSDEPYM", "IOMA",
-    "OSSEG", "OSDE 210", "OSFATUN", "OSDE GBA", "OSECAC", "OSPRERA",
-    "OMINT", "OSSEGUR", "OSPR", "OSUTGRA"
+    'OSDE', 'Medifé', 'OSDEPYM', 'IOMA', 'OSSEG', 'OSDE 210',
+    'OSFATUN', 'OSDE GBA', 'OSECAC', 'OSPRERA', 'OMINT', 'OSSEGUR',
+    'OSPR', 'OSUTHGRA', 'OSBLYCA', 'UOM', 'OSPM', 'OSPECON', 'Elevar', 'OSCHOCA',
+    'OSPEP'
 ];
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "Medicenter"];
-const TIPO_VENTA = ["alta", "cambio"];
+const TIPO_VENTA = ["Alta", "Cambio"];
 
 export default function AuditEditModal({ audit, onClose, onSave }) {
     const [form, setForm] = useState({
@@ -41,6 +42,8 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
     });
 
     const [loading, setLoading] = useState(false);
+    const [reprogramar, setReprogramar] = useState(false);
+
     const [auditores, setAuditores] = useState([]);
     const [availableSlots, setAvailableSlots] = useState([]);
     const [loadingSlots, setLoadingSlots] = useState(false);
@@ -83,7 +86,7 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
         const all = generateTimeOptions();
         const map = {};
         (availableSlots || []).forEach((s) => { map[s.time] = s.count; });
-        return all.map((t) => ({ time: t, disabled: (map[t] || 0) >= 3 }));
+        return all.map((t) => ({ time: t, disabled: (map[t] || 0) >= 4 }));
     }
     const timeOptions = getEnabledTimeOptions();
 
@@ -107,7 +110,7 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
         if (!/^\d{11}$/.test(form.cuil)) return "CUIL debe tener exactamente 11 dígitos";
         if (form.telefono && !/^\d{10}$/.test(form.telefono.replace(/\D/g, '')))
             return "Teléfono debe tener 10 dígitos";
-        if (form.fecha && form.hora) {
+        if (reprogramar && form.fecha && form.hora) {
             const now = new Date();
             const selected = new Date(`${form.fecha}T${form.hora}:00`);
             if (selected < now) return "No se puede asignar un turno en el pasado";
@@ -126,26 +129,6 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
         const err = validate();
         if (err) { toast.error(err); return; }
 
-        // 🔹 Si el usuario intenta marcar como Completa, verificar multimedia
-        if (form.status === "Completa") {
-            try {
-                const { data: fullAudit } = await apiClient.get(`/audits/${audit._id}`);
-                const multimedia = fullAudit.multimedia || {};
-                const hasVideo = !!multimedia.video;
-                const hasDniFront = Array.isArray(multimedia.images) && multimedia.images.length >= 2;
-                const hasAfiliadoKey = !!multimedia.afiliadoKey;
-
-                if (!hasVideo || !hasDniFront) {
-                    toast.error("⚠️ No se puede marcar como COMPLETA: faltan archivos obligatorios (DNI y/o Video).");
-                    return;
-                }
-            } catch (err) {
-                console.error("Error verificando multimedia:", err);
-                toast.error("No se pudo validar la multimedia. Intenta de nuevo.");
-                return;
-            }
-        }
-
         setLoading(true);
         try {
             const payload = {
@@ -157,7 +140,7 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                 obraSocialAnterior: form.obraSocialAnterior || "",
                 obraSocialVendida: form.obraSocialVendida || "",
                 auditor: form.auditor || "",
-                scheduledAt: form.fecha && form.hora ? `${form.fecha}T${form.hora}:00` : audit.scheduledAt,
+                scheduledAt: reprogramar && form.fecha && form.hora ? `${form.fecha}T${form.hora}:00` : audit.scheduledAt,
                 datosExtra: form.datosExtra?.trim() || ""
             };
 
@@ -313,7 +296,8 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                                 min={new Date().toISOString().split("T")[0]}
                                 value={form.fecha}
                                 onChange={(e) => setForm({ ...form, fecha: e.target.value })}
-                                className="border rounded p-2 w-full"
+                                className={`border rounded p-2 w-full ${!reprogramar ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                                disabled={!reprogramar}
                             />
                         </div>
                         <div>
@@ -321,7 +305,8 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                             <select
                                 value={form.hora}
                                 onChange={(e) => setForm({ ...form, hora: e.target.value })}
-                                className="border rounded p-2 w-full"
+                                className={`border rounded p-2 w-full ${!reprogramar ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                                disabled={!reprogramar}
                             >
                                 <option value="">-- Seleccionar --</option>
                                 {loadingSlots ? (
@@ -335,6 +320,17 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                                 )}
                             </select>
                         </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <input
+                            id="chk-reprogramar"
+                            type="checkbox"
+                            checked={reprogramar}
+                            onChange={(e) => setReprogramar(e.target.checked)}
+                            className="h-4 w-4"
+                        />
+                        <label htmlFor="chk-reprogramar" className="text-sm">Reprogramar turno (habilita edición de fecha y hora)</label>
                     </div>
 
                     <div>

@@ -5,8 +5,10 @@ import apiClient from '../services/api';
 import { toast } from 'react-toastify';
 
 const ARGENTINE_OBRAS_SOCIALES = [
-    'PAMI', 'OSDE', 'Swiss Medical', 'Galeno', 'Medifé', 'OSDEPYM', 'IOMA', 'OSSEG', 'OSDE 210',
-    'OSFATUN', 'OSDE GBA', 'OSECAC', 'OSPRERA', 'OMINT', 'OSSEGUR', 'OSPR', 'OSUTGRA'
+    'OSDE', 'Medifé', 'OSDEPYM', 'IOMA', 'OSSEG', 'OSDE 210',
+    'OSFATUN', 'OSDE GBA', 'OSECAC', 'OSPRERA', 'OMINT', 'OSSEGUR',
+    'OSPR', 'OSUTHGRA', 'OSBLYCA', 'UOM', 'OSPM', 'OSPECON', 'Elevar', 'OSCHOCA',
+    'OSPEP'
 ];
 
 export default function SalesForm({ currentUser }) {
@@ -41,9 +43,13 @@ export default function SalesForm({ currentUser }) {
 
     async function fetchAsesores() {
         try {
-            const res = await apiClient.get('/users?role=Asesor');
-            // Suponemos que el endpoint filtra por grupo en backend o se puede filtrar aquí
-            setAsesores(res.data || []);
+            const res = await apiClient.get('/users?scope=group');
+            const list = Array.isArray(res.data) ? res.data : [];
+            const onlyAsesores = list
+                .filter(u => (u.role === 'asesor' || u.role === 'Asesor'))
+                .filter(u => !!u.nombre && u.nombre.trim().length > 0)
+                .sort((a,b) => a.nombre.localeCompare(b.nombre));
+            setAsesores(onlyAsesores);
         } catch (err) {
             console.error(err);
             toast.error('No se pudieron cargar los asesores');
@@ -154,12 +160,12 @@ export default function SalesForm({ currentUser }) {
         return options;
     }
 
-    // Filtrar opciones disponibles según availableSlots (capacidad 3)
+    // Filtrar opciones disponibles según availableSlots (capacidad 4)
     function getEnabledTimeOptions() {
         const all = generateTimeOptions();
         const map = {};
         (availableSlots || []).forEach(s => { map[s.time] = s.count; });
-        return all.map(t => ({ time: t, disabled: (map[t] || 0) >= 3 }));
+        return all.map(t => ({ time: t, disabled: (map[t] || 0) >= 4 }));
     }
 
     const timeOptions = getEnabledTimeOptions();
@@ -226,7 +232,7 @@ export default function SalesForm({ currentUser }) {
                             <label className="block text-sm">Asesor (solo supervisores)</label>
                             <select value={form.asesor} onChange={e => setForm({ ...form, asesor: e.target.value })} className="w-full p-2 border rounded">
                                 <option value="">-- Seleccionar asesor --</option>
-                                {asesores.map(a => <option key={a._id} value={a._id}>{a.name || a.email}</option>)}
+                                {asesores.map(a => <option key={a._id} value={a._id}>{a.nombre}</option>)}
                             </select>
                         </div>
                     )}

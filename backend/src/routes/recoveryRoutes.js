@@ -4,8 +4,8 @@ const { requireAuth } = require('../middlewares/authMiddleware');
 const { permit } = require('../middlewares/roleMiddleware');
 const recovery = require('../controllers/recoveryController');
 
-// Roles permitidos: admin, auditor, revendedor
-router.use(requireAuth, permit('admin', 'auditor', 'revendedor'));
+// Roles permitidos: admin, auditor, revendedor, gerencia
+router.use(requireAuth, permit('admin', 'auditor', 'revendedor', 'gerencia'));
 
 router.get('/', recovery.list);
 router.post('/', recovery.create);

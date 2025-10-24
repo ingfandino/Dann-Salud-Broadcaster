@@ -65,7 +65,7 @@ exports.createAudit = async (req, res) => {
     const count = await Audit.countDocuments({
         scheduledAt: { $gte: slotStart, $lt: slotEnd }
     });
-    if (count >= 3) {
+    if (count >= 4) {
         return res.status(400).json({ message: 'Turno completo' });
     }
 
@@ -80,7 +80,7 @@ exports.createAudit = async (req, res) => {
         asesor: asesor || req.user._id,
         createdBy: req.user._id,
         groupId: req.user.groupId,
-        auditor: req.user._id,
+        auditor: null,
         datosExtra: req.body.datosExtra || ""
     });
 
@@ -135,24 +135,87 @@ exports.getAuditsByDate = async (req, res) => {
         if (estado) filter.status = { $regex: estado, $options: "i" };
         if (tipo) filter.tipoVenta = { $regex: tipo, $options: "i" };
 
-        // Excluir elegibles para recuperación (>24h en estados objetivo) y los ya marcados como isRecovery
+        // Visibilidad por rol
+        const expRole = (req.user?.role || '').toLowerCase();
+        if (expRole === 'supervisor') {
+            const supId = req.user._id;
+            const myGroup = req.user.numeroEquipo || null;
+            const teamByRef = await User.find({ supervisor: supId }).select("_id").lean();
+            const teamByRefIds = teamByRef.map(u => u._id);
+            let teamByGroupIds = [];
+            if (myGroup !== null && myGroup !== undefined && myGroup !== "") {
+                const teamByGroup = await User.find({ numeroEquipo: String(myGroup) }).select("_id").lean();
+                teamByGroupIds = teamByGroup.map(u => u._id);
+            }
+            const orConds = [ { asesor: supId }, { createdBy: supId } ];
+            if (teamByRefIds.length) orConds.push({ asesor: { $in: teamByRefIds } });
+            if (teamByGroupIds.length) orConds.push({ asesor: { $in: teamByGroupIds } });
+            filter.$and = (filter.$and || []).concat([{ $or: orConds }]);
+        } else if (expRole === 'asesor') {
+            filter.$and = (filter.$and || []).concat([{ createdBy: req.user._id }]);
+        }
+
+        // Si es supervisor, restringir a:
+        // - Auditorías asignadas a él mismo (asesor == supId)
+        // - Auditorías creadas por él (createdBy == supId)
+        // - Auditorías de asesores con supervisor == él (modelo antiguo)
+        // - Auditorías de asesores cuyo numeroEquipo coincide con el suyo (modelo por grupo)
+        const userRole = (req.user?.role || '').toLowerCase();
+        if (userRole === 'supervisor') {
+            const supId = req.user._id;
+            const myGroup = req.user.numeroEquipo || null;
+            const teamByRef = await User.find({ supervisor: supId }).select("_id").lean();
+            const teamByRefIds = teamByRef.map(u => u._id);
+            let teamByGroupIds = [];
+            if (myGroup !== null && myGroup !== undefined && myGroup !== "") {
+                const teamByGroup = await User.find({ numeroEquipo: String(myGroup) }).select("_id").lean();
+                teamByGroupIds = teamByGroup.map(u => u._id);
+            }
+
+            const orConds = [
+                { asesor: supId },
+                { createdBy: supId },
+            ];
+            if (teamByRefIds.length) orConds.push({ asesor: { $in: teamByRefIds } });
+            if (teamByGroupIds.length) orConds.push({ asesor: { $in: teamByGroupIds } });
+
+            filter.$and = filter.$and || [];
+            filter.$and.push({ $or: orConds });
+        } else if (userRole === 'asesor') {
+            // Asesor: solo lo creado por él/ella
+            filter.$and = filter.$and || [];
+            filter.$and.push({ createdBy: req.user._id });
+        }
+
+        // Excluir elegibles para recuperación solo para roles que no son supervisor
         const now = new Date();
-        filter.$and = [
-            {
-                $or: [
-                    { status: { $nin: ["Falta clave", "Rechazada", "Falta documentación"] } },
-                    { recoveryEligibleAt: { $exists: false } },
-                    { recoveryEligibleAt: null },
-                    { recoveryEligibleAt: { $gt: now } }
-                ]
-            },
-            { isRecovery: { $ne: true } }
-        ];
+        const roleForRecovery = (req.user?.role || '').toLowerCase();
+        if (roleForRecovery !== 'supervisor') {
+            const recoveryAnd = [
+                {
+                    $or: [
+                        { status: { $nin: ["Falta clave", "Rechazada", "Falta documentación"] } },
+                        { recoveryEligibleAt: { $exists: false } },
+                        { recoveryEligibleAt: null },
+                        { recoveryEligibleAt: { $gt: now } }
+                    ]
+                },
+                { isRecovery: { $ne: true } }
+            ];
+            filter.$and = (filter.$and || []).concat(recoveryAnd);
+        }
+
+        
 
         let audits = await Audit.find(filter)
-            .populate('asesor', 'nombre name email')
+            .populate({
+                path: 'asesor',
+                select: 'nombre name email supervisor numeroEquipo',
+                populate: { path: 'supervisor', select: 'nombre name email numeroEquipo' }
+            })
             .populate('auditor', 'nombre name email')
             .populate('groupId', 'nombre name')
+            .sort({ scheduledAt: 1 })
             .lean();
 
         // Filtrado adicional (asesor / auditor / grupo) - strings parciales (no siempre llegan ids)
@@ -193,6 +256,49 @@ exports.getAuditsByDate = async (req, res) => {
                 );
             });
         }
+
+        // Enriquecer supervisor/grupo cuando falte, usando numeroEquipo
+        const supCache = new Map(); // key: numeroEquipo -> supervisor user
+        await Promise.all(audits.map(async (a) => {
+            let as = a.asesor;
+            if (!as) return;
+
+            // Resolver asesor cuando no viene populado (ObjectId) o viene como email string
+            if (!as.email && !as.nombre && !as.name) {
+                try {
+                    if (typeof as === 'string' && as.includes('@')) {
+                        const found = await User.findOne({ email: as }).select('nombre name email supervisor numeroEquipo').lean();
+                        if (found) {
+                            a.asesor = as = found;
+                        }
+                    } else {
+                        const found = await User.findById(as).select('nombre name email supervisor numeroEquipo').lean();
+                        if (found) {
+                            a.asesor = as = found;
+                        }
+                    }
+                } catch {}
+            }
+
+            const grupo = as && as.numeroEquipo;
+            // Fallback de supervisor a partir de numeroEquipo
+            if (as && (!as.supervisor || !as.supervisor._id) && grupo) {
+                if (!supCache.has(String(grupo))) {
+                    const sup = await User.findOne({ role: 'supervisor', numeroEquipo: String(grupo) })
+                        .select('nombre name email numeroEquipo')
+                        .lean();
+                    supCache.set(String(grupo), sup || null);
+                }
+                const found = supCache.get(String(grupo));
+                if (found) {
+                    a.asesor.supervisor = found;
+                }
+            }
+            // Fallback de groupId a partir de numeroEquipo
+            if (!a.groupId && grupo) {
+                a.groupId = { nombre: String(grupo) };
+            }
+        }));
 
         res.json(audits);
     } catch (err) {
@@ -270,17 +376,12 @@ exports.updateAudit = async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
-    // Solo admin/auditor/supervisor pueden editar
-    if (!['admin', 'auditor', 'supervisor'].includes(req.user.role)) {
+    // Solo admin/auditor/supervisor/gerencia pueden editar
+    if (!['admin', 'auditor', 'supervisor', 'gerencia'].includes(req.user.role)) {
         return res.status(403).json({ message: 'No autorizado' });
     }
 
-    // Manejo de campo auditor:
-    // - Si el payload trae auditor -> respetar (porque viene de un select en el frontend)
-    // - Si no trae -> se asigna el usuario que edita (fallback)
-    if (!updates.auditor) {
-        updates.auditor = req.user._id;
-    }
+    // No sobreescribir auditor automáticamente. Solo cambiar si viene en el payload.
 
     const audit = await Audit.findByIdAndUpdate(
         id,
@@ -367,8 +468,8 @@ exports.uploadMultimedia = async (req, res) => {
             audit.multimedia.afiliadoKey = afiliadoKey.trim();
         }
 
-        // ✅ Clave afiliado definitiva (solo admin)
-        if (req.user.role === "admin" && afiliadoKeyDefinitiva && afiliadoKeyDefinitiva.trim()) {
+        // ✅ Clave afiliado definitiva (solo gerencia)
+        if (req.user.role === "gerencia" && afiliadoKeyDefinitiva && afiliadoKeyDefinitiva.trim()) {
             audit.multimedia.afiliadoKeyDefinitiva = afiliadoKeyDefinitiva.trim();
         }
 
@@ -393,15 +494,33 @@ exports.uploadMultimedia = async (req, res) => {
 exports.deleteAudit = async (req, res) => {
     const { id } = req.params;
 
-    if (!['admin', 'auditor'].includes(req.user.role)) {
+    const allowedRoles = ['admin', 'auditor', 'supervisor', 'gerencia'];
+    if (!allowedRoles.includes(req.user.role)) {
         return res.status(403).json({ message: 'No autorizado' });
     }
 
-    const audit = await Audit.findByIdAndDelete(id);
+    // Obtener auditoría para validar permisos de supervisor
+    const audit = await Audit.findById(id)
+        .populate({ path: 'asesor', select: 'numeroEquipo _id' })
+        .populate({ path: 'createdBy', select: '_id' });
 
     if (!audit) {
         return res.status(404).json({ message: 'Auditoría no encontrada' });
     }
+
+    if (req.user.role === 'supervisor') {
+        const myGroup = req.user.numeroEquipo || null;
+        const advisorGroup = audit.asesor && audit.asesor.numeroEquipo ? audit.asesor.numeroEquipo : null;
+        const createdByMe = audit.createdBy && audit.createdBy._id?.toString() === req.user._id.toString();
+
+        const sameGroup = myGroup !== null && advisorGroup !== null && String(myGroup) === String(advisorGroup);
+
+        if (!sameGroup && !createdByMe) {
+            return res.status(403).json({ message: 'No autorizado a eliminar este turno' });
+        }
+    }
+
+    await Audit.findByIdAndDelete(id);
 
     try {
         emitAuditUpdate(id, { deleted: true });
@@ -454,7 +573,11 @@ exports.exportByDate = async (req, res) => {
         if (tipo) filter.tipoVenta = { $regex: tipo, $options: "i" };
 
         let audits = await Audit.find(filter)
-            .populate('asesor', 'nombre name email')
+            .populate({
+                path: 'asesor',
+                select: 'nombre name email supervisor numeroEquipo',
+                populate: { path: 'supervisor', select: 'nombre name email numeroEquipo' }
+            })
             .populate('auditor', 'nombre name email')
             .populate('groupId', 'nombre name')
             .lean();
@@ -499,6 +622,26 @@ exports.exportByDate = async (req, res) => {
         }
 
         // Normalizar / aplanar datos para CSV (evitamos [Object])
+        // Fallback supervisor/grupo vía numeroEquipo
+        const supCache = new Map();
+        for (const a of audits) {
+            const as = a.asesor;
+            const grupo = as?.numeroEquipo;
+            if ((!as?.supervisor?._id) && grupo) {
+                if (!supCache.has(String(grupo))) {
+                    const sup = await User.findOne({ role: 'supervisor', numeroEquipo: String(grupo) })
+                        .select('nombre name email numeroEquipo')
+                        .lean();
+                    supCache.set(String(grupo), sup || null);
+                }
+                const found = supCache.get(String(grupo));
+                if (found) a.asesor.supervisor = found;
+            }
+            if (!a.groupId && grupo) {
+                a.groupId = { nombre: String(grupo) };
+            }
+        }
+
         const mapped = audits.map(a => ({
             scheduledAt: a.scheduledAt ? new Date(a.scheduledAt).toISOString() : '',
             nombre: a.nombre || '',
@@ -550,24 +693,55 @@ exports.exportByDate = async (req, res) => {
 exports.getAuditsByDateRange = async (req, res) => {
     try {
         const { from, to } = req.query;
-        if (!from || !to)
+        if (!from || !to) {
             return res.status(400).json({ message: "Parámetros de fecha requeridos." });
+        }
 
         const start = parseLocalDate(from);
         const end = parseLocalDate(to);
         end.setDate(end.getDate() + 1);
 
-        const audits = await Audit.find({
+        const rangeFilter = {
             scheduledAt: { $gte: start, $lt: end },
-        })
-            .populate('asesor', 'nombre name email')
+        };
+
+        // Restricción de supervisor: ver propio, creados por él, su equipo por referencia y por grupo (numeroEquipo)
+        const rangeRole = (req.user?.role || '').toLowerCase();
+        if (rangeRole === 'supervisor') {
+            const supId = req.user._id;
+            const myGroup = req.user.numeroEquipo || null;
+            const teamByRef = await User.find({ supervisor: supId }).select("_id").lean();
+            const teamByRefIds = teamByRef.map(u => u._id);
+            let teamByGroupIds = [];
+            if (myGroup !== null && myGroup !== undefined && myGroup !== "") {
+                const teamByGroup = await User.find({ numeroEquipo: String(myGroup) }).select("_id").lean();
+                teamByGroupIds = teamByGroup.map(u => u._id);
+            }
+            const orConds = [
+                { asesor: supId },
+                { createdBy: supId },
+            ];
+            if (teamByRefIds.length) orConds.push({ asesor: { $in: teamByRefIds } });
+            if (teamByGroupIds.length) orConds.push({ asesor: { $in: teamByGroupIds } });
+            rangeFilter.$and = (rangeFilter.$and || []).concat([{ $or: orConds }]);
+        } else if (rangeRole === 'asesor') {
+            // Asesor: solo lo creado por él/ella
+            rangeFilter.$and = (rangeFilter.$and || []).concat([{ createdBy: req.user._id }]);
+        }
+
+        const audits = await Audit.find(rangeFilter)
+            .populate({
+                path: 'asesor',
+                select: 'nombre name email supervisor',
+                populate: { path: 'supervisor', select: 'nombre name email' }
+            })
             .populate('auditor', 'nombre name email')
             .populate('groupId', 'nombre name')
-            .sort({ scheduledAt: -1 });
+            .sort({ scheduledAt: 1 });
 
-        res.json(audits);
+        return res.json(audits);
     } catch (error) {
         logger.error("getAuditsByDateRange error", error);
-        res.status(500).json({ message: "Error interno al filtrar auditorías" });
+        return res.status(500).json({ message: "Error interno al filtrar auditorías" });
     }
 };

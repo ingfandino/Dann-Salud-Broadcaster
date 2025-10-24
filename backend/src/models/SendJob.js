@@ -27,6 +27,11 @@ const sendJobSchema = new mongoose.Schema({
         enum: ["pendiente", "ejecutando", "pausado", "completado", "fallido", "cancelado"],
         default: "pendiente",
     },
+    // Parámetros de envío
+    delayMin: { type: Number, default: 2 }, // segundos
+    delayMax: { type: Number, default: 5 }, // segundos
+    batchSize: { type: Number, default: 10 },
+    pauseBetweenBatchesMinutes: { type: Number, default: 1 },
     stats: {
         total: { type: Number, default: 0 },
         sent: { type: Number, default: 0 },

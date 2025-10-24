@@ -10,8 +10,13 @@ if (!URL) {
 }
 
 const socket = io(URL, {
-    autoConnect: true,
-    transports: ["websocket"],
+    autoConnect: false,
+    // Permitir fallback a polling en redes/VPN que bloquean WS puro
+    transports: ["websocket", "polling"],
+    timeout: 10000,
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
     auth: () => {
         const token = localStorage.getItem("token");
         return token ? { token } : {};

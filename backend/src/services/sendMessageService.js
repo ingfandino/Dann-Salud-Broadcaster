@@ -39,6 +39,13 @@ async function processJob(jobId) {
         return;
     }
 
+    // Marcar job como ejecutando (si no está ya)
+    if (initialJob.status !== "ejecutando") {
+        initialJob.status = "ejecutando";
+        if (!initialJob.startedAt) initialJob.startedAt = new Date();
+        await initialJob.save();
+    }
+
     const contactsToSend = initialJob.contacts;
     logger.info(`🚀 Job iniciado (${contactsToSend.length} destinatarios)`);
     await addLog({
@@ -47,7 +54,41 @@ async function processJob(jobId) {
         metadata: { total: contactsToSend.length }
     });
 
-    for (let i = initialJob.currentIndex; i < contactsToSend.length; i++) {
+    // Parámetros por Job con fallback a configuración global
+    const dMin = Number.isFinite(parseInt(initialJob.delayMin, 10)) ? parseInt(initialJob.delayMin, 10) : (config.minDelay || 2);
+    const dMax = Number.isFinite(parseInt(initialJob.delayMax, 10)) ? parseInt(initialJob.delayMax, 10) : (config.maxDelay || 5);
+    const jobBatchSize = Number.isFinite(parseInt(initialJob.batchSize, 10)) ? parseInt(initialJob.batchSize, 10) : (config.batchSize || 10);
+    const pauseMinutes = Number.isFinite(parseInt(initialJob.pauseBetweenBatchesMinutes, 10)) ? parseInt(initialJob.pauseBetweenBatchesMinutes, 10) : Math.ceil((config.batchPause || 60) / 60);
+
+    const normalizeArNumber = (raw) => {
+        let digits = String(raw || "").replace(/\D/g, "");
+        // quitar ceros iniciales
+        digits = digits.replace(/^0+/, "");
+        // quitar 15 al inicio (caso comunes locales)
+        if (digits.startsWith("15")) digits = digits.slice(2);
+        // si empieza con 54 pero sin 549, insertar 9
+        if (digits.startsWith("54") && !digits.startsWith("549")) {
+            digits = "549" + digits.slice(2);
+        }
+        // si no tiene prefijo país, agregar 549
+        if (!digits.startsWith("54")) {
+            digits = "549" + digits;
+        }
+        return digits;
+    };
+
+    // Set para evitar duplicados dentro del mismo Job (por teléfono normalizado)
+    const seenPhones = new Set();
+    const startIndex = initialJob.currentIndex || 0;
+    // Prefill con teléfonos ya procesados si el job se reanuda
+    for (let p = 0; p < startIndex; p++) {
+        const prev = contactsToSend[p];
+        if (prev && prev.telefono) {
+            try { seenPhones.add(normalizeArNumber(prev.telefono)); } catch {}
+        }
+    }
+
+    for (let i = startIndex; i < contactsToSend.length; i++) {
         const currentJobState = await SendJob.findById(jobId);
 
         if (!currentJobState || ["pausado", "cancelado"].includes(currentJobState.status)) {
@@ -62,14 +103,45 @@ async function processJob(jobId) {
 
         const contact = contactsToSend[i];
 
-        // 🔹 Soporte de placeholders + spintax
-        let rendered = initialJob.message.replace(/{{(.*?)}}/g, (match, key) => {
-            const cleanKey = key.trim();
-            return contact[cleanKey] !== undefined ? contact[cleanKey] : match;
+        // 🔹 Soporte de placeholders + spintax con normalización y extraData
+        const normalizeKey = (k) => String(k || "")
+            .toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            .replace(/\s+/g, "")
+            .replace(/_/g, "");
+        const dataMap = new Map();
+        // Cargar campos de contacto nivel superior
+        Object.entries(contact.toObject ? contact.toObject() : contact).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && typeof v !== 'object') dataMap.set(normalizeKey(k), v);
+        });
+        // Incluir extraData si existe
+        let extra = (contact.toObject ? contact.toObject() : contact).extraData || {};
+        if (extra instanceof Map) {
+            extra = Object.fromEntries(extra);
+        }
+        Object.entries(extra).forEach(([k, v]) => {
+            if (v !== undefined && v !== null) dataMap.set(normalizeKey(k), v);
+        });
+
+        let rendered = initialJob.message.replace(/{{\s*(.*?)\s*}}/g, (match, key) => {
+            const nk = normalizeKey(key);
+            return dataMap.has(nk) ? String(dataMap.get(nk)) : "";
         });
         const messageText = parseSpintax(rendered);
 
-        const to = `${contact.telefono}@c.us`;
+        const toDigits = normalizeArNumber(contact.telefono);
+        // Evitar duplicados en el mismo Job
+        if (seenPhones.has(toDigits)) {
+            logger.warn(`⚠️ Duplicado en job: ${toDigits} ya fue procesado. Se omite.`);
+            await addLog({ tipo: "warning", mensaje: `Duplicado en job omitido: ${toDigits}`, metadata: { jobId: initialJob._id, index: i } });
+            // actualizar progreso sin enviar
+            initialJob.currentIndex = i + 1;
+            await initialJob.save();
+            continue;
+        }
+        seenPhones.add(toDigits);
+
+        const to = `${toDigits}@c.us`;
 
         try {
             let attempt = 0;
@@ -143,16 +215,17 @@ async function processJob(jobId) {
         }
 
         if (i < contactsToSend.length - 1) {
-            const randomDelay = Math.floor(
-                Math.random() * (config.maxDelay - config.minDelay + 1) + config.minDelay
-            );
+            const min = Math.max(0, dMin);
+            const max = Math.max(min, dMax);
+            const randomDelay = Math.floor(Math.random() * (max - min + 1) + min);
             logger.info(`⏳ Delay de ${randomDelay}s...`);
             await delay(randomDelay * 1000);
         }
 
-        if ((i + 1) % config.batchSize === 0 && i < contactsToSend.length - 1) {
-            logger.info(`😴 Pausa de ${config.batchPause}s (fin de lote)...`);
-            await delay(config.batchPause * 1000);
+        if ((i + 1) % jobBatchSize === 0 && i < contactsToSend.length - 1) {
+            const pauseMs = Math.max(0, pauseMinutes) * 60 * 1000;
+            logger.info(`😴 Pausa de ${pauseMs / 1000}s (fin de lote)...`);
+            await delay(pauseMs);
         }
     }
 

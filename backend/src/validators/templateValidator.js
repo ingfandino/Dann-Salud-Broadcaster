@@ -2,7 +2,7 @@
 
 const { body } = require("express-validator");
 
-// 🔹 Validaciones para crear plantilla
+// Validaciones para crear plantilla
 exports.createTemplateValidator = [
     body("nombre")
         .notEmpty()
@@ -15,13 +15,9 @@ exports.createTemplateValidator = [
         .withMessage("El campo 'contenido' es obligatorio")
         .isLength({ max: 2000 })
         .withMessage("El contenido no puede superar los 2000 caracteres"),
-
-    body("createdBy")
-        .notEmpty()
-        .withMessage("El campo 'createdBy' es obligatorio")
 ];
 
-// 🔹 Validaciones para actualizar plantilla
+// Validaciones para actualizar plantilla
 exports.updateTemplateValidator = [
     body("nombre")
         .optional()
@@ -36,9 +32,4 @@ exports.updateTemplateValidator = [
         .withMessage("El contenido no puede estar vacío")
         .isLength({ max: 2000 })
         .withMessage("El contenido no puede superar los 2000 caracteres"),
-
-    body("createdBy")
-        .optional()
-        .notEmpty()
-        .withMessage("El campo 'createdBy' no puede estar vacío")
 ];

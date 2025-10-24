@@ -22,6 +22,7 @@ import Audits from "./pages/Audits";
 import { AuthProvider } from "./context/AuthContext";
 import PrivateRoute from "./components/PrivateRoute";
 import AdminRoute from "./components/AdminRoute";
+import GerenciaRoute from "./components/GerenciaRoute";
 import MetricsPanel from "./components/MetricsPanel";
 
 export default function App() {
@@ -49,9 +50,9 @@ export default function App() {
                 <Route
                     path="/reports"
                     element={
-                        <PrivateRoute>
+                        <GerenciaRoute>
                             <Reports />
-                        </PrivateRoute>
+                        </GerenciaRoute>
                     }
                 />
 
@@ -82,13 +83,13 @@ export default function App() {
                     }
                 />
 
-                {/* Solo admin */}
+                {/* Solo gerencia */}
                 <Route
                     path="/admin/users"
                     element={
-                        <AdminRoute>
+                        <GerenciaRoute>
                             <AdminUsers />
-                        </AdminRoute>
+                        </GerenciaRoute>
                     }
                 />
 

@@ -49,6 +49,9 @@ export default function Dashboard() {
             { to: "/audits", icon: <SquareUserRound className="w-5 h-5" />, label: "Auditorías" },
         ],
         admin: [
+            { to: "/audits", icon: <SquareUserRound className="w-5 h-5" />, label: "Auditorías" },
+        ],
+        gerencia: [
             { to: "/reports", icon: <BarChart2 className="w-5 h-5" />, label: "Reportes Globales" },
             { to: "/bulk-messages", icon: <MessageSquare className="w-5 h-5" />, label: "Mensajería Masiva" },
             { to: "/audits", icon: <SquareUserRound className="w-5 h-5" />, label: "Auditorías" },

@@ -1,8 +1,26 @@
-https://192.168.1.49 {
-  tls internal
-  encode gzip
-  reverse_proxy 127.0.0.1:5000 {
-    header_up X-Forwarded-Proto https
-    header_up X-Forwarded-Host {host}
-  }
+# ==========================================================
+# DannSalud local server - Caddy configuration
+# Servirá tanto el frontend (React build) como el backend (Node.js)
+# ==========================================================
+
+dannsalud.lan {
+    tls internal
+    encode gzip
+
+    log {
+        output file "C:\Users\Daniel\Downloads\Dann+Salud Online (DEV)\caddy\caddy.log"
+    }
+
+    # ---------------------
+    # 1️⃣ Rutas API -> Backend Node.js
+    # ---------------------
+    handle_path /api/* {
+        reverse_proxy localhost:5000
+    }
+
+    # ---------------------
+    # 2️⃣ Frontend estático (React compilado)
+    # ---------------------
+    root * "C:\Users\Daniel\Downloads\Dann+Salud Online (DEV)\frontend\dist"
+    file_server
 }

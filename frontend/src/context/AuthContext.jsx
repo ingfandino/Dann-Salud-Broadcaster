@@ -25,7 +25,12 @@ function sanitizeTokenFromStorage() {
 
 export function AuthProvider({ children }) {
     const [token, setToken] = useState(() => sanitizeTokenFromStorage());
-    const [user, setUser] = useState(null);
+    const [user, setUser] = useState(() => {
+        try {
+            const raw = localStorage.getItem("user");
+            return raw ? JSON.parse(raw) : null;
+        } catch { return null; }
+    });
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
 
@@ -33,16 +38,19 @@ export function AuthProvider({ children }) {
         logoutApi();
         setToken(null);
         setUser(null);
+        try { localStorage.removeItem("user"); } catch {}
         socket.auth = {}; // Limpiar el token del socket, pero no desconectar
         navigate("/login", { replace: true });
     };
 
-    // Interceptor para manejar errores 401 (token expirado)
+    // Interceptor 401: solo desloguear si falla /auth/me
     useEffect(() => {
         const interceptor = apiClient.interceptors.response.use(
             (response) => response,
             (error) => {
-                if (error.response?.status === 401 && user) {
+                const status = error?.response?.status;
+                const url = error?.config?.url || "";
+                if (status === 401 && user && /\/auth\/me\b/.test(url)) {
                     toast.error("Tu sesión ha expirado. Por favor, inicia sesión de nuevo.");
                     logout();
                 }
@@ -57,9 +65,17 @@ export function AuthProvider({ children }) {
         if (token) {
             localStorage.setItem("token", token);
             socket.auth = { token };
+            // Conectar socket si no está conectado
+            try {
+                if (!socket.connected) socket.connect();
+            } catch {}
         } else {
             localStorage.removeItem("token");
             socket.auth = {};
+            // Desconectar socket si estaba conectado
+            try {
+                if (socket.connected) socket.disconnect();
+            } catch {}
         }
     }, [token]);
 
@@ -71,6 +87,7 @@ export function AuthProvider({ children }) {
             }
             setToken(newToken);
             setUser(user);
+            try { localStorage.setItem("user", JSON.stringify(user)); } catch {}
             navigate("/", { replace: true });
             return { ok: true };
         } catch (err) {
@@ -105,10 +122,20 @@ export function AuthProvider({ children }) {
                 if (!mounted) return;
                 setUser(me || null);
                 setToken(t);
-            } catch {
+                try { localStorage.setItem("user", JSON.stringify(me || null)); } catch {}
+            } catch (err) {
+                // Solo cerrar sesión si el backend confirma 401
+                const status = err?.response?.status;
                 if (mounted) {
-                    setToken(null);
-                    setUser(null);
+                    if (status === 401) {
+                        setToken(null);
+                        setUser(null);
+                        try { localStorage.removeItem("user"); } catch {}
+                    } else {
+                        // Mantener sesión ante fallos de red/CORS/timeouts
+                        // Evitar flicker de logout por errores transitorios
+                        // Opcional: logger.warn
+                    }
                 }
             } finally {
                 if (mounted) setLoading(false);

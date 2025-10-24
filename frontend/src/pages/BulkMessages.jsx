@@ -25,6 +25,8 @@ export default function BulkMessages() {
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [uploadSummary, setUploadSummary] = useState(null);
+    const [importLogId, setImportLogId] = useState(null);
+    const [importWarnings, setImportWarnings] = useState([]);
 
     const [showAutoResp, setShowAutoResp] = useState(false);
     const [autoResponses, setAutoResponses] = useState([]);
@@ -40,10 +42,12 @@ export default function BulkMessages() {
         message: "",
         contacts: [],
         scheduledFor: "",
-        delayBetween: 2,
+        delayMin: 30,       // segundos
+        delayMax: 60,       // segundos
         batchSize: 10,
-        pauseBetweenBatches: 30,
+        pauseBetweenBatches: 1, // minutos
     });
+    const [importHeaders, setImportHeaders] = useState([]);
 
     // Evitar múltiples clics en desconexión
     const [loggingOut, setLoggingOut] = useState(false);
@@ -170,6 +174,27 @@ export default function BulkMessages() {
         }
     };
 
+    const handleDownloadRejected = async () => {
+        try {
+            let content = importWarnings || [];
+            if (importLogId) {
+                const res = await apiClient.get(`/contacts/logs/${importLogId}`);
+                content = res.data?.content || content;
+            }
+            const blob = new Blob([JSON.stringify(content, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `rechazados_${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch {
+            toast.error("No se pudo descargar el detalle de rechazados");
+        }
+    };
+
     const handleAutoEdit = (item) => {
         setEditingAutoId(item._id);
         setAutoForm({
@@ -227,7 +252,7 @@ export default function BulkMessages() {
             const fd = new FormData();
             fd.append("file", file);
             fd.append("createdBy", user._id);
-            const res = await (await import("../services/api")).default.post("/contacts/import", fd, {
+            const res = await apiClient.post("/contacts/import", fd, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
             const inserted = res.data?.insertedContacts || [];
@@ -241,6 +266,19 @@ export default function BulkMessages() {
                 inserted: res.data?.resumen?.inserted || 0,
                 invalid: res.data?.resumen?.invalid || 0,
             });
+            setImportLogId(res.data?.logId || null);
+            setImportWarnings(res.data?.warnings || []);
+            // headers detectados devueltos por el backend en la misma respuesta
+            const respHeaders = res.data?.headers || [];
+            if (respHeaders.length) {
+                setImportHeaders(respHeaders);
+            } else {
+                // fallback: consultar endpoint de headers si por algún motivo no vino en la respuesta
+                try {
+                    const hdr = await apiClient.get("/contacts/headers");
+                    setImportHeaders(hdr.data?.headers || []);
+                } catch {}
+            }
         } catch {
             toast.error("Error importando contactos");
         } finally {
@@ -291,9 +329,10 @@ export default function BulkMessages() {
                 message: "",
                 contacts: [],
                 scheduledFor: "",
-                delayBetween: 2,
+                delayMin: 2,
+                delayMax: 5,
                 batchSize: 10,
-                pauseBetweenBatches: 30,
+                pauseBetweenBatches: 1,
             });
             setPreview(null);
             loadJobs();
@@ -329,14 +368,20 @@ export default function BulkMessages() {
                 toast.error("Debes elegir al menos un contacto para generar preview");
                 return;
             }
-
+            // obtener contacto para armar variables
+            const contactRes = await apiClient.get(`/contacts/${contactId}`);
+            const c = contactRes.data || {};
+            const variables = {
+                nombre: c.nombre,
+                telefono: c.telefono,
+                cuil: c.cuil,
+                ...(c.extraData || {}),
+            };
             const data = await previewMessage({
-                message: form.message,
-                templateId: form.templateId || null,
-                contactId,
+                contenido: form.message,
+                variables,
             });
-
-            setPreview(data.preview);
+            setPreview(data.preview || (data.previews && data.previews[0]?.preview) || "");
         } catch {
             toast.error("Error generando preview");
         }
@@ -355,22 +400,13 @@ export default function BulkMessages() {
                 return;
             }
 
-            if (form.templateId) {
-                await updateTemplate(form.templateId, {
-                    nombre: form.name || "Plantilla sin nombre",
-                    contenido: form.message,
-                    createdBy: user._id,
-                });
-                toast.success("Plantilla actualizada ");
-            } else {
-                const nueva = await createTemplate({
-                    nombre: form.name || "Plantilla sin nombre",
-                    contenido: form.message,
-                    createdBy: user._id,
-                });
-                toast.success("Plantilla creada ");
-                setForm((prev) => ({ ...prev, templateId: nueva._id }));
-            }
+            // Siempre crear una nueva plantilla para evitar sobrescrituras accidentales
+            const nueva = await createTemplate({
+                nombre: form.name || "Plantilla sin nombre",
+                contenido: form.message,
+            });
+            toast.success("Plantilla creada ");
+            // No fijar templateId automáticamente; dejar que el usuario la seleccione si desea
 
             loadTemplates();
             setForm((prev) => ({
@@ -414,7 +450,35 @@ export default function BulkMessages() {
         setForm((prev) => ({ ...prev, message: newText }));
     };
 
-    const emojis = ["", "", "", "", "", "", "", "", "", "", "", ""];
+    const emojis = [
+        "😀","😃","😄","😉","😊","😍","🤩","😎","😁","😂",
+        "🙌","👍","💪","🎉","🎯","✨","📞","📲","📅","🕒",
+        "💬","✅","❌","⚠️","📍","📌","🔔","🚀","💡","🧾"
+    ];
+
+    const escapeHtml = (str) =>
+        String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+
+    // Render básico de formato: *bold* y _italic_
+    const formatPreview = (text) => {
+        let html = escapeHtml(text || "");
+        // negrita: *texto*
+        html = html.replace(/\*(.+?)\*/g, "<strong>$1</strong>");
+        // cursiva: _texto_
+        html = html.replace(/_(.+?)_/g, "<em>$1</em>");
+        // saltos de línea
+        html = html.replace(/\n/g, "<br/>");
+        return html;
+    };
+
+    // campos disponibles desde headers (excluir campos de telefono)
+    const phoneLike = new Set(["telefono", "phone", "celular", "telefono1", "telefonocelular"]);
+    const fieldButtons = (importHeaders || []).filter(h => h && !phoneLike.has(String(h).toLowerCase()));
 
     if (checkingLink) {
         return (
@@ -481,6 +545,17 @@ export default function BulkMessages() {
                             {`Importados: ${uploadSummary.inserted}  |  Inválidos: ${uploadSummary.invalid}`}
                         </div>
                     )}
+                    {uploadSummary && uploadSummary.invalid > 0 && (
+                        <div className="mt-2 flex gap-2">
+                            <button
+                                type="button"
+                                onClick={handleDownloadRejected}
+                                className="px-3 py-1 rounded bg-gray-700 text-white hover:bg-gray-800"
+                            >
+                                Descargar rechazados
+                            </button>
+                        </div>
+                    )}
                     <input
                         type="text"
                         name="name"
@@ -498,11 +573,22 @@ export default function BulkMessages() {
                             className="w-full border p-2 rounded"
                         >
                             <option value="">-- Selecciona plantilla (opcional) --</option>
-                            {templates.map((t) => (
-                                <option key={t._id} value={t._id}>
-                                    {t.nombre}
-                                </option>
-                            ))}
+                            {templates.map((t) => {
+                                const role = (user?.role || "").toLowerCase();
+                                let label = t.nombre;
+                                if (role === "supervisor") {
+                                    if (t.createdBy?.nombre) label += ` — ${t.createdBy.nombre}`;
+                                } else if (role === "gerencia" || role === "admin") {
+                                    const by = t.createdBy?.nombre ? ` — ${t.createdBy.nombre}` : "";
+                                    const team = t.createdBy?.numeroEquipo ? ` [${t.createdBy.numeroEquipo}]` : "";
+                                    label += `${by}${team}`;
+                                }
+                                return (
+                                    <option key={t._id} value={t._id}>
+                                        {label}
+                                    </option>
+                                );
+                            })}
                         </select>
 
                         <div className="flex gap-2">
@@ -524,7 +610,7 @@ export default function BulkMessages() {
                     </div>
 
                     {/* Toolbar de edición */}
-                    <div className="flex gap-2 mb-2 relative">
+                    <div className="flex gap-2 flex-wrap">
                         <button
                             type="button"
                             onClick={() => insertAtCursor("*", "*")}
@@ -553,6 +639,19 @@ export default function BulkMessages() {
                         >
                             Spintax
                         </button>
+
+                        {/* Botones dinámicos de campos */}
+                        {fieldButtons.map((h) => (
+                            <button
+                                key={h}
+                                type="button"
+                                onClick={() => insertAtCursor(`{{${h}}}`)}
+                                className="px-2 py-1 bg-blue-100 text-blue-800 rounded hover:bg-blue-200 text-xs"
+                                title={`Insertar {{${h}}}`}
+                            >
+                                [{String(h).toUpperCase()}]
+                            </button>
+                        ))}
 
                         {/* Emoji Picker */}
                         {showEmojiPicker && (
@@ -596,15 +695,28 @@ export default function BulkMessages() {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-gray-50 p-3 rounded border">
                         <div>
                             <label className="block text-sm font-medium mb-1">
-                                ⏱️ Tiempo entre mensajes (seg)
+                                ⏱️ Tiempo entre mensajes (rango en segundos)
                             </label>
-                            <input
-                                type="number"
-                                name="delayBetween"
-                                value={form.delayBetween}
-                                onChange={handleChange}
-                                className="w-full border p-2 rounded"
-                            />
+                            <div className="flex gap-2">
+                                <input
+                                    type="number"
+                                    name="delayMin"
+                                    min={0}
+                                    value={form.delayMin}
+                                    onChange={handleChange}
+                                    className="w-full border p-2 rounded"
+                                    placeholder="Mín"
+                                />
+                                <input
+                                    type="number"
+                                    name="delayMax"
+                                    min={1}
+                                    value={form.delayMax}
+                                    onChange={handleChange}
+                                    className="w-full border p-2 rounded"
+                                    placeholder="Máx"
+                                />
+                            </div>
                         </div>
                         <div>
                             <label className="block text-sm font-medium mb-1">
@@ -616,11 +728,12 @@ export default function BulkMessages() {
                                 value={form.batchSize}
                                 onChange={handleChange}
                                 className="w-full border p-2 rounded"
+                                min={1}
                             />
                         </div>
                         <div>
                             <label className="block text-sm font-medium mb-1">
-                                😴 Descanso entre lotes (seg)
+                                😴 Descanso entre lotes (minutos)
                             </label>
                             <input
                                 type="number"
@@ -628,6 +741,7 @@ export default function BulkMessages() {
                                 value={form.pauseBetweenBatches}
                                 onChange={handleChange}
                                 className="w-full border p-2 rounded"
+                                min={0}
                             />
                         </div>
                     </div>
@@ -658,7 +772,10 @@ export default function BulkMessages() {
                 {preview && (
                     <div className="mt-4 p-3 border rounded bg-gray-50">
                         <p className="font-semibold mb-2">🔍 Vista previa:</p>
-                        <p>{preview}</p>
+                        <div
+                            className="prose prose-sm max-w-none"
+                            dangerouslySetInnerHTML={{ __html: formatPreview(preview) }}
+                        />
                     </div>
                 )}
 

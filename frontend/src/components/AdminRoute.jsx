@@ -16,7 +16,8 @@ export default function AdminRoute({ children }) {
         return <Navigate to="/login" replace />;
     }
 
-    if (user.role !== "admin") {
+    const role = (user.role || '').toLowerCase();
+    if (!(role === "admin" || role === "gerencia")) {
         // Si está logueado pero no es admin → lo mandamos al dashboard
         return <Navigate to="/" replace />;
     }
