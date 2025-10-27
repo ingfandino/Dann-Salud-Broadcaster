@@ -67,8 +67,20 @@ const app = express();
 
 // 🔹 Configuración CORS
 let allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(",").map(s => s.trim()).filter(Boolean)
+  ? process.env.ALLOWED_ORIGINS.split(",").map(s => {
+      let origin = s.trim();
+      if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
+        origin = 'http://' + origin;
+      }
+      if (origin.endsWith('/')) {
+        origin = origin.slice(0, -1);
+      }
+      return origin;
+    }).filter(Boolean)
   : [];
+
+// Añadir origen del servidor actual para permitir peticiones desde el frontend servido por el mismo backend
+allowedOrigins.push("http://100.73.251.127:5000");
 if (process.env.NODE_ENV === "development") {
   allowedOrigins.push("http://localhost:5173"); // Vite por defecto
 }
@@ -107,6 +119,12 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// Middleware para establecer la cabecera Origin-Agent-Cluster
+app.use((_req, res, next) => {
+  res.setHeader("Origin-Agent-Cluster", "?1");
+  next();
+});
 
 // Configuración de Helmet modificada para evitar redirecciones HTTPS
 app.use(helmet({
