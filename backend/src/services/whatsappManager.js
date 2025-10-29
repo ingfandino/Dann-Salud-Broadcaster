@@ -2,13 +2,49 @@
 
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const EventEmitter = require("events");
+EventEmitter.defaultMaxListeners = 50;
 const path = require("path");
 const fs = require("fs");
 const logger = require("../utils/logger");
+const SendJob = require("../models/SendJob");
+const { emitJobsUpdate } = require("../config/socket");
 const Message = require("../models/Message");
 const Autoresponse = require("../models/Autoresponse");
 const AutoResponseLog = require("../models/AutoResponseLog");
 const { getIO } = require("../config/socket");
+
+// Sistema de cola de conexiones
+const connectionQueue = [];
+let activeConnections = 0;
+const MAX_CONCURRENT_CONNECTIONS = 5;
+
+async function processQueue() {
+  if (activeConnections >= MAX_CONCURRENT_CONNECTIONS || connectionQueue.length === 0) return;
+
+  activeConnections++;
+  const { userId, resolve, reject } = connectionQueue.shift();
+
+  try {
+    const client = await initClientForUser(userId);
+    resolve(client);
+  } catch (error) {
+    reject(error);
+  } finally {
+    activeConnections--;
+    processQueue(); // Procesar siguiente en la cola
+  }
+}
+
+logger.info(`[Connection Manager] Estado: ${activeConnections}/${MAX_CONCURRENT_CONNECTIONS} conexiones activas`);
+
+function queueConnection(userId) {
+  return new Promise((resolve, reject) => {
+    connectionQueue.push({ userId, resolve, reject });
+    if (activeConnections < MAX_CONCURRENT_CONNECTIONS) {
+      processQueue();
+    }
+  });
+}
 
 // Mapa de clientes por usuario
 const clients = new Map(); // userId -> { client, ready, currentQR, qrTimeout }
@@ -21,75 +57,122 @@ function getSessionPathForUser(userId) {
 
 async function initClientForUser(userId) {
   const existing = clients.get(String(userId));
+  const room = `user_${userId}`;
   if (existing?.client) {
-    try { await existing.client.destroy(); } catch {}
+    try {
+      await existing.client.destroy();
+    } catch (error) {
+      logger.warn(`[WA][${userId}] Error al destruir cliente existente:`, error.message);
+    }
   }
 
-  const state = { client: null, ready: false, currentQR: null, qrTimeout: null };
+  const state = {
+    client: null,
+    ready: false,
+    currentQR: null,
+    qrTimeout: null,
+    reconnectAttempts: 0,
+    maxReconnectAttempts: 3
+  };
+
   clients.set(String(userId), state);
 
+  // Configuración de Puppeteer...
+  const puppeteerArgs = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--no-zygote",
+    "--ignore-certificate-errors",
+  ];
+
+  if (process.env.HTTPS_PROXY) {
+    puppeteerArgs.push(`--proxy-server=${process.env.HTTPS_PROXY}`);
+  }
+
+  const puppeteerConfig = {
+    headless: true,
+    args: puppeteerArgs,
+    timeout: 60000 // Aumentar tiempo de espera
+  };
+
+  if (process.env.WHATSAPP_CHROME_PATH) {
+    puppeteerConfig.executablePath = process.env.WHATSAPP_CHROME_PATH;
+  }
+
   const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: getSessionPathForUser(userId) }),
-    puppeteer: { headless: true, args: ["--no-sandbox"] },
+    authStrategy: new LocalAuth({
+      clientId: String(userId),
+      dataPath: getSessionPathForUser(userId)
+    }),
+    puppeteer: puppeteerConfig,
+    webVersionCache: {
+      type: 'remote',
+      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+    }
   });
 
-  // Encapsular room por usuario
-  const room = `user_${userId}`;
-
-  client.on("qr", (qr) => {
+  // Manejo de eventos del cliente
+  client.on('qr', (qr) => {
     logger.info(`[WA][${userId}] QR recibido`);
     state.currentQR = qr;
-    // Emitir solo al usuario dueño
-    try { getIO().to(room).emit("qr", qr); } catch {}
-    if (state.qrTimeout) clearTimeout(state.qrTimeout);
+    state.ready = false;
+    clearTimeout(state.qrTimeout);
+
+    try {
+      getIO().to(room).emit('qr', { qr });
+    } catch (error) {
+      logger.error(`[WA][${userId}] Error emitiendo evento QR:`, error.message);
+    }
+
+    // Configurar expiración del QR
     state.qrTimeout = setTimeout(() => {
       logger.warn(`[WA][${userId}] QR expirado, regenerando...`);
-      try { getIO().to(room).emit("qr_expired"); } catch {}
-      forceNewSessionForUser(userId);
+      try {
+        getIO().to(room).emit('qr_expired');
+        forceNewSessionForUser(userId);
+      } catch (error) {
+        logger.error(`[WA][${userId}] Error manejando expiración de QR:`, error.message);
+      }
     }, 60000);
   });
 
-  client.on("authenticated", () => {
-    logger.info(`[WA][${userId}] Autenticado`);
-    try { getIO().to(room).emit("authenticated"); } catch {}
-  });
-
-  client.on("ready", () => {
-    if (state.qrTimeout) { clearTimeout(state.qrTimeout); state.qrTimeout = null; }
+  client.on('ready', () => {
+    logger.info(`[WA][${userId}] Ready`);
     state.ready = true;
     state.currentQR = null;
-    logger.info(`[WA][${userId}] Ready`);
-    try { getIO().to(room).emit("ready"); } catch {}
+    state.reconnectAttempts = 0; // Reiniciar contador en conexión exitosa
+    try {
+      getIO().to(room).emit('ready');
+    } catch (error) {
+      logger.error(`[WA][${userId}] Error emitiendo evento ready:`, error.message);
+    }
   });
 
-  client.on("disconnected", (reason) => {
-    state.ready = false;
-    state.currentQR = null;
-    logger.warn(`[WA][${userId}] Disconnected: ${reason}`);
-    try { getIO().to(room).emit("disconnected", { reason }); } catch {}
-  });
-
-  client.on("auth_failure", (msg) => {
-    state.ready = false;
-    state.currentQR = null;
-    logger.error(`[WA][${userId}] Auth failure: ${msg}`);
-    try { getIO().to(room).emit("auth_failure", { message: msg }); } catch {}
-  });
-
-  // Reemitir y procesar mensajes entrantes por usuario (auto-respuestas)
-  client.on("message", async (msg) => {
-    try { getIO().to(room).emit("message", msg); } catch {}
+  client.on('message', async (msg) => {
     try {
       if (msg.fromMe) return;
+
+      // Notificar al frontend
+      try {
+        getIO().to(room).emit('message', msg);
+      } catch (error) {
+        logger.error(`[WA][${userId}] Error emitiendo mensaje:`, error.message);
+      }
+
+      // Lógica de auto-respuestas
       const enviado = await Message.findOne({ to: msg.from, direction: "outbound" });
       if (!enviado) {
         logger.info(`[WA][${userId}] Mensaje entrante ignorado (no corresponde a campaña): ${msg.from}`);
         return;
       }
-      await Message.updateMany({ to: msg.from, direction: "outbound" }, { $set: { respondio: true } });
-      logger.info(`[WA][${userId}] Respuesta recibida de contacto de campaña: ${msg.from}`);
 
-      // Cargar reglas activas del propietario de esta sesión
+      await Message.updateMany(
+        { to: msg.from, direction: "outbound" },
+        { $set: { respondio: true } }
+      );
+
+      // Cargar reglas de auto-respuesta
       const reglas = await Autoresponse.find({ createdBy: userId, active: true });
       if (reglas.length) {
         const normalize = (s) => (s || "").toLowerCase().trim();
@@ -101,8 +184,9 @@ async function initClientForUser(userId) {
           return mt === "exact" ? bodyNorm === kw : bodyNorm.includes(kw);
         });
         const rule = matched || reglas.find(r => r.isFallback);
+
         if (rule) {
-          // Anti-spam: evitar múltiples auto-respuestas en ventana de tiempo
+          // Anti-spam
           const windowMinutes = Number(process.env.AUTORESPONSE_WINDOW_MINUTES || 30);
           const since = new Date(Date.now() - windowMinutes * 60 * 1000);
           const recent = await AutoResponseLog.findOne({
@@ -110,53 +194,65 @@ async function initClientForUser(userId) {
             chatId: msg.from,
             respondedAt: { $gte: since },
           }).sort({ respondedAt: -1 }).lean();
-          if (recent) {
-            logger.info(`[WA][${userId}] Anti-spam: ya se respondió recientemente a ${msg.from}, omitiendo.`);
-            return;
-          }
-          try {
-            await client.sendMessage(msg.from, rule.response);
-            logger.info(`[WA][${userId}] Auto-respuesta enviada (${rule.keyword || "fallback"})`);
-            // Registrar envío en log
+
+          if (!recent) {
             try {
-              await AutoResponseLog.create({ createdBy: userId, chatId: msg.from, ruleId: rule._id, respondedAt: new Date() });
-            } catch (logErr) {
-              logger.warn(`[WA][${userId}] No se pudo registrar AutoResponseLog: ${logErr?.message}`);
+              await client.sendMessage(msg.from, rule.response);
+              logger.info(`[WA][${userId}] Auto-respuesta enviada (${rule.keyword || "fallback"})`);
+
+              // Registrar en log
+              await AutoResponseLog.create({
+                createdBy: userId,
+                chatId: msg.from,
+                ruleId: rule._id,
+                respondedAt: new Date()
+              });
+            } catch (e) {
+              logger.warn(`[WA][${userId}] Error enviando auto-respuesta:`, e.message);
             }
-          } catch (e) {
-            logger.warn(`[WA][${userId}] Error enviando auto-respuesta: ${e?.message}`);
           }
         }
       }
     } catch (err) {
-      logger.error(`[WA][${userId}] Error procesando mensaje entrante: ${err?.message}`);
+      logger.error(`[WA][${userId}] Error procesando mensaje:`, err.message);
     }
   });
 
-  logger.info(`[WA][${userId}] Inicializando cliente...`);
-  // Retry con backoff
-  const maxAttempts = Number(process.env.WA_INIT_MAX_ATTEMPTS || 3);
-  let attempt = 0;
-  let lastErr = null;
-  while (attempt < maxAttempts) {
-    attempt++;
-    try {
-      await client.initialize();
-      logger.info(`[WA][${userId}] Cliente inicializado (intento ${attempt}/${maxAttempts})`);
-      break;
-    } catch (err) {
-      lastErr = err;
-      const waitMs = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
-      logger.warn(`[WA][${userId}] Falló initialize() intento ${attempt}/${maxAttempts}: ${err?.message}. Reintentando en ${waitMs}ms`);
-      await new Promise(r => setTimeout(r, waitMs));
+  client.on('disconnected', async (reason) => {
+    logger.warn(`[WA][${userId}] Disconnected: ${reason}`);
+    state.ready = false;
+
+    // Lógica de reconexión automática
+    if (state.reconnectAttempts < state.maxReconnectAttempts) {
+      state.reconnectAttempts++;
+      const delay = Math.min(1000 * Math.pow(2, state.reconnectAttempts), 30000); // Backoff exponencial
+      logger.info(`[WA][${userId}] Intentando reconexión ${state.reconnectAttempts}/${state.maxReconnectAttempts} en ${delay}ms...`);
+
+      setTimeout(() => {
+        if (!state.ready) {
+          initClientForUser(userId).catch(err => {
+            logger.error(`[WA][${userId}] Error en reconexión:`, err.message);
+          });
+        }
+      }, delay);
+    } else {
+      logger.error(`[WA][${userId}] Máximo de intentos de reconexión alcanzado`);
     }
+  });
+
+  client.on('auth_failure', (msg) => {
+    logger.error(`[WA][${userId}] Error de autenticación:`, msg);
+    state.ready = false;
+  });
+
+  try {
+    state.client = client;
+    await client.initialize();
+    return client;
+  } catch (error) {
+    logger.error(`[WA][${userId}] Error al inicializar cliente:`, error.message);
+    throw error;
   }
-  if (!client.info?.wid && lastErr && !state.ready) {
-    logger.error(`[WA][${userId}] No se pudo inicializar el cliente tras ${maxAttempts} intentos: ${lastErr?.message}`);
-  }
-  
-  state.client = client;
-  return client;
 }
 
 async function getOrInitClient(userId) {
@@ -212,10 +308,10 @@ async function forceNewSessionForUser(userId) {
 async function logoutForUser(userId) {
   const s = getState(userId);
   if (s?.client) {
-    try { await s.client.logout(); } catch {}
+    try { await s.client.logout(); } catch { }
   }
   const p = getSessionPathForUser(userId);
-  try { if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true }); } catch {}
+  try { if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true }); } catch { }
   await forceNewSessionForUser(userId);
 }
 

@@ -9,12 +9,12 @@ exports.createJobValidator = [
         .withMessage("El nombre no puede superar los 100 caracteres"),
 
     body("templateId")
-        .optional()
+        .optional({ nullable: true, checkFalsy: true })
         .isMongoId()
         .withMessage("El templateId debe ser un ObjectId válido"),
 
     body("message")
-        .optional()
+        .optional({ nullable: true, checkFalsy: true })
         .isLength({ min: 1, max: 2000 })
         .withMessage("El mensaje no puede estar vacío ni superar 2000 caracteres"),
 

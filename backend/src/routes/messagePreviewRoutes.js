@@ -5,6 +5,7 @@ const router = express.Router();
 const { parseSpintax } = require("../utils/spintax");
 const { requireAuth } = require("../middlewares/authMiddleware");
 const logger = require("../utils/logger");
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 router.post("/preview", requireAuth, (req, res) => {
     try {
@@ -16,7 +17,8 @@ router.post("/preview", requireAuth, (req, res) => {
         // Reemplazo de placeholders tipo {{campo}}
         let parsed = message;
         for (const [key, value] of Object.entries(contact)) {
-            parsed = parsed.replace(new RegExp(`{{${key}}}`, "g"), value ?? "");
+            const pattern = new RegExp(`{{${escapeRegex(String(key))}}}`, "g");
+            parsed = parsed.replace(pattern, () => (value ?? ""));
         }
 
         // Expansión de spintax

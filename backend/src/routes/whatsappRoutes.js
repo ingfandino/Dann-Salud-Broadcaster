@@ -3,6 +3,7 @@
 const express = require("express");
 const router = express.Router();
 const { whatsappEvents, isReady, getCurrentQR } = require("../config/whatsapp");
+const { authenticate } = require('../middlewares/auth');
 
 const { relink, logout, getStatus } = require("../controllers/whatsappController");
 const { permit } = require("../middlewares/roleMiddleware");
@@ -10,35 +11,26 @@ const logger = require("../utils/logger");
 
 let lastQR = null;
 
-// 📡 Al generar un nuevo QR, lo almacenamos en memoria
-whatsappEvents.on("qr", (qr) => {
-    lastQR = qr;
-});
+// Ruta para inicializar la conexión
+router.get('/init', authenticate, whatsappController.init);
 
-// 📡 Si el QR expira o se fuerza nueva sesión
-whatsappEvents.on("qr_refresh", () => {
-    lastQR = null;
-});
-whatsappEvents.on("disconnected", () => {
-    lastQR = null;
-});
+// Ruta para verificar el estado
+router.get('/status', authenticate, whatsappController.getStatus);
 
-// ✅ Estado actual de conexión
-router.get("/status", getStatus);
-
-// 🔁 Obtener QR actual (si hay)
-router.get("/qr", async (req, res) => {
+// Ruta para obtener el QR
+router.get("/qr", authenticate, async (req, res) => {
     try {
-        if (isReady()) {
-            return res.json({ connected: true });
+        if (lastQR) {
+            return res.json({ qr: lastQR });
         }
-        const qr = lastQR || getCurrentQR();
-        if (qr) return res.json({ qr });
-        return res.json({ qr: null });
-
-    } catch (err) {
-        logger.error("Error obteniendo QR", { error: err });
-        res.status(500).json({ error: "Error interno" });
+        const qr = whatsappController.getCurrentQR();
+        if (qr) {
+            return res.json({ qr });
+        }
+        res.status(404).json({ error: "No hay QR disponible" });
+    } catch (error) {
+        logger.error("Error en /qr:", error);
+        res.status(500).json({ error: error.message });
     }
 });
 

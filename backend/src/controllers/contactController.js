@@ -17,6 +17,7 @@ const isValidPhone = (v) => {
 const normalizeHeader = (header) => {
     return header
         .toString()
+        .replace(/\uFEFF/g, "") // BOM
         .trim()
         .toLowerCase()
         .normalize("NFD")
@@ -36,20 +37,66 @@ exports.importContacts = async (req, res) => {
 
         const workbook = XLSX.readFile(req.file.path);
         const sheetName = workbook.SheetNames[0];
-        const rawSheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
+        const rawSheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, blankrows: false, defval: "" });
 
         const headers = rawSheet[0].map(h => normalizeHeader(h));
-        const rows = rawSheet.slice(1);
+        const phoneHeaderKeys = [
+            "telefono", "phone", "celular", "telefono1", "telefonocelular", "numerodetelefono", "tel", "movil", "mobile", "whatsapp"
+        ];
+        const nameHeaderKeys = [
+            "nombre", "name", "fullname", "nombreyapellido"
+        ];
+        const cuilHeaderKeys = [
+            "cuil", "cuit", "dni", "documento"
+        ];
+        const findIndex = (keys) => {
+            for (const k of keys) {
+                const idx = headers.indexOf(k);
+                if (idx !== -1) return idx;
+            }
+            return -1;
+        };
+        const phoneIdx = findIndex(phoneHeaderKeys);
+        const nameIdx = findIndex(nameHeaderKeys);
+        const cuilIdx = findIndex(cuilHeaderKeys);
 
-        // Caps de seguridad
+        // Filtrar directamente por filas con teléfono válido (sin pasos intermedios)
+        const allRows = rawSheet.slice(1);
+        const seenPhonesForLimit = new Set();
+        const effectiveRows = [];
+        
+        for (const row of allRows) {
+            if (!row || !Array.isArray(row)) continue;
+            const phoneRaw = phoneIdx >= 0 ? row[phoneIdx] : null;
+            if (!phoneRaw) continue;
+            const digits = String(phoneRaw).replace(/\D/g, "");
+            if (!/^\d{8,15}$/.test(digits)) continue;
+            if (seenPhonesForLimit.has(digits)) continue;
+            seenPhonesForLimit.add(digits);
+            effectiveRows.push(row);
+        }
+
         const MAX_ROWS = Number(process.env.CONTACTS_IMPORT_MAX_ROWS || 5000);
-        if (rows.length > MAX_ROWS) {
-            fs.unlinkSync(req.file.path);
-            return res.status(400).json({ error: `Demasiadas filas (${rows.length}). Límite: ${MAX_ROWS}` });
+        let truncated = 0;
+        if (effectiveRows.length > MAX_ROWS) {
+            truncated = effectiveRows.length - MAX_ROWS;
+            effectiveRows.splice(MAX_ROWS);
         }
 
         // Guardamos los headers para el endpoint dinámico
         lastImportHeaders = headers;
+
+        // Pre-cargar contactos existentes por teléfono para acelerar
+        const numbers = effectiveRows
+            .map(r => {
+                const phoneRaw = phoneIdx >= 0 ? r[phoneIdx] : null;
+                return phoneRaw ? String(phoneRaw).replace(/\D/g, "") : null;
+            })
+            .filter(d => d && /^\d{8,15}$/.test(d));
+        const existingList = numbers.length
+            ? await Contact.find({ telefono: { $in: numbers } })
+            : [];
+        const existingByPhone = new Map(existingList.map(c => [String(c.telefono), c]));
 
         let inserted = 0;
         let invalid = 0;
@@ -67,7 +114,8 @@ exports.importContacts = async (req, res) => {
         // Detección de duplicados dentro del mismo archivo
         const seenPhonesInFile = new Set();
 
-        for (let row of rows) {
+        for (let row of effectiveRows) {
+
             if (!row || row.every(cell => !cell || cell.toString().trim() === "")) continue;
 
             const rowData = {};
@@ -135,12 +183,12 @@ exports.importContacts = async (req, res) => {
                 continue;
             }
 
-            const existing = await Contact.findOne({ telefono: normalizedPhone });
+            const existing = existingByPhone.get(String(normalizedPhone)) || null;
 
             if (existing) {
                 // Verificar si ya recibió mensajes salientes (por cualquier usuario)
-                const sentCount = await Message.countDocuments({ contact: existing._id, direction: "outbound" });
-                if (sentCount > 0) {
+                const sentExists = await Message.exists({ contact: existing._id, direction: "outbound" });
+                if (sentExists) {
                     warnings.push({
                         telefono: normalizedPhone,
                         tipo: "bloqueado_por_envio_previo",
@@ -194,8 +242,8 @@ exports.importContacts = async (req, res) => {
         // Inserción masiva optimizada
         if (newContacts.length > 0) {
             const insertedRes = await Contact.insertMany(newContacts);
-            inserted = insertedRes.length;
-            insertedContacts = insertedRes.map(c => ({ _id: c._id, nombre: c.nombre, telefono: c.telefono }));
+            inserted += insertedRes.length;
+            insertedContacts.push(...insertedRes.map(c => ({ _id: c._id, nombre: c.nombre, telefono: c.telefono })));
         }
 
         fs.unlinkSync(req.file.path);
@@ -219,7 +267,7 @@ exports.importContacts = async (req, res) => {
 
         res.json({
             message: "Importación completada",
-            resumen: { inserted, invalid },
+            resumen: { inserted, invalid, truncated },
             warnings,
             insertedContacts,
             headers: lastImportHeaders,
@@ -277,10 +325,10 @@ exports.deleteContact = async (req, res) => {
 exports.listImportLogs = async (req, res) => {
     try {
         const logs = await ImportLog.find().sort({ createdAt: -1 }).limit(50);
-        res.json({ logs });
+        return res.json({ logs });
     } catch (error) {
         logger.error("❌ Error listImportLogs:", error);
-        res.status(500).json({ error: "No se pudo listar logs" });
+        return res.status(500).json({ error: "Error listando logs" });
     }
 };
 
@@ -289,22 +337,22 @@ exports.downloadImportLog = async (req, res) => {
     try {
         const log = await ImportLog.findById(req.params.id);
         if (!log) return res.status(404).json({ error: "Log no encontrado" });
-
-        res.json(log);
+        return res.json(log);
     } catch (error) {
         logger.error("❌ Error downloadImportLog:", error);
-        res.status(500).json({ error: "No se pudo descargar el log" });
+        return res.status(500).json({ error: "No se pudo descargar el log" });
     }
 };
 
-// 🔹 Devolver headers detectados en la última importación
-exports.getLastImportHeaders = (req, res) => {
-    if (!lastImportHeaders || lastImportHeaders.length === 0) {
-        // 🔹 En lugar de 404 → devolver fallback
-        return res.json({
-            headers: ["nombre", "telefono", "cuil"],
-            note: "Aún no se ha importado ningún archivo, se devuelven headers de ejemplo."
-        });
+// 📋 Devolver headers detectados en la última importación
+exports.getLastImportHeaders = async (_req, res) => {
+    try {
+        const headers = Array.isArray(lastImportHeaders) && lastImportHeaders.length > 0
+            ? lastImportHeaders
+            : ["nombre", "telefono", "cuil"];
+        return res.json({ headers });
+    } catch (error) {
+        logger.error("❌ Error getLastImportHeaders:", error);
+        return res.status(500).json({ error: "No se pudieron obtener los headers" });
     }
-    res.json({ headers: lastImportHeaders });
 };

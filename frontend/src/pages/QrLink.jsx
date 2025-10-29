@@ -119,7 +119,7 @@ export default function QRLink() {
         checkConnected();
         statusPollRef.current = setInterval(() => {
             checkConnected();
-        }, 1000);
+        }, 3000);
     }, [checkConnected]);
 
     const handleRefresh = async () => {
@@ -156,10 +156,16 @@ export default function QRLink() {
 
         const onReady = () => {
             console.log("[QRLink] Socket: 'ready' recibido");
-            if (logoutModeRef.current) {
-                // Estamos en proceso de logout: ignorar 'ready' residual
-                return;
-            }
+            // Forzar salida de logout mode y navegar para evitar bucles
+            logoutModeRef.current = false;
+            toast.success("✅ Dispositivo vinculado correctamente");
+            safeNavigateToBulk();
+        };
+
+        const onAuthenticated = () => {
+            console.log("[QRLink] Socket: 'authenticated' recibido");
+            // Forzar salida de logout mode y navegar para evitar bucles
+            logoutModeRef.current = false;
             toast.success("✅ Dispositivo vinculado correctamente");
             safeNavigateToBulk();
         };

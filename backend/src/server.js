@@ -19,6 +19,8 @@ const errorHandler = require("./middlewares/errorHandler");
 const User = require("./models/User");
 const Autoresponse = require("./models/Autoresponse");
 const AutoResponseLog = require("./models/AutoResponseLog");
+const Message = require("./models/Message");
+const SendJob = require("./models/SendJob");
 const routes = require("./routes");
 const { requireAuth } = require("./middlewares/authMiddleware");
 const { validateEnv, ENV } = require("./config");
@@ -48,6 +50,20 @@ if (process.env.NODE_ENV !== "test") {
           logger.warn("⚠️  No se pudieron sincronizar índices de AutoResponseLog", { error: e?.message });
         }
 
+        try {
+          await Message.syncIndexes();
+          logger.info("✅ Índices de Message sincronizados");
+        } catch (e) {
+          logger.warn("⚠️  No se pudieron sincronizar índices de Message", { error: e?.message });
+        }
+
+        try {
+          await SendJob.syncIndexes();
+          logger.info("✅ Índices de SendJob sincronizados");
+        } catch (e) {
+          logger.warn("⚠️  No se pudieron sincronizar índices de SendJob", { error: e?.message });
+        }
+
         // 🌱 Semilla opcional para crear auditor
         await seedAuditorRole();
       } catch (err) {
@@ -64,6 +80,8 @@ if (process.env.NODE_ENV !== "test") {
 }
 
 const app = express();
+const uploadsPath = path.join(__dirname, '../uploads');
+try { require("fs").mkdirSync(uploadsPath, { recursive: true }); } catch (e) {}
 
 // 🔹 Configuración CORS
 let allowedOrigins = process.env.ALLOWED_ORIGINS
@@ -80,7 +98,7 @@ let allowedOrigins = process.env.ALLOWED_ORIGINS
   : [];
 
 // Añadir origen del servidor actual para permitir peticiones desde el frontend servido por el mismo backend
-allowedOrigins.push("http://100.73.251.127:5000");
+ 
 if (process.env.NODE_ENV === "development") {
   allowedOrigins.push("http://localhost:5173"); // Vite por defecto
 }
@@ -118,7 +136,8 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Middleware para establecer la cabecera Origin-Agent-Cluster
 app.use((_req, res, next) => {
@@ -148,7 +167,14 @@ if (process.env.NODE_ENV === "development") {
   app.use(
     rateLimit({
       windowMs: 60 * 1000,
-      max: 100,
+      max: 1000,
+      standardHeaders: true,
+      legacyHeaders: false,
+      skip: (req) => {
+        const p = req.path || "";
+        // Evitar 429 en endpoints de polling rápido
+        return p.startsWith("/api/whatsapp/me/status") || p.startsWith("/api/whatsapp/me/qr");
+      },
     })
   );
 }
@@ -181,7 +207,11 @@ app.get("/api/ping-auth", requireAuth, (_req, res) =>
 
 // 🔹 Montar rutas
 app.use("/api", routes);
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+if (process.env.NODE_ENV === 'production' || process.env.PROTECT_UPLOADS === 'true') {
+  app.use('/uploads', requireAuth, express.static(path.join(__dirname, '../uploads')));
+} else {
+  app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+}
 
 // Servir archivos estáticos del frontend en producción
 if (process.env.NODE_ENV === 'production') {
@@ -311,7 +341,7 @@ if (process.env.NODE_ENV !== "test") {
     pushMetrics().catch(err =>
       logger.error("Error al emitir métricas", { error: err })
     );
-  }, 15000);
+  }, 60000);
 
   const shutdown = (signal) => {
     logger.info(`Cerrando servidor (signal: ${signal})...`);

@@ -11,6 +11,7 @@ const {
     isReady,
     getSessionPath,
 } = require("../config/whatsapp");
+const connectionManager = require('../services/connectionManager');
 const logger = require("../utils/logger");
 
 // Escucha de mensajes entrantes
@@ -105,3 +106,36 @@ exports.getStatus = async (req, res) => {
         res.status(500).json({ connected: false });
     }
 };
+
+async function init(req, res) {
+  try {
+    const userId = req.user.id;
+    logger.info(`[API] Inicializando WhatsApp para usuario ${userId}`);
+    
+    await connectionManager.addToQueue(userId);
+    res.json({ status: 'En cola', message: 'Tu conexión está en cola para ser inicializada' });
+  } catch (error) {
+    logger.error('Error al inicializar WhatsApp:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function getQueueStatus(req, res) {
+  try {
+    const status = connectionManager.getQueueStatus();
+    res.json(status);
+  } catch (error) {
+    logger.error('Error al obtener estado de la cola:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    init,
+    getQueueStatus,
+    relink,
+    logout,
+    getStatus
+  };
+}

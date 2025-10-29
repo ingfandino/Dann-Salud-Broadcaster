@@ -4,6 +4,7 @@ const SendConfig = require("../models/SendConfig");
 const Message = require("../models/Message");
 const SendJob = require("../models/SendJob");
 const { getOrInitClient, isReady: isReadyForUser } = require("./whatsappManager");
+const { getWhatsappClient, isReady: isReadySingle } = require("../config/whatsapp");
 const { emitJobProgress } = require("../config/socket");
 const { addLog } = require("../services/logService");
 const { parseSpintax } = require("../utils/spintax");
@@ -21,6 +22,7 @@ async function getConfig() {
 }
 
 async function processJob(jobId) {
+    const USE_MULTI = process.env.USE_MULTI_SESSION === 'true';
     const config = await getConfig();
     const initialJob = await SendJob.findById(jobId).populate("contacts");
 
@@ -32,9 +34,10 @@ async function processJob(jobId) {
 
     // ⚠️ Verificamos conexión con WhatsApp para el creador del job
     const userId = initialJob.createdBy;
-    if (!isReadyForUser(userId)) {
-        logger.error("❌ WhatsApp (usuario) no está conectado, abortando job", { userId });
-        initialJob.status = "fallido";
+    const readyNow = USE_MULTI ? isReadyForUser(userId) : isReadySingle();
+    if (!readyNow) {
+        logger.warn("⏸️ WhatsApp no está listo para el usuario; re-programando job como 'pendiente'", { userId, jobId });
+        initialJob.status = "pendiente";
         await initialJob.save();
         return;
     }
@@ -48,6 +51,7 @@ async function processJob(jobId) {
 
     const contactsToSend = initialJob.contacts;
     logger.info(`🚀 Job iniciado (${contactsToSend.length} destinatarios)`);
+
     await addLog({
         tipo: "info",
         mensaje: `Job ${initialJob._id} iniciado`,
@@ -88,6 +92,12 @@ async function processJob(jobId) {
         }
     }
 
+    let sentLocal = Number(initialJob.stats?.sent || 0);
+    let failedLocal = Number(initialJob.stats?.failed || 0);
+    let pendingLocal = Number(initialJob.stats?.pending != null ? initialJob.stats.pending : (initialJob.stats?.total || contactsToSend.length) - (sentLocal + failedLocal));
+    const totalLocal = Number(initialJob.stats?.total || contactsToSend.length);
+    let lastEmitTs = 0;
+
     for (let i = startIndex; i < contactsToSend.length; i++) {
         const currentJobState = await SendJob.findById(jobId);
 
@@ -123,6 +133,12 @@ async function processJob(jobId) {
             if (v !== undefined && v !== null) dataMap.set(normalizeKey(k), v);
         });
 
+        const placeholderMatches = Array.from(initialJob.message.matchAll(/{{\s*(.*?)\s*}}/g));
+        const placeholders = placeholderMatches.map(m => m[1]);
+        const placeholdersNormalized = Array.from(new Set(placeholders.map(k => normalizeKey(k))));
+        const dataKeys = Array.from(dataMap.keys());
+        logger.info("🔎 Placeholder debug", { jobId: initialJob._id, contactId: contact?._id, placeholders, placeholdersNormalized, dataKeys });
+
         let rendered = initialJob.message.replace(/{{\s*(.*?)\s*}}/g, (match, key) => {
             const nk = normalizeKey(key);
             return dataMap.has(nk) ? String(dataMap.get(nk)) : "";
@@ -135,14 +151,22 @@ async function processJob(jobId) {
             logger.warn(`⚠️ Duplicado en job: ${toDigits} ya fue procesado. Se omite.`);
             await addLog({ tipo: "warning", mensaje: `Duplicado en job omitido: ${toDigits}`, metadata: { jobId: initialJob._id, index: i } });
             // actualizar progreso sin enviar
-            initialJob.currentIndex = i + 1;
-            await initialJob.save();
+            await SendJob.updateOne(
+                { _id: jobId },
+                {
+                    $inc: {
+                        "stats.pending": -1,
+                    },
+                    $set: { currentIndex: i + 1 },
+                }
+            );
             continue;
         }
         seenPhones.add(toDigits);
 
         const to = `${toDigits}@c.us`;
 
+        let wasSent = false;
         try {
             let attempt = 0;
             let sent = false;
@@ -151,7 +175,7 @@ async function processJob(jobId) {
             while (attempt < 3 && !sent) {
                 attempt++;
                 try {
-                    const userClient = await getOrInitClient(userId);
+                    const userClient = USE_MULTI ? await getOrInitClient(userId) : getWhatsappClient();
                     await userClient.sendMessage(to, messageText);
                     sent = true;
                 } catch (err) {
@@ -181,6 +205,7 @@ async function processJob(jobId) {
             await newMsg.save();
 
             logger.info(`✅ Enviado a ${contact.telefono}`);
+            wasSent = true;
 
         } catch (err) {
             logger.error(`❌ Error enviando a ${contact.telefono}`, { error: err.message });
@@ -196,22 +221,32 @@ async function processJob(jobId) {
             });
             await failedMsg.save();
         } finally {
-            const finalStatus = await SendJob.findById(jobId);
-            const sentCount = await Message.countDocuments({ job: jobId, status: "enviado" });
-            const failedCount = await Message.countDocuments({ job: jobId, status: "fallido" });
+            await SendJob.updateOne(
+                { _id: jobId },
+                {
+                    $inc: {
+                        "stats.sent": wasSent ? 1 : 0,
+                        "stats.failed": wasSent ? 0 : 1,
+                        "stats.pending": -1,
+                    },
+                    $set: { currentIndex: i + 1 },
+                }
+            );
 
-            finalStatus.currentIndex = i + 1;
-            finalStatus.stats.sent = sentCount;
-            finalStatus.stats.failed = failedCount;
-            finalStatus.stats.pending = finalStatus.stats.total - (sentCount + failedCount);
-            await finalStatus.save();
+            if (wasSent) sentLocal++; else failedLocal++;
+            pendingLocal = Math.max(0, pendingLocal - 1);
 
-            emitJobProgress(finalStatus._id.toString(), {
-                currentIndex: finalStatus.currentIndex,
-                total: finalStatus.stats.total,
-                progress: Math.round((finalStatus.currentIndex / finalStatus.stats.total) * 100),
-                status: finalStatus.status,
-            });
+            const now = Date.now();
+            const milestone = Math.max(1, Math.floor(totalLocal / 50));
+            if (now - lastEmitTs >= 1000 || (i + 1) === totalLocal || ((i + 1) % milestone === 0)) {
+                emitJobProgress(initialJob._id.toString(), {
+                    currentIndex: i + 1,
+                    total: totalLocal,
+                    progress: Math.round(((i + 1) / totalLocal) * 100),
+                    status: "ejecutando",
+                });
+                lastEmitTs = now;
+            }
         }
 
         if (i < contactsToSend.length - 1) {

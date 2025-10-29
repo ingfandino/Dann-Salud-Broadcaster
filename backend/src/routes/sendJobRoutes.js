@@ -49,6 +49,9 @@ router.get("/:id", requireAuth, permit("asesor", "supervisor", "admin", "gerenci
     logger.info(`🚦 [sendJobRoutes] GET /send-jobs/${req.params.id}`);
     await sendJobController.getJob(req, res);
 });
+router.get("/:id/export", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
+    await sendJobController.exportJobResultsExcel(req, res);
+});
 router.get("/", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
     logger.info("🚦 [sendJobRoutes] GET /send-jobs/");
     await sendJobController.listJobs(req, res);

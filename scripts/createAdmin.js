@@ -6,6 +6,11 @@ require("dotenv").config({
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
+if (process.env.NODE_ENV === 'production' && process.env.ALLOW_CREATE_ADMIN !== 'true') {
+    console.error("Refusing to create admin in production. Set ALLOW_CREATE_ADMIN=true to override.");
+    process.exit(1);
+}
+
 const createAdmin = async () => {
     try {
         const mongoUri = process.env.MONGO_URI;

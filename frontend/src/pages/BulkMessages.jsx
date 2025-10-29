@@ -13,7 +13,7 @@ import { toast } from "react-toastify";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { getWhatsappStatus, logoutWhatsapp } from "../services/api"; // 
+import { getWhatsappStatus, logoutWhatsapp } from "../services/api";
 import apiClient from "../services/api";
 import logger from "../utils/logger";
 import { fetchAutoresponses, createAutoresponse, updateAutoresponse, deleteAutoresponse } from "../services/autoresponseService";
@@ -42,10 +42,10 @@ export default function BulkMessages() {
         message: "",
         contacts: [],
         scheduledFor: "",
-        delayMin: 30,       // segundos
-        delayMax: 60,       // segundos
-        batchSize: 10,
-        pauseBetweenBatches: 1, // minutos
+        delayMin: 60,       // segundos
+        delayMax: 90,       // segundos
+        batchSize: 15,
+        pauseBetweenBatches: 25, // minutos
     });
     const [importHeaders, setImportHeaders] = useState([]);
 
@@ -99,8 +99,8 @@ export default function BulkMessages() {
                 if (!mounted) return;
 
                 if (!status?.connected) {
-                    toast.info(" No hay teléfono vinculado. Redirigiendo a la pantalla de vinculación...");
-                    navigate("/qr-link", { replace: true });
+                    toast.info("No hay teléfono vinculado. Puedes vincular desde el botón 'Ir a vincular' en el panel de estado (⚙️).");
+                    // No redirigir automáticamente; permitir que el usuario decida
                     return;
                 }
 
@@ -108,8 +108,8 @@ export default function BulkMessages() {
                 await loadJobs();
                 await loadTemplates();
             } catch (err) {
-                toast.error(" No fue posible comprobar el estado del teléfono. Redirigiendo a vinculación...");
-                navigate("/qr-link", { replace: true });
+                toast.warn("No fue posible comprobar el estado del teléfono. Mostrando Mensajería igualmente.");
+                // No redirigir automáticamente en errores transitorios
             } finally {
                 if (mounted) setCheckingLink(false);
             }
@@ -279,8 +279,8 @@ export default function BulkMessages() {
                     setImportHeaders(hdr.data?.headers || []);
                 } catch {}
             }
-        } catch {
-            toast.error("Error importando contactos");
+        } catch (err) {
+            toast.error(err?.response?.data?.error || "Error importando contactos");
         } finally {
             setUploading(false);
             e.target.value = "";
@@ -400,21 +400,30 @@ export default function BulkMessages() {
                 return;
             }
 
-            // Siempre crear una nueva plantilla para evitar sobrescrituras accidentales
-            const nueva = await createTemplate({
-                nombre: form.name || "Plantilla sin nombre",
-                contenido: form.message,
-            });
-            toast.success("Plantilla creada ");
-            // No fijar templateId automáticamente; dejar que el usuario la seleccione si desea
+            if (form.templateId) {
+                const updated = await updateTemplate(form.templateId, {
+                    nombre: form.name || "Plantilla sin nombre",
+                    contenido: form.message,
+                });
+                toast.success("Plantilla actualizada ");
+                await loadTemplates();
+            } else {
+                // Siempre crear una nueva plantilla para evitar sobrescrituras accidentales
+                const nueva = await createTemplate({
+                    nombre: form.name || "Plantilla sin nombre",
+                    contenido: form.message,
+                });
+                toast.success("Plantilla creada ");
+                // No fijar templateId automáticamente; dejar que el usuario la seleccione si desea
 
-            loadTemplates();
-            setForm((prev) => ({
-                ...prev,
-                name: "",
-                message: "",
-                templateId: "",
-            }));
+                await loadTemplates();
+                setForm((prev) => ({
+                    ...prev,
+                    name: "",
+                    message: "",
+                    templateId: "",
+                }));
+            }
         } catch {
             toast.error("Error al guardar plantilla");
         }

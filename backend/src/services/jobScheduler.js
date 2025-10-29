@@ -6,54 +6,53 @@ const { emitJobsUpdate } = require("../config/socket");
 const logger = require("../utils/logger");
 
 const CHECK_INTERVAL = 15 * 1000;
+const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_JOBS || 4);
+const activeJobs = new Set();
+
+async function claimOneJob() {
+    const now = new Date();
+    const job = await SendJob.findOneAndUpdate(
+        {
+            status: "pendiente",
+            scheduledFor: { $lte: now }
+        },
+        { $set: { status: "ejecutando", startedAt: new Date() } },
+        { new: true, sort: { scheduledFor: 1 } }
+    );
+    return job;
+}
 
 async function processJobs() {
     try {
-        const now = new Date();
+        // Rellenar capacidad disponible
+        while (activeJobs.size < MAX_CONCURRENT) {
+            const job = await claimOneJob();
+            if (!job) break;
 
-        const job = await SendJob.findOneAndUpdate(
-            {
-                status: "pendiente",
-                scheduledFor: { $lte: now }
-            },
-            {
-                $set: { status: "ejecutando", startedAt: new Date() }
-            },
-            {
-                new: true, // Devuelve el documento actualizado
-                sort: { scheduledFor: 1 } // Procesa el más antiguo primero
-            }
-        );
+            activeJobs.add(String(job._id));
+            logger.info(`📌 Reclamado y lanzando job ${job._id} (activos: ${activeJobs.size}/${MAX_CONCURRENT})`);
 
-        if (job) {
-            logger.info(`📌 Reclamado y lanzando job ${job._id} programado para ${job.scheduledFor}`);
-
-            try {
-                emitJobsUpdate(job);
-            } catch (errEmit) {
-                logger.warn("⚠️ No se pudo emitir jobs:update al reclamar job", { error: errEmit.message });
+            try { emitJobsUpdate(job); } catch (e) {
+                logger.warn("⚠️ No se pudo emitir jobs:update al reclamar job", { error: e?.message });
             }
 
-            try {
-                await processJob(job._id);
-                const finishedJob = await SendJob.findById(job._id);
-                if (finishedJob) {
-                    emitJobsUpdate(finishedJob);
-                }
-            } catch (err) {
-                logger.error(`❌ Error ejecutando job ${job._id}:`, err.message);
-                await SendJob.findByIdAndUpdate(job._id, {
-                    $set: { status: "fallido", finishedAt: new Date() }
-                });
+            // Lanzar en background, liberar slot al terminar
+            (async () => {
                 try {
-                    const failedJob = await SendJob.findById(job._id);
-                    if (failedJob) {
-                        emitJobsUpdate(failedJob);
+                    await processJob(job._id);
+                } catch (err) {
+                    logger.error(`❌ Error ejecutando job ${job._id}: ${err?.message}`);
+                    try { await SendJob.findByIdAndUpdate(job._id, { $set: { status: "fallido", finishedAt: new Date() } }); } catch {}
+                } finally {
+                    try {
+                        const j = await SendJob.findById(job._id);
+                        if (j) emitJobsUpdate(j);
+                    } catch (emitErr) {
+                        logger.warn("⚠️ No se pudo emitir jobs:update al finalizar", { error: emitErr?.message });
                     }
-                } catch (errEmit2) {
-                    logger.warn("⚠️ No se pudo emitir jobs:update tras fallo", { error: errEmit2.message });
+                    activeJobs.delete(String(job._id));
                 }
-            }
+            })();
         }
     } catch (err) {
         logger.error("🔥 Error en el ciclo del scheduler", { error: err });

@@ -34,11 +34,25 @@ exports.getTemplates = async (req, res) => {
         } else if (role === "supervisor") {
             // ver plantillas de todos los usuarios de su equipo (mismo numeroEquipo)
             const teamUsers = await User.find({ numeroEquipo: equipo }).select("_id");
-            filter = { createdBy: { $in: teamUsers.map(u => u._id) } };
-        } else if (role === "asesor") {
+            const gerencias = await User.find({ role: "gerencia" }).select("_id");
+            const admins = await User.find({ role: "admin" }).select("_id");
+            const allowed = [
+                ...teamUsers.map(u => u._id),
+                ...gerencias.map(u => u._id),
+                ...admins.map(u => u._id)
+            ];
+            filter = { createdBy: { $in: allowed } };
+        } else if (role === "asesor" || role === "revendedor") {
             // ver propias + de supervisores del mismo equipo
             const supervisors = await User.find({ role: "supervisor", numeroEquipo: equipo }).select("_id");
-            const allowed = [userId, ...supervisors.map(u => u._id)];
+            const gerencias = await User.find({ role: "gerencia" }).select("_id");
+            const admins = await User.find({ role: "admin" }).select("_id");
+            const allowed = [
+                userId,
+                ...supervisors.map(u => u._id),
+                ...gerencias.map(u => u._id),
+                ...admins.map(u => u._id)
+            ];
             filter = { createdBy: { $in: allowed } };
         } else {
             filter = { createdBy: userId };

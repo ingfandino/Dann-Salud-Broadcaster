@@ -3,13 +3,15 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { BarChart2, MessageSquare, Users, LogOut, SquareUserRound, ClipboardList } from "lucide-react";
 import { API_URL } from "../config.js";
+import { getWhatsappStatus } from "../services/api";
 
 export default function Dashboard() {
     const { user, token, logout } = useAuth();
+    const navigate = useNavigate();
 
     const [metrics, setMetrics] = useState({
         mensajesHoy: 0,
@@ -95,10 +97,27 @@ export default function Dashboard() {
                     {navLinks[user?.role]?.map((link, idx) => {
                         const isBulkMessages = link.label === "Mensajería Masiva";
 
+                        const handleClick = async (e) => {
+                            if (isBulkMessages) {
+                                e.preventDefault();
+                                try {
+                                    const status = await getWhatsappStatus();
+                                    if (status?.connected) {
+                                        navigate('/bulk-messages');
+                                    } else {
+                                        navigate('/qr-link');
+                                    }
+                                } catch {
+                                    navigate('/qr-link');
+                                }
+                            }
+                        };
+
                         return (
                             <motion.div whileHover={{ scale: 1.05 }} key={idx}>
                                 <Link
                                     to={link.to}
+                                    onClick={handleClick}
                                     className={`relative flex items-center gap-3 px-4 py-2 rounded-lg transition overflow-hidden
                         ${isBulkMessages
                                             ? "text-black font-semibold bg-yellow-400 border border-yellow-600 shadow-md under-construction"

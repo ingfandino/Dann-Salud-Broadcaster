@@ -54,4 +54,8 @@ const sendJobSchema = new mongoose.Schema({
     },
 }, { timestamps: true });
 
+// Índices para acelerar búsquedas y scheduler
+sendJobSchema.index({ status: 1, scheduledFor: 1 });
+sendJobSchema.index({ createdBy: 1, updatedAt: -1 });
+
 module.exports = mongoose.model("SendJob", sendJobSchema);

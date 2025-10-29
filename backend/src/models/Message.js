@@ -41,4 +41,9 @@ const messageSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+// Índices para acelerar consultas de métricas y progreso
+messageSchema.index({ job: 1, status: 1 });
+messageSchema.index({ status: 1 });
+messageSchema.index({ direction: 1 });
+
 module.exports = mongoose.model("Message", messageSchema);

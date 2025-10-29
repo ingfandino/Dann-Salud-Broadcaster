@@ -9,9 +9,10 @@ const { requireAuth } = require("../middlewares/authMiddleware");
 const { createContactValidator } = require("../validators/contactValidator");
 const validateRequest = require("../middlewares/validateRequest");
 
+const MAX_MB = Number(process.env.CONTACTS_IMPORT_MAX_MB || 50);
 const upload = multer({
     dest: "uploads/",
-    limits: { fileSize: 5 * 1024 * 1024 },
+    limits: { fileSize: MAX_MB * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
         const allowedMimes = [
             "text/csv",
@@ -46,9 +47,20 @@ router.delete("/:id", requireAuth, async (req, res) => {
     await contactController.deleteContact(req, res);
 });
 
-// Import masivo
-router.post("/import", requireAuth, upload.single("file"), async (req, res) => {
-    await contactController.importContacts(req, res);
+// Import masivo (con manejo explícito de errores de Multer)
+router.post("/import", requireAuth, (req, res) => {
+    upload.single("file")(req, res, async (err) => {
+        if (err) {
+            if (err.name === "MulterError" && err.code === "LIMIT_FILE_SIZE") {
+                return res.status(400).json({ error: `Archivo demasiado grande. Límite: ${MAX_MB}MB` });
+            }
+            if (err.message && /Formato inválido/i.test(err.message)) {
+                return res.status(400).json({ error: err.message });
+            }
+            return res.status(400).json({ error: "No se pudo procesar el archivo subido" });
+        }
+        await contactController.importContacts(req, res);
+    });
 });
 
 // Logs
