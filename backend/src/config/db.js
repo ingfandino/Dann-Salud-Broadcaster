@@ -2,9 +2,17 @@
 
 const mongoose = require("mongoose");
 const logger = require("../utils/logger");
+const { envConfig } = require("./index");
 
 const connectDB = async () => {
     try {
+        // Verificar que tenemos la URI de MongoDB
+        if (!envConfig.MONGO_URI) {
+            throw new Error("MONGODB_URI no está configurado en las variables de entorno");
+        }
+        
+        logger.info(`🔌 Conectando a MongoDB: ${envConfig.MONGO_URI.replace(/\/\/.*:.*@/, '//****:****@')}`);
+        
         // Opciones optimizadas para entorno local en producción
         const options = {
             serverSelectionTimeoutMS: 5000, // Timeout más corto para entorno local
@@ -13,7 +21,7 @@ const connectDB = async () => {
             minPoolSize: 10, // Conexiones mínimas para respuesta rápida
         };
         
-        const conn = await mongoose.connect(process.env.MONGO_URI, options);
+        const conn = await mongoose.connect(envConfig.MONGO_URI, options);
         logger.info(`✅ MongoDB conectado: ${conn.connection.host}`);
         
         // Manejadores de eventos para monitorear la conexión

@@ -50,7 +50,7 @@ whatsappEvents.on("message", async (msg) => {
 });
 
 // Cerrar sesión
-exports.logout = async (req, res) => {
+const logout = async (req, res) => {
     try {
         const client = getWhatsappClient();
         // 1) Logout del cliente si existe
@@ -84,7 +84,7 @@ exports.logout = async (req, res) => {
 };
 
 // Forzar nueva sesión
-exports.relink = async (req, res) => {
+const relink = async (req, res) => {
     try {
         await forceNewSession();
         res.json({ message: "Reiniciando sesión de WhatsApp, escanee el nuevo QR" });
@@ -95,7 +95,7 @@ exports.relink = async (req, res) => {
 };
 
 // 🔍 Estado actual del cliente
-exports.getStatus = async (req, res) => {
+const getStatus = async (req, res) => {
     try {
         res.json({
             connected: isReady(),

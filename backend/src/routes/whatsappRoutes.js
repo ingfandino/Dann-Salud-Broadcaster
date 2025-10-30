@@ -3,27 +3,26 @@
 const express = require("express");
 const router = express.Router();
 const { whatsappEvents, isReady, getCurrentQR } = require("../config/whatsapp");
-const { authenticate } = require('../middlewares/auth');
-
-const { relink, logout, getStatus } = require("../controllers/whatsappController");
+const { requireAuth } = require('../middlewares/authMiddleware');
+const whatsappController = require("../controllers/whatsappController");
 const { permit } = require("../middlewares/roleMiddleware");
 const logger = require("../utils/logger");
 
 let lastQR = null;
 
 // Ruta para inicializar la conexión
-router.get('/init', authenticate, whatsappController.init);
+router.get('/init', requireAuth, whatsappController.init);
 
 // Ruta para verificar el estado
-router.get('/status', authenticate, whatsappController.getStatus);
+router.get('/status', requireAuth, whatsappController.getStatus);
 
 // Ruta para obtener el QR
-router.get("/qr", authenticate, async (req, res) => {
+router.get("/qr", requireAuth, async (req, res) => {
     try {
         if (lastQR) {
             return res.json({ qr: lastQR });
         }
-        const qr = whatsappController.getCurrentQR();
+        const qr = getCurrentQR();
         if (qr) {
             return res.json({ qr });
         }
@@ -35,7 +34,7 @@ router.get("/qr", authenticate, async (req, res) => {
 });
 
 // 🔁 Forzar nueva sesión / refrescar QR
-router.post("/relink", permit("admin"), relink);
-router.post("/logout", permit("admin"), logout);
+router.post("/relink", requireAuth, permit("admin"), whatsappController.relink);
+router.post("/logout", requireAuth, permit("admin"), whatsappController.logout);
 
 module.exports = router;

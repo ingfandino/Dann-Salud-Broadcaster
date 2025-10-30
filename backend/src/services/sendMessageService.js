@@ -12,6 +12,22 @@ const logger = require("../utils/logger");
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// ✅ CORRECCIÓN: Control de tasa global para evitar rate limiting de WhatsApp
+const MESSAGE_RATE_LIMITER = {
+    lastMessageTime: 0,
+    minIntervalMs: 2000, // Mínimo 2 segundos entre mensajes a nivel global
+};
+
+async function throttleMessage() {
+    const now = Date.now();
+    const elapsed = now - MESSAGE_RATE_LIMITER.lastMessageTime;
+    if (elapsed < MESSAGE_RATE_LIMITER.minIntervalMs) {
+        const waitTime = MESSAGE_RATE_LIMITER.minIntervalMs - elapsed;
+        await delay(waitTime);
+    }
+    MESSAGE_RATE_LIMITER.lastMessageTime = Date.now();
+}
+
 async function getConfig() {
     let config = await SendConfig.findOne();
     if (!config) {
@@ -168,6 +184,9 @@ async function processJob(jobId) {
 
         let wasSent = false;
         try {
+            // ✅ CORRECCIÓN: Aplicar throttling global antes de enviar
+            await throttleMessage();
+            
             let attempt = 0;
             let sent = false;
             let lastError = null;
@@ -182,7 +201,7 @@ async function processJob(jobId) {
                     lastError = err;
                     const msg = String(err.message || "").toLowerCase();
                     if (msg.includes("rate")) {
-                        const backoff = 1000 * Math.pow(2, attempt - 1);
+                        const backoff = 2000 * Math.pow(2, attempt - 1); // ✅ Aumentar backoff inicial
                         logger.warn(`⚠️ Rate limit, reintento ${attempt} en ${backoff}ms`);
                         await delay(backoff);
                     } else {

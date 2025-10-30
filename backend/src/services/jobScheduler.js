@@ -6,8 +6,14 @@ const { emitJobsUpdate } = require("../config/socket");
 const logger = require("../utils/logger");
 
 const CHECK_INTERVAL = 15 * 1000;
-const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_JOBS || 4);
+// ✅ CORRECCIÓN: Reducir concurrencia para evitar sobrecarga
+const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_JOBS || 2);
 const activeJobs = new Set();
+const jobStartTimes = new Map(); // Track cuando empezó cada job
+
+// ✅ CORRECCIÓN: Monitoreo de salud del sistema
+let systemOverloaded = false;
+let lastHealthCheck = Date.now();
 
 async function claimOneJob() {
     const now = new Date();
@@ -22,14 +28,56 @@ async function claimOneJob() {
     return job;
 }
 
+// ✅ CORRECCIÓN: Verificar salud del sistema
+function checkSystemHealth() {
+    const now = Date.now();
+    
+    // Check cada 30 segundos
+    if (now - lastHealthCheck < 30000) return;
+    lastHealthCheck = now;
+    
+    // Verificar si hay jobs atascados (más de 1 hora ejecutando)
+    let stuckJobs = 0;
+    for (const [jobId, startTime] of jobStartTimes.entries()) {
+        if (now - startTime > 3600000) { // 1 hora
+            stuckJobs++;
+            logger.warn(`⚠️ Job ${jobId} lleva más de 1 hora ejecutando`);
+        }
+    }
+    
+    // Verificar uso de memoria
+    const memUsage = process.memoryUsage();
+    const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+    const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
+    
+    if (heapUsedMB > 1024) { // Más de 1GB
+        logger.warn(`⚠️ Alto uso de memoria: ${heapUsedMB}MB / ${heapTotalMB}MB`);
+        systemOverloaded = true;
+    } else if (heapUsedMB < 512) {
+        systemOverloaded = false;
+    }
+    
+    logger.info(`💊 Health Check - Jobs activos: ${activeJobs.size}/${MAX_CONCURRENT}, Jobs atascados: ${stuckJobs}, Memoria: ${heapUsedMB}MB, Sobrecarga: ${systemOverloaded}`);
+}
+
 async function processJobs() {
     try {
+        // ✅ CORRECCIÓN: Verificar salud del sistema antes de procesar
+        checkSystemHealth();
+        
+        // ✅ CORRECCIÓN: No procesar nuevos jobs si el sistema está sobrecargado
+        if (systemOverloaded) {
+            logger.warn("⚠️ Sistema sobrecargado, pausando procesamiento de nuevos jobs");
+            return;
+        }
+        
         // Rellenar capacidad disponible
         while (activeJobs.size < MAX_CONCURRENT) {
             const job = await claimOneJob();
             if (!job) break;
 
             activeJobs.add(String(job._id));
+            jobStartTimes.set(String(job._id), Date.now()); // Track start time
             logger.info(`📌 Reclamado y lanzando job ${job._id} (activos: ${activeJobs.size}/${MAX_CONCURRENT})`);
 
             try { emitJobsUpdate(job); } catch (e) {
@@ -38,6 +86,7 @@ async function processJobs() {
 
             // Lanzar en background, liberar slot al terminar
             (async () => {
+                const jobIdStr = String(job._id);
                 try {
                     await processJob(job._id);
                 } catch (err) {
@@ -50,7 +99,8 @@ async function processJobs() {
                     } catch (emitErr) {
                         logger.warn("⚠️ No se pudo emitir jobs:update al finalizar", { error: emitErr?.message });
                     }
-                    activeJobs.delete(String(job._id));
+                    activeJobs.delete(jobIdStr);
+                    jobStartTimes.delete(jobIdStr); // ✅ Limpiar tracking
                 }
             })();
         }

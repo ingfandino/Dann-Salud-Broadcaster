@@ -31,6 +31,12 @@ class ConnectionManager {
     try {
       logger.info(`[ConnectionManager] Procesando conexión para usuario ${userId} (${this.activeConnections}/${this.maxConcurrent} conexiones activas)`);
       
+      // ✅ CORRECCIÓN: Delay aleatorio entre 1-3 segundos antes de inicializar
+      // Esto evita que WhatsApp detecte múltiples conexiones simultáneas desde la misma IP
+      const randomDelay = 1000 + Math.random() * 2000; // 1-3 segundos
+      logger.info(`[ConnectionManager] Esperando ${Math.round(randomDelay)}ms antes de inicializar...`);
+      await new Promise(r => setTimeout(r, randomDelay));
+      
       const client = await this.initializeClient(userId);
       resolve(client);
     } catch (error) {
@@ -38,7 +44,8 @@ class ConnectionManager {
       reject(error);
     } finally {
       this.activeConnections--;
-      this.processQueue(); // Procesar siguiente en la cola
+      // ✅ CORRECCIÓN: Delay adicional de 2 segundos antes de procesar siguiente
+      setTimeout(() => this.processQueue(), 2000);
     }
   }
 

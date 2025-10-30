@@ -47,7 +47,11 @@ function queueConnection(userId) {
 }
 
 // Mapa de clientes por usuario
-const clients = new Map(); // userId -> { client, ready, currentQR, qrTimeout }
+const clients = new Map(); // userId -> { client, ready, currentQR, qrTimeout, lastActivity }
+
+// Cleanup de clientes inactivos cada 30 minutos
+const CLEANUP_INTERVAL = 30 * 60 * 1000;
+const INACTIVITY_TIMEOUT = 60 * 60 * 1000; // 1 hora de inactividad
 
 function getSessionPathForUser(userId) {
   const base = process.env.WHATSAPP_SESSION_BASE || path.resolve(process.cwd(), ".wwebjs_auth_multi");
@@ -56,10 +60,28 @@ function getSessionPathForUser(userId) {
 }
 
 async function initClientForUser(userId) {
-  const existing = clients.get(String(userId));
+  const userIdStr = String(userId);
+  const existing = clients.get(userIdStr);
   const room = `user_${userId}`;
+  
+  // ✅ CORRECCIÓN: Prevenir inicializaciones concurrentes
+  if (existing?.initializing) {
+    logger.warn(`[WA][${userId}] Ya hay una inicialización en progreso, esperando...`);
+    return existing.client;
+  }
+  
+  // ✅ CORRECCIÓN: Limpiar cliente existente adecuadamente
   if (existing?.client) {
+    logger.info(`[WA][${userId}] Limpiando cliente existente antes de reinicializar...`);
     try {
+      // Limpiar event listeners antes de destruir
+      if (existing.eventListeners) {
+        existing.eventListeners.forEach(({ event, handler }) => {
+          try {
+            existing.client.removeListener(event, handler);
+          } catch (e) {}
+        });
+      }
       await existing.client.destroy();
     } catch (error) {
       logger.warn(`[WA][${userId}] Error al destruir cliente existente:`, error.message);
@@ -72,61 +94,130 @@ async function initClientForUser(userId) {
     currentQR: null,
     qrTimeout: null,
     reconnectAttempts: 0,
-    maxReconnectAttempts: 3
+    maxReconnectAttempts: 3,
+    lastActivity: Date.now(),
+    eventListeners: [], // Para rastrear listeners y poder limpiarlos
+    initializing: true // Flag para prevenir inicializaciones concurrentes
   };
 
-  clients.set(String(userId), state);
+  clients.set(userIdStr, state);
 
-  // Configuración de Puppeteer...
+  // ✅ CORRECCIÓN: Generar User-Agent único por usuario para evitar detección de WhatsApp
+  const userAgentVariations = [
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+  ];
+  
+  // Seleccionar User-Agent basado en hash del userId para consistencia
+  const userIdHash = String(userId).split('').reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0);
+  const userAgent = userAgentVariations[Math.abs(userIdHash) % userAgentVariations.length];
+
+  // Configuración de Puppeteer optimizada para Linux servidor
   const puppeteerArgs = [
     "--no-sandbox",
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
     "--no-zygote",
+    "--single-process", // Importante para servidores sin GUI
+    "--disable-gpu",
+    "--disable-web-security",
+    "--disable-features=IsolateOrigins,site-per-process",
+    "--disable-blink-features=AutomationControlled",
     "--ignore-certificate-errors",
+    "--disable-extensions",
+    "--disable-default-apps",
+    "--mute-audio",
+    "--no-first-run",
+    `--user-agent=${userAgent}` // User-Agent único por usuario
   ];
 
-  if (process.env.HTTPS_PROXY) {
-    puppeteerArgs.push(`--proxy-server=${process.env.HTTPS_PROXY}`);
+  // ✅ CORRECCIÓN: Soporte para proxy por usuario (variable de entorno)
+  // Formato: PROXY_USER_<userId>=http://proxy.com:8080 (sin autenticación para proxies locales)
+  const userProxy = process.env[`PROXY_USER_${userId}`] || process.env.HTTPS_PROXY;
+  
+  if (userProxy) {
+    try {
+      const proxyUrl = new URL(userProxy);
+      const proxyHost = `${proxyUrl.hostname}:${proxyUrl.port}`;
+      
+      puppeteerArgs.push(`--proxy-server=${proxyHost}`);
+      logger.info(`[WA][${userId}] Usando proxy: ${proxyHost}`);
+    } catch (error) {
+      logger.error(`[WA][${userId}] Error parseando URL del proxy:`, error.message);
+      logger.error(`[WA][${userId}] Proxy configurado: ${userProxy}`);
+      // Intentar usar el proxy tal cual
+      puppeteerArgs.push(`--proxy-server=${userProxy}`);
+    }
   }
 
   const puppeteerConfig = {
     headless: true,
     args: puppeteerArgs,
-    timeout: 60000 // Aumentar tiempo de espera
+    timeout: 60000,
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false
   };
 
+  // Solo usar executablePath si está explícitamente configurado
+  // Puppeteer usará su propia versión de Chromium si no se especifica
   if (process.env.WHATSAPP_CHROME_PATH) {
     puppeteerConfig.executablePath = process.env.WHATSAPP_CHROME_PATH;
+    logger.info(`[WA][${userId}] Usando Chrome personalizado: ${process.env.WHATSAPP_CHROME_PATH}`);
+  } else {
+    logger.info(`[WA][${userId}] Usando Chromium de Puppeteer (descarga automática)`);
   }
 
-  const client = new Client({
+  const clientConfig = {
     authStrategy: new LocalAuth({
       clientId: String(userId),
       dataPath: getSessionPathForUser(userId)
     }),
     puppeteer: puppeteerConfig,
+    // ✅ CORRECCIÓN: Deshabilitar webVersionCache para evitar errores de red
+    // WhatsApp Web.js usará la versión más reciente disponible localmente
     webVersionCache: {
-      type: 'remote',
-      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+      type: 'none'
     }
-  });
+  };
+  
+  const client = new Client(clientConfig);
 
   // Manejo de eventos del cliente
-  client.on('qr', (qr) => {
+  const onQr = (qr) => {
+    state.lastActivity = Date.now();
+    
+    // ✅ CORRECCIÓN CRÍTICA: Ignorar QRs después de estar conectado
+    if (state.ready) {
+      logger.warn(`[WA][${userId}] QR recibido pero cliente ya está Ready, ignorando (comportamiento normal de WhatsApp después de autenticar)`);
+      return;
+    }
+    
     logger.info(`[WA][${userId}] QR recibido`);
     state.currentQR = qr;
-    state.ready = false;
-    clearTimeout(state.qrTimeout);
-
+    
+    // ✅ CORRECCIÓN: Cancelar timeout anterior si existe antes de crear uno nuevo
+    if (state.qrTimeout) {
+      clearTimeout(state.qrTimeout);
+      state.qrTimeout = null;
+    }
+    
     try {
-      getIO().to(room).emit('qr', { qr });
+      getIO().to(room).emit('qr', qr);
     } catch (error) {
       logger.error(`[WA][${userId}] Error emitiendo evento QR:`, error.message);
     }
 
-    // Configurar expiración del QR
+    // Configurar expiración del QR (60 segundos)
     state.qrTimeout = setTimeout(() => {
+      // ✅ CORRECCIÓN: No regenerar si ya está conectado
+      if (state.ready) {
+        logger.info(`[WA][${userId}] QR expiró pero cliente ya está conectado, ignorando`);
+        return;
+      }
+      
       logger.warn(`[WA][${userId}] QR expirado, regenerando...`);
       try {
         getIO().to(room).emit('qr_expired');
@@ -135,21 +226,43 @@ async function initClientForUser(userId) {
         logger.error(`[WA][${userId}] Error manejando expiración de QR:`, error.message);
       }
     }, 60000);
-  });
+  };
+  client.on('qr', onQr);
+  state.eventListeners.push({ event: 'qr', handler: onQr });
 
-  client.on('ready', () => {
+  const onReady = () => {
+    // ✅ CORRECCIÓN: Prevenir ejecuciones múltiples del mismo evento
+    if (state.ready) {
+      logger.warn(`[WA][${userId}] Ready ya procesado, ignorando evento duplicado`);
+      return;
+    }
+    
+    state.lastActivity = Date.now();
     logger.info(`[WA][${userId}] Ready`);
     state.ready = true;
     state.currentQR = null;
     state.reconnectAttempts = 0; // Reiniciar contador en conexión exitosa
+    
+    // ✅ CORRECCIÓN CRÍTICA: Cancelar timeout del QR cuando se conecta exitosamente
+    if (state.qrTimeout) {
+      clearTimeout(state.qrTimeout);
+      state.qrTimeout = null;
+      logger.info(`[WA][${userId}] Timeout de QR cancelado (conexión exitosa)`);
+    }
+    
     try {
       getIO().to(room).emit('ready');
     } catch (error) {
       logger.error(`[WA][${userId}] Error emitiendo evento ready:`, error.message);
     }
-  });
+  };
+  
+  // ✅ CORRECCIÓN CRÍTICA: Usar .once() para ready ya que solo debe ejecutarse una vez
+  client.once('ready', onReady);
+  state.eventListeners.push({ event: 'ready', handler: onReady });
 
-  client.on('message', async (msg) => {
+  const onMessage = async (msg) => {
+    state.lastActivity = Date.now();
     try {
       if (msg.fromMe) return;
 
@@ -216,20 +329,30 @@ async function initClientForUser(userId) {
     } catch (err) {
       logger.error(`[WA][${userId}] Error procesando mensaje:`, err.message);
     }
-  });
+  };
+  client.on('message', onMessage);
+  state.eventListeners.push({ event: 'message', handler: onMessage });
 
-  client.on('disconnected', async (reason) => {
+  const onDisconnected = async (reason) => {
     logger.warn(`[WA][${userId}] Disconnected: ${reason}`);
     state.ready = false;
 
-    // Lógica de reconexión automática
+    // ✅ CORRECCIÓN: No reconectar en ciertos casos
+    // LOGOUT es una desconexión intencional o conflicto de sesión
+    if (reason === 'LOGOUT' || reason === 'CONFLICT') {
+      logger.warn(`[WA][${userId}] Desconexión por ${reason}, no se reintentará automáticamente`);
+      state.reconnectAttempts = state.maxReconnectAttempts; // Prevenir más intentos
+      return;
+    }
+
+    // Lógica de reconexión automática solo para desconexiones accidentales
     if (state.reconnectAttempts < state.maxReconnectAttempts) {
       state.reconnectAttempts++;
       const delay = Math.min(1000 * Math.pow(2, state.reconnectAttempts), 30000); // Backoff exponencial
       logger.info(`[WA][${userId}] Intentando reconexión ${state.reconnectAttempts}/${state.maxReconnectAttempts} en ${delay}ms...`);
 
       setTimeout(() => {
-        if (!state.ready) {
+        if (!state.ready && !state.initializing) {
           initClientForUser(userId).catch(err => {
             logger.error(`[WA][${userId}] Error en reconexión:`, err.message);
           });
@@ -238,19 +361,39 @@ async function initClientForUser(userId) {
     } else {
       logger.error(`[WA][${userId}] Máximo de intentos de reconexión alcanzado`);
     }
-  });
+  };
+  client.on('disconnected', onDisconnected);
+  state.eventListeners.push({ event: 'disconnected', handler: onDisconnected });
 
-  client.on('auth_failure', (msg) => {
+  const onAuthFailure = (msg) => {
     logger.error(`[WA][${userId}] Error de autenticación:`, msg);
     state.ready = false;
-  });
+  };
+  client.on('auth_failure', onAuthFailure);
+  state.eventListeners.push({ event: 'auth_failure', handler: onAuthFailure });
 
   try {
     state.client = client;
     await client.initialize();
+    state.initializing = false; // ✅ CORRECCIÓN: Marcar como no inicializando
+    logger.info(`[WA][${userId}] Cliente inicializado exitosamente`);
     return client;
   } catch (error) {
-    logger.error(`[WA][${userId}] Error al inicializar cliente:`, error.message);
+    state.initializing = false; // ✅ CORRECCIÓN: Marcar como no inicializando incluso si falla
+    logger.error(`[WA][${userId}] ❌ Error al inicializar cliente:`);
+    logger.error(`[WA][${userId}] Mensaje: ${error.message || 'Sin mensaje'}`);
+    logger.error(`[WA][${userId}] Nombre: ${error.name || 'Sin nombre'}`);
+    logger.error(`[WA][${userId}] Código: ${error.code || 'Sin código'}`);
+    if (error.stack) {
+      logger.error(`[WA][${userId}] Stack:`, error.stack.split('\n').slice(0, 5).join('\n'));
+    }
+    // Log adicional si hay más propiedades
+    const errorKeys = Object.keys(error).filter(k => !['message', 'name', 'stack', 'code'].includes(k));
+    if (errorKeys.length > 0) {
+      logger.error(`[WA][${userId}] Propiedades adicionales:`, errorKeys.map(k => `${k}=${error[k]}`).join(', '));
+    }
+    // Remover del mapa si falla completamente
+    clients.delete(String(userId));
     throw error;
   }
 }
@@ -278,12 +421,19 @@ function getCurrentQR(userId) {
 async function forceNewSessionForUser(userId) {
   logger.info(`[WA][${userId}] Forzando nueva sesión...`);
   const s = getState(userId);
+  
+  // ✅ CORRECCIÓN: No destruir si ya está conectado y listo
+  if (s?.ready && s?.client) {
+    logger.warn(`[WA][${userId}] Cliente ya está conectado y listo, ignorando forceNewSession`);
+    return;
+  }
+  
   if (s?.client) {
     try { await s.client.destroy(); } catch (e) { logger.warn(`[WA][${userId}] destroy error: ${e?.message}`); }
     s.client = null;
   }
   if (s?.qrTimeout) { clearTimeout(s.qrTimeout); s.qrTimeout = null; }
-  s && (s.ready = false, s.currentQR = null);
+  s && (s.ready = false, s.currentQR = null, s.initializing = false);
   await new Promise(r => setTimeout(r, 1000));
   // Backoff y límites para re-init en caso de fallo
   const maxResets = Number(process.env.WA_RESET_MAX_ATTEMPTS || 2);
@@ -315,6 +465,78 @@ async function logoutForUser(userId) {
   await forceNewSessionForUser(userId);
 }
 
+// Destruir cliente y limpiar todos sus recursos
+async function destroyClient(userId) {
+  const state = clients.get(String(userId));
+  if (!state) return;
+
+  logger.info(`[WA][${userId}] Destruyendo cliente y limpiando recursos...`);
+
+  // Limpiar timeout de QR
+  if (state.qrTimeout) {
+    clearTimeout(state.qrTimeout);
+    state.qrTimeout = null;
+  }
+
+  // Remover todos los event listeners
+  if (state.client && state.eventListeners) {
+    state.eventListeners.forEach(({ event, handler }) => {
+      try {
+        state.client.removeListener(event, handler);
+      } catch (e) {
+        logger.warn(`[WA][${userId}] Error removiendo listener ${event}:`, e.message);
+      }
+    });
+    state.eventListeners = [];
+  }
+
+  // Destruir cliente de WhatsApp
+  if (state.client) {
+    try {
+      await state.client.destroy();
+    } catch (e) {
+      logger.warn(`[WA][${userId}] Error destruyendo cliente:`, e.message);
+    }
+    state.client = null;
+  }
+
+  // Remover del mapa
+  clients.delete(String(userId));
+  logger.info(`[WA][${userId}] Cliente destruido y recursos liberados`);
+}
+
+// Cleanup periódico de clientes inactivos
+async function cleanupInactiveClients() {
+  const now = Date.now();
+  const toRemove = [];
+
+  for (const [userId, state] of clients.entries()) {
+    const inactive = now - state.lastActivity;
+    if (inactive > INACTIVITY_TIMEOUT && !state.ready) {
+      logger.info(`[WA][${userId}] Cliente inactivo por ${Math.round(inactive / 60000)} min, marcando para limpieza`);
+      toRemove.push(userId);
+    }
+  }
+
+  for (const userId of toRemove) {
+    try {
+      await destroyClient(userId);
+    } catch (e) {
+      logger.error(`[WA][${userId}] Error en cleanup:`, e.message);
+    }
+  }
+
+  if (toRemove.length > 0) {
+    logger.info(`[WA] Cleanup completado: ${toRemove.length} cliente(s) removido(s). Activos: ${clients.size}`);
+  }
+}
+
+// Iniciar cleanup periódico
+if (process.env.NODE_ENV !== 'test') {
+  setInterval(cleanupInactiveClients, CLEANUP_INTERVAL);
+  logger.info(`[WA] Sistema de cleanup automático iniciado (cada ${CLEANUP_INTERVAL / 60000} min)`);
+}
+
 module.exports = {
   getOrInitClient,
   initClientForUser,
@@ -322,5 +544,9 @@ module.exports = {
   logoutForUser,
   isReady,
   getCurrentQR,
+  getState, // ✅ Exportar getState para verificar estado del cliente
   getSessionPathForUser,
+  destroyClient,
+  cleanupInactiveClients,
+  clients, // Exportar para debugging/monitoreo
 };

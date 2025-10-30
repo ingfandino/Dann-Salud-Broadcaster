@@ -48,10 +48,29 @@ exports.getQR = async (req, res) => {
   try {
     const userId = req.user._id;
     if (USE_MULTI) {
-      if (isReadyMulti(userId)) return res.json({ connected: true });
+      // ✅ CORRECCIÓN: Verificar si está conectado primero
+      if (isReadyMulti(userId)) {
+        return res.json({ connected: true });
+      }
+      
+      // Obtener QR actual si existe
       const qr = getCurrentQRMulti(userId);
-      if (qr) return res.json({ qr });
-      // Si no hay cliente aún, inicializar perezosamente para forzar emisión de QR
+      if (qr) {
+        return res.json({ qr });
+      }
+      
+      // ✅ CORRECCIÓN: Verificar si ya hay una sesión en proceso antes de inicializar
+      const { getState } = require("../services/whatsappManager");
+      const state = getState(userId);
+      
+      // Si ya existe un state (inicializando o esperando QR), no reinicializar
+      if (state) {
+        logger.debug(`[WA:me] Cliente ya existe para ${userId}, esperando QR...`);
+        return res.json({ qr: null, initializing: true });
+      }
+      
+      // Solo inicializar si no existe ningún cliente
+      logger.info(`[WA:me] Inicializando nuevo cliente para ${userId}`);
       await getOrInitClient(userId);
       return res.json({ qr: getCurrentQRMulti(userId) || null });
     } else {

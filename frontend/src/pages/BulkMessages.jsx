@@ -99,8 +99,9 @@ export default function BulkMessages() {
                 if (!mounted) return;
 
                 if (!status?.connected) {
-                    toast.info("No hay teléfono vinculado. Puedes vincular desde el botón 'Ir a vincular' en el panel de estado (⚙️).");
-                    // No redirigir automáticamente; permitir que el usuario decida
+                    toast.error("⚠️ Debes vincular tu WhatsApp para acceder a Mensajería Masiva");
+                    // ✅ CORRECCIÓN: Redirigir obligatoriamente a QR si no hay dispositivo vinculado
+                    navigate("/qr-link", { replace: true, state: { from: "bulk-messages" } });
                     return;
                 }
 
@@ -108,8 +109,9 @@ export default function BulkMessages() {
                 await loadJobs();
                 await loadTemplates();
             } catch (err) {
-                toast.warn("No fue posible comprobar el estado del teléfono. Mostrando Mensajería igualmente.");
-                // No redirigir automáticamente en errores transitorios
+                toast.error("Error verificando estado del dispositivo. Redirigiendo a vinculación...");
+                // ✅ CORRECCIÓN: En caso de error, también redirigir por seguridad
+                navigate("/qr-link", { replace: true, state: { from: "bulk-messages", error: true } });
             } finally {
                 if (mounted) setCheckingLink(false);
             }
