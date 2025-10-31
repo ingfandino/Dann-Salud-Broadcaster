@@ -97,7 +97,8 @@ async function initClientForUser(userId) {
     maxReconnectAttempts: 3,
     lastActivity: Date.now(),
     eventListeners: [], // Para rastrear listeners y poder limpiarlos
-    initializing: true // Flag para prevenir inicializaciones concurrentes
+    initializing: true, // Flag para prevenir inicializaciones concurrentes
+    intentionalLogout: false // Flag para prevenir reconexión después de logout intencional
   };
 
   clients.set(userIdStr, state);
@@ -342,6 +343,13 @@ async function initClientForUser(userId) {
     if (reason === 'LOGOUT' || reason === 'CONFLICT') {
       logger.warn(`[WA][${userId}] Desconexión por ${reason}, no se reintentará automáticamente`);
       state.reconnectAttempts = state.maxReconnectAttempts; // Prevenir más intentos
+      state.intentionalLogout = true; // Marcar como logout intencional
+      return;
+    }
+    
+    // ✅ CORRECCIÓN: No reconectar si fue un logout intencional del usuario
+    if (state.intentionalLogout) {
+      logger.warn(`[WA][${userId}] Sesión marcada como logout intencional, no se reconectará`);
       return;
     }
 
@@ -352,7 +360,7 @@ async function initClientForUser(userId) {
       logger.info(`[WA][${userId}] Intentando reconexión ${state.reconnectAttempts}/${state.maxReconnectAttempts} en ${delay}ms...`);
 
       setTimeout(() => {
-        if (!state.ready && !state.initializing) {
+        if (!state.ready && !state.initializing && !state.intentionalLogout) {
           initClientForUser(userId).catch(err => {
             logger.error(`[WA][${userId}] Error en reconexión:`, err.message);
           });
@@ -456,13 +464,44 @@ async function forceNewSessionForUser(userId) {
 }
 
 async function logoutForUser(userId) {
-  const s = getState(userId);
+  const userIdStr = String(userId);
+  logger.info(`[WA][${userId}] Iniciando logout completo...`);
+  
+  const s = getState(userIdStr);
+  
+  // 1. Cerrar sesión en WhatsApp (logout remoto)
   if (s?.client) {
-    try { await s.client.logout(); } catch { }
+    try {
+      await s.client.logout();
+      logger.info(`[WA][${userId}] Logout ejecutado en cliente`);
+    } catch (err) {
+      logger.warn(`[WA][${userId}] Error en logout del cliente:`, err.message);
+    }
   }
-  const p = getSessionPathForUser(userId);
-  try { if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true }); } catch { }
-  await forceNewSessionForUser(userId);
+  
+  // 2. Destruir cliente completamente (limpia listeners, timeouts, etc)
+  await destroyClient(userIdStr);
+  
+  // 3. Eliminar archivos de sesión del disco
+  const p = getSessionPathForUser(userIdStr);
+  try {
+    if (fs.existsSync(p)) {
+      fs.rmSync(p, { recursive: true, force: true });
+      logger.info(`[WA][${userId}] Sesión eliminada del disco: ${p}`);
+    }
+  } catch (err) {
+    logger.warn(`[WA][${userId}] Error eliminando sesión del disco:`, err.message);
+  }
+  
+  // 4. Emitir evento de logout exitoso
+  try {
+    getIO().to(`user_${userId}`).emit('logout_success');
+    logger.info(`[WA][${userId}] Evento logout_success emitido`);
+  } catch (err) {
+    logger.warn(`[WA][${userId}] Error emitiendo logout_success:`, err.message);
+  }
+  
+  logger.info(`[WA][${userId}] ✅ Logout completo finalizado`);
 }
 
 // Destruir cliente y limpiar todos sus recursos

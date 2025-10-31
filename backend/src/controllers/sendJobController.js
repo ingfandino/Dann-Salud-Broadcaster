@@ -9,6 +9,7 @@ const { addLog } = require("../services/logService");
 const ExcelJS = require("exceljs");
 const logger = require("../utils/logger");
 const { processJob } = require("../services/sendMessageService");
+const { emitJobProgress, emitJobsUpdate } = require("../config/socket");
 
 // 🔹 Crear un job
 exports.startJob = async (req, res) => {
@@ -19,6 +20,46 @@ exports.startJob = async (req, res) => {
 
         if (!contacts || contacts.length === 0) {
             return res.status(400).json({ error: "Debes especificar al menos un contacto" });
+        }
+
+        // ✅ CORRECCIÓN: Deduplicar contactos por teléfono antes de crear el job
+        const Contact = require('../models/Contact');
+        const contactDocs = await Contact.find({ _id: { $in: contacts } }).lean();
+        
+        const normalizePhone = (raw) => {
+            let digits = String(raw || "").replace(/\D/g, "");
+            digits = digits.replace(/^0+/, "");
+            if (digits.startsWith("15")) digits = digits.slice(2);
+            if (digits.startsWith("54") && !digits.startsWith("549")) {
+                digits = "549" + digits.slice(2);
+            }
+            if (!digits.startsWith("54")) {
+                digits = "549" + digits;
+            }
+            return digits;
+        };
+        
+        const seenPhones = new Set();
+        const uniqueContactIds = [];
+        let duplicatesRemoved = 0;
+        
+        for (const contact of contactDocs) {
+            const normalized = normalizePhone(contact.telefono);
+            if (!seenPhones.has(normalized)) {
+                seenPhones.add(normalized);
+                uniqueContactIds.push(contact._id);
+            } else {
+                duplicatesRemoved++;
+                logger.warn(`⚠️ Contacto duplicado eliminado del job: ${contact.telefono} (${normalized})`);
+            }
+        }
+        
+        if (duplicatesRemoved > 0) {
+            logger.info(`🔄 Eliminados ${duplicatesRemoved} contactos duplicados del job`);
+        }
+        
+        if (uniqueContactIds.length === 0) {
+            return res.status(400).json({ error: "No hay contactos válidos únicos para enviar" });
         }
 
         let finalMessage = "";
@@ -58,7 +99,7 @@ exports.startJob = async (req, res) => {
             createdBy,
             template: templateRef,
             message: finalMessage,
-            contacts,
+            contacts: uniqueContactIds, // ✅ Usar IDs únicos (sin duplicados)
             scheduledFor: scheduledFor || new Date(),
             status: "pendiente",
             delayMin: Math.max(0, delayMin),
@@ -66,8 +107,8 @@ exports.startJob = async (req, res) => {
             batchSize: Math.max(1, batchSize),
             pauseBetweenBatchesMinutes: Math.max(0, pauseBetweenBatchesMinutes),
             stats: {
-                total: contacts.length,
-                pending: contacts.length,
+                total: uniqueContactIds.length, // ✅ Total real sin duplicados
+                pending: uniqueContactIds.length,
                 sent: 0,
                 failed: 0,
             }
@@ -107,6 +148,25 @@ exports.pauseJob = async (req, res) => {
 
         await addLog({ tipo: "info", mensaje: `Job pausado: ${job._id}`, metadata: { jobId: job._id } });
         pushMetrics();
+        
+        // ✅ Emitir actualizaciones en tiempo real
+        try {
+            const total = job.contacts?.length || 0;
+            const progress = total > 0 ? ((job.currentIndex / total) * 100).toFixed(2) : 0;
+            
+            emitJobProgress(job._id.toString(), {
+                _id: job._id,
+                status: job.status,
+                progress: parseFloat(progress),
+                stats: job.stats,
+                currentIndex: job.currentIndex
+            });
+            
+            emitJobsUpdate({ ...job.toObject(), progress: parseFloat(progress) });
+        } catch (e) {
+            logger.warn(`Error emitiendo actualizaciones del job ${job._id}:`, e.message);
+        }
+        
         res.json(job);
     } catch (err) {
         logger.error("❌ Error pausando job:", err);
@@ -136,6 +196,24 @@ exports.resumeJob = async (req, res) => {
 
         await addLog({ tipo: "info", mensaje: `Job reanudado: ${job._id}`, metadata: { jobId: job._id } });
         pushMetrics();
+        
+        // ✅ Emitir actualizaciones en tiempo real
+        try {
+            const total = job.contacts?.length || 0;
+            const progress = total > 0 ? ((job.currentIndex / total) * 100).toFixed(2) : 0;
+            
+            emitJobProgress(job._id.toString(), {
+                _id: job._id,
+                status: job.status,
+                progress: parseFloat(progress),
+                stats: job.stats,
+                currentIndex: job.currentIndex
+            });
+            
+            emitJobsUpdate({ ...job.toObject(), progress: parseFloat(progress) });
+        } catch (e) {
+            logger.warn(`Error emitiendo actualizaciones del job ${job._id}:`, e.message);
+        }
 
         // Re-despachar procesamiento en background (no bloquear la respuesta)
         setTimeout(() => {
@@ -165,6 +243,13 @@ exports.cancelJob = async (req, res) => {
 
         // 🗑️ Eliminar mensajes asociados
         await Message.deleteMany({ job: job._id });
+        
+        // ✅ Emitir actualización antes de eliminar (para que UI actualice)
+        try {
+            emitJobsUpdate({ _id: job._id, status: "cancelado", deleted: true });
+        } catch (e) {
+            logger.warn(`Error emitiendo actualización de cancelación del job ${job._id}:`, e.message);
+        }
 
         // 🗑️ Eliminar el Job
         await SendJob.findByIdAndDelete(job._id);
@@ -230,6 +315,9 @@ exports.listJobs = async (req, res) => {
         } else if (role === "supervisor") {
             // mostrar jobs creados por usuarios del mismo numeroEquipo (incluyéndose)
             filter = { };
+        } else if (role === "revendedor") {
+            // ✅ Revendedores ven jobs creados por otros revendedores
+            filter = { };
         } else if (role === "asesor") {
             filter = { createdBy: userId };
         } else {
@@ -245,6 +333,9 @@ exports.listJobs = async (req, res) => {
         // Post-filtrado por equipo para supervisor (porque createdBy.numeroEquipo es en documento poblado)
         if (role === "supervisor") {
             jobs = jobs.filter(j => j.createdBy && j.createdBy.numeroEquipo === userEquipo);
+        } else if (role === "revendedor") {
+            // ✅ Filtrar solo jobs creados por revendedores
+            jobs = jobs.filter(j => j.createdBy && String(j.createdBy.role).toLowerCase() === "revendedor");
         }
 
         const enriched = jobs.map(job => {
@@ -293,6 +384,7 @@ exports.exportJobResultsExcel = async (req, res) => {
             { header: "Teléfono", key: "telefono", width: 18 },
             { header: "Mensaje", key: "mensaje", width: 50 },
             { header: "Estado", key: "estado", width: 15 },
+            { header: "Respondió", key: "respondio", width: 12 },
             { header: "Fecha", key: "fecha", width: 22 },
         ];
 
@@ -302,6 +394,7 @@ exports.exportJobResultsExcel = async (req, res) => {
                 telefono: msg.contact?.telefono || "",
                 mensaje: msg.contenido,
                 estado: msg.status,
+                respondio: msg.respondio ? "Sí" : "No",
                 fecha: msg.timestamp ? new Date(msg.timestamp).toLocaleString() : "",
             });
         });

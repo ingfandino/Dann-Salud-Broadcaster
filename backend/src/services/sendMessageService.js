@@ -3,12 +3,13 @@
 const SendConfig = require("../models/SendConfig");
 const Message = require("../models/Message");
 const SendJob = require("../models/SendJob");
-const { getOrInitClient, isReady: isReadyForUser } = require("./whatsappManager");
-const { getWhatsappClient, isReady: isReadySingle } = require("../config/whatsapp");
+const { getOrInitClient, isReady, sendMessage, USE_MULTI, USE_BAILEYS } = require("./whatsappUnified");
 const { emitJobProgress } = require("../config/socket");
 const { addLog } = require("../services/logService");
 const { parseSpintax } = require("../utils/spintax");
 const logger = require("../utils/logger");
+
+logger.info(`[SendMessageService] Usando ${USE_BAILEYS ? 'Baileys' : 'whatsapp-web.js'}, Multi: ${USE_MULTI}`);
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -38,7 +39,6 @@ async function getConfig() {
 }
 
 async function processJob(jobId) {
-    const USE_MULTI = process.env.USE_MULTI_SESSION === 'true';
     const config = await getConfig();
     const initialJob = await SendJob.findById(jobId).populate("contacts");
 
@@ -49,8 +49,8 @@ async function processJob(jobId) {
     }
 
     // ⚠️ Verificamos conexión con WhatsApp para el creador del job
-    const userId = initialJob.createdBy;
-    const readyNow = USE_MULTI ? isReadyForUser(userId) : isReadySingle();
+    const userId = USE_MULTI ? initialJob.createdBy : null;
+    const readyNow = isReady(userId);
     if (!readyNow) {
         logger.warn("⏸️ WhatsApp no está listo para el usuario; re-programando job como 'pendiente'", { userId, jobId });
         initialJob.status = "pendiente";
@@ -166,13 +166,11 @@ async function processJob(jobId) {
         if (seenPhones.has(toDigits)) {
             logger.warn(`⚠️ Duplicado en job: ${toDigits} ya fue procesado. Se omite.`);
             await addLog({ tipo: "warning", mensaje: `Duplicado en job omitido: ${toDigits}`, metadata: { jobId: initialJob._id, index: i } });
-            // actualizar progreso sin enviar
+            // ✅ CORRECCIÓN: No decrementar pending, solo avanzar currentIndex
+            // El duplicado no cuenta como enviado, fallido ni pendiente
             await SendJob.updateOne(
                 { _id: jobId },
                 {
-                    $inc: {
-                        "stats.pending": -1,
-                    },
                     $set: { currentIndex: i + 1 },
                 }
             );
@@ -194,8 +192,8 @@ async function processJob(jobId) {
             while (attempt < 3 && !sent) {
                 attempt++;
                 try {
-                    const userClient = USE_MULTI ? await getOrInitClient(userId) : getWhatsappClient();
-                    await userClient.sendMessage(to, messageText);
+                    // ✅ Usar wrapper unificado que funciona con Baileys y whatsapp-web.js
+                    await sendMessage(userId, to, messageText);
                     sent = true;
                 } catch (err) {
                     lastError = err;
@@ -283,7 +281,7 @@ async function processJob(jobId) {
         }
     }
 
-    const completedJob = await SendJob.findById(jobId);
+    const completedJob = await SendJob.findById(jobId).populate('createdBy');
     completedJob.status = "completado";
     completedJob.finishedAt = new Date();
     await completedJob.save();
@@ -301,6 +299,45 @@ async function processJob(jobId) {
         mensaje: `Job ${completedJob._id} completado`,
         metadata: { total: contactsToSend.length, sent: completedJob.stats.sent, failed: completedJob.stats.failed }
     });
+
+    // ✅ GENERAR REPORTES AUTOMÁTICAMENTE
+    try {
+        const Report = require('../models/Report');
+        const messages = await Message.find({ job: jobId }).populate('contact');
+        
+        let reportsGenerated = 0;
+        for (const msg of messages) {
+            const contact = msg.contact;
+            if (!contact) continue;
+
+            // Verificar si ya existe un reporte para este mensaje
+            const existing = await Report.findOne({ message: msg._id });
+            if (existing) continue;
+
+            const report = new Report({
+                fecha: msg.timestamp || msg.createdAt,
+                telefono: contact.telefono || "",
+                nombre: contact.nombre || "Sin nombre",
+                obraSocial: contact.obraSocial || "",
+                respondio: msg.respondio || false,
+                asesorNombre: completedJob.createdBy?.nombre || "N/A",
+                grupo: completedJob.createdBy?.numeroEquipo || "N/A",
+                job: completedJob._id,
+                contact: contact._id,
+                message: msg._id,
+                createdBy: completedJob.createdBy?._id,
+                campaignName: completedJob.name,
+                messageStatus: msg.status,
+            });
+
+            await report.save();
+            reportsGenerated++;
+        }
+        
+        logger.info(`📊 Generados ${reportsGenerated} reportes para campaña ${completedJob.name}`);
+    } catch (reportErr) {
+        logger.error("❌ Error generando reportes automáticos:", reportErr.message);
+    }
 }
 
 async function sendSingleMessage(userId, to, text) {

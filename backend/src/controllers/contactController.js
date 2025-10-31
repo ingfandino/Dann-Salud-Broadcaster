@@ -186,37 +186,13 @@ exports.importContacts = async (req, res) => {
             const existing = existingByPhone.get(String(normalizedPhone)) || null;
 
             if (existing) {
-                // Verificar si ya recibió mensajes salientes (por cualquier usuario)
-                const sentExists = await Message.exists({ contact: existing._id, direction: "outbound" });
-                if (sentExists) {
-                    warnings.push({
-                        telefono: normalizedPhone,
-                        tipo: "bloqueado_por_envio_previo",
-                        detalle: `El contacto ya recibió mensajes, no se puede re-importar`
-                    });
-                    invalid++;
-                    continue;
-                }
-
-                // Aceptar re-importación: actualizar/mergear extraData y datos básicos si vienen
-                const excludeKeys = new Set([phoneKey, nameKey, cuilKey]);
-                const existingExtra = existing.extraData instanceof Map
-                    ? Object.fromEntries(existing.extraData)
-                    : (existing.extraData || {});
-                const extraData = { ...existingExtra };
-                for (const [k, v] of Object.entries(rowData)) {
-                    if (!excludeKeys.has(k) && v !== undefined && v !== null && String(v).trim() !== "") {
-                        extraData[k] = String(v);
-                    }
-                }
-                if (nameVal && String(nameVal).trim() !== "") existing.nombre = String(nameVal);
-                if (cuilVal && String(cuilVal).trim() !== "") existing.cuil = String(cuilVal);
-                existing.extraData = extraData;
-                await existing.save();
-
-                // Contar como insertado (reutilizado) y agregar a respuesta
-                inserted++;
-                insertedContacts.push({ _id: existing._id, nombre: existing.nombre, telefono: existing.telefono });
+                // ✅ CORRECCIÓN: Rechazar contacto si ya existe en la BD (duplicado)
+                warnings.push({
+                    telefono: normalizedPhone,
+                    tipo: "duplicado_en_bd",
+                    detalle: `El contacto ya existe en la base de datos`
+                });
+                invalid++;
                 continue;
             }
 
