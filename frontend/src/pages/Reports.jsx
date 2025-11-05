@@ -5,82 +5,61 @@ import apiClient from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { toast } from "react-toastify";
 import logger from "../utils/logger";
 
-const USE_MOCK = false;
-
-// Helpers
-function formatDate(dateStr) {
+// ✅ Helpers
+function formatDateTime(dateStr) {
     const d = new Date(dateStr);
     if (Number.isNaN(d.getTime())) return "";
-    return d.toLocaleDateString("es-AR"); // dd/mm/aaaa
+    return d.toLocaleString("es-AR", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+    });
 }
+
 function toYMD(dateStr) {
     const d = new Date(dateStr);
     if (Number.isNaN(d.getTime())) return "";
-    return d.toISOString().split("T")[0]; // yyyy-mm-dd
-}
-
-// Mock generator
-function generateMockReports(n = 50) {
-    const obras = ["OSDE", "Swiss Medical", "Galeno", "Medicus", "OSF"];
-    const names = ["Ana Pérez", "Juan Gómez", "María López", "Carlos Díaz", "Lucía Ruiz"];
-    const asesores = ["Sofía", "Martín", "Luciano", "Valeria"];
-    const grupos = ["Grupo Norte", "Grupo Sur", "Grupo Oeste"];
-
-    const out = [];
-    const today = new Date();
-    for (let i = 0; i < n; i++) {
-        const daysBack = Math.floor(Math.random() * 20);
-        const d = new Date(today);
-        d.setDate(d.getDate() - daysBack);
-
-        const responded = Math.random() > 0.6; // ~40% no responde
-        out.push({
-            _id: `r_${i}`,
-            fecha: d.toISOString(),
-            telefono: "+54" + (900000000 + Math.floor(Math.random() * 9000000)).toString(),
-            nombre: names[i % names.length] + ` ${i}`,
-            obraSocial: obras[i % obras.length],
-            respondio: responded,
-            asesorNombre: asesores[i % asesores.length],
-            grupo: grupos[i % grupos.length],
-        });
-    }
-    return out;
+    return d.toISOString().split("T")[0];
 }
 
 export default function Reports() {
     const { user } = useAuth();
     const navigate = useNavigate();
 
-    const [reports, setReports] = useState([]);
+    const [campaigns, setCampaigns] = useState([]);
     const [filters, setFilters] = useState({
         startDate: "",
         endDate: "",
+        status: "",
         asesor: "",
-        grupo: "",
         q: "",
     });
     const [page, setPage] = useState(1);
-    const [perPage] = useState(10);
+    const [perPage] = useState(15);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        if (USE_MOCK) {
-            setReports(generateMockReports(80));
-        } else {
-            fetchReports();
-        }
-        // eslint-disable-next-line
+        fetchCampaigns();
     }, []);
 
-    const fetchReports = async () => {
+    const fetchCampaigns = async () => {
         try {
-            const res = await apiClient.get("/reports", { params: filters });
-            setReports(res.data || []);
+            setLoading(true);
+            // ✅ Obtener TODOS los jobs (sin filtro, respeta jerarquía en backend)
+            const res = await apiClient.get("/send-jobs");
+            setCampaigns(res.data || []);
             setPage(1);
         } catch (err) {
-            logger.error("❌ Error cargando reportes:", err);
+            logger.error("❌ Error cargando campañas:", err);
+            toast.error("Error cargando campañas");
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -88,84 +67,84 @@ export default function Reports() {
         setFilters({ ...filters, [e.target.name]: e.target.value });
     };
 
-    // Filtrado en memoria
+    // ✅ Filtrado en memoria por campaña
     const filtered = useMemo(() => {
-        const { startDate, endDate, asesor, grupo, q } = filters;
-        let out = [...reports];
+        const { startDate, endDate, status, asesor, q } = filters;
+        let out = [...campaigns];
 
         if (startDate) {
-            out = out.filter((r) => toYMD(r.fecha) >= startDate);
+            out = out.filter((c) => toYMD(c.scheduledFor || c.createdAt) >= startDate);
         }
         if (endDate) {
-            out = out.filter((r) => toYMD(r.fecha) <= endDate);
+            out = out.filter((c) => toYMD(c.scheduledFor || c.createdAt) <= endDate);
+        }
+        if (status) {
+            out = out.filter((c) => (c.status || "").toLowerCase() === status.toLowerCase());
         }
         if (asesor) {
-            out = out.filter((r) => (r.asesorNombre || "").toLowerCase().includes(asesor.toLowerCase()));
-        }
-        if (grupo) {
-            out = out.filter((r) => (r.grupo || "").toLowerCase().includes(grupo.toLowerCase()));
+            out = out.filter((c) => 
+                (c.createdBy?.nombre || "").toLowerCase().includes(asesor.toLowerCase())
+            );
         }
         if (q) {
             const qq = q.toLowerCase();
-            out = out.filter(
-                (r) =>
-                    (r.nombre || "").toLowerCase().includes(qq) ||
-                    (r.telefono || "").toLowerCase().includes(qq)
+            out = out.filter((c) =>
+                (c.name || "").toLowerCase().includes(qq) ||
+                (c.createdBy?.nombre || "").toLowerCase().includes(qq)
             );
         }
-        return out.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
-    }, [reports, filters]);
+        return out.sort((a, b) => 
+            new Date(b.scheduledFor || b.createdAt) - new Date(a.scheduledFor || a.createdAt)
+        );
+    }, [campaigns, filters]);
 
     const total = filtered.length;
     const totalPages = Math.max(1, Math.ceil(total / perPage));
     const current = filtered.slice((page - 1) * perPage, page * perPage);
 
-    // Exportar a Excel (.xls)
-    const exportXLS = () => {
-        if (filtered.length === 0) {
-            alert("No hay datos para exportar.");
-            return;
+    // ✅ Exportar Excel detallado de una campaña específica
+    const handleExportCampaign = async (jobId) => {
+        try {
+            const res = await apiClient.get(`/send-jobs/${jobId}/export`, {
+                responseType: "blob"
+            });
+            
+            const blob = new Blob([res.data], {
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.setAttribute("download", `campaña_${jobId}_detalle.xlsx`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+            
+            toast.success("✅ Excel descargado");
+        } catch (err) {
+            logger.error("Error descargando Excel:", err);
+            toast.error("Error descargando Excel");
         }
+    };
 
-        const headers = ["Fecha", "Teléfono", "Nombre", "Obra social", "¿Respondió?", "Asesor", "Grupo"];
+    // ✅ Mapeo de estados a colores
+    const statusColors = {
+        pendiente: "bg-blue-100 text-blue-800",
+        ejecutando: "bg-green-100 text-green-800",
+        pausado: "bg-yellow-100 text-yellow-800",
+        completado: "bg-emerald-100 text-emerald-800",
+        cancelado: "bg-red-100 text-red-800",
+        fallido: "bg-red-100 text-red-800"
+    };
 
-        const rows = filtered.map((r) => [
-            formatDate(r.fecha),
-            r.telefono ?? "",
-            r.nombre ?? "",
-            r.obraSocial ?? "",
-            r.respondio ? "Sí" : "No",
-            r.asesorNombre ?? "",
-            r.grupo ?? "",
-        ]);
-
-        const table =
-            "<table><thead><tr>" +
-            headers.map((h) => `<th>${h}</th>`).join("") +
-            "</tr></thead><tbody>" +
-            rows
-                .map(
-                    (row) =>
-                        "<tr>" +
-                        row.map((cell) => `<td>${(cell ?? "").toString().replace(/</g, "&lt;")}</td>`).join("") +
-                        "</tr>"
-                )
-                .join("") +
-            "</tbody></table>";
-
-        const html =
-            "<html xmlns:x='urn:schemas-microsoft-com:office:excel'><head><meta charset='utf-8'></head><body>" +
-            table +
-            "</body></html>";
-
-        const blob = new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        const nameSuffix = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-        a.href = url;
-        a.download = `reporte_mensajeria_${nameSuffix}.xls`;
-        a.click();
-        URL.revokeObjectURL(url);
+    const statusLabels = {
+        pendiente: "Pendiente",
+        ejecutando: "En ejecución",
+        pausado: "Pausada",
+        completado: "Completada",
+        cancelado: "Cancelada",
+        fallido: "Fallida"
     };
 
     return (
@@ -181,8 +160,8 @@ export default function Reports() {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.5 }}
                 >
-                    <h1 className="text-2xl font-bold">📑 Reporte de mensajería</h1>
-                    <p className="text-sm text-gray-600">Censo de contactos y respuesta por asesor</p>
+                    <h1 className="text-2xl font-bold">📊 Reporte de Campañas</h1>
+                    <p className="text-sm text-gray-600">Historial completo de campañas de mensajería</p>
                 </motion.div>
 
                 <motion.div
@@ -197,13 +176,6 @@ export default function Reports() {
                     >
                         ← Volver al Menú
                     </button>
-
-                    <button
-                        onClick={exportXLS}
-                        className="px-3 py-2 rounded bg-green-600 text-white hover:bg-green-700"
-                    >
-                        Exportar .xls
-                    </button>
                 </motion.div>
             </div>
 
@@ -214,72 +186,163 @@ export default function Reports() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1, duration: 0.4 }}
             >
-                <h2 className="font-semibold mb-2">Filtros</h2>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <input type="date" name="startDate" value={filters.startDate} onChange={handleChange}
-                        className="border p-2 rounded" />
-                    <input type="date" name="endDate" value={filters.endDate} onChange={handleChange}
-                        className="border p-2 rounded" />
-                    <input type="text" name="asesor" placeholder="Filtrar por asesor" value={filters.asesor}
-                        onChange={handleChange} className="border p-2 rounded" />
-                    <input type="text" name="grupo" placeholder="Filtrar por grupo" value={filters.grupo}
-                        onChange={handleChange} className="border p-2 rounded" />
-
-                    <input type="text" name="q" placeholder="Buscar por nombre o teléfono" value={filters.q}
-                        onChange={handleChange} className="border p-2 rounded md:col-span-2" />
-                    <div className="md:col-span-2 flex gap-2">
-                        <button onClick={() => { setPage(1); }} className="bg-blue-600 text-white px-4 py-2 rounded">
-                            Aplicar filtros
-                        </button>
-                        <button onClick={() => { setFilters({ startDate: "", endDate: "", asesor: "", grupo: "", q: "" }); setPage(1); }}
-                            className="bg-gray-200 px-4 py-2 rounded">
-                            Limpiar
-                        </button>
-                    </div>
+                <h2 className="font-semibold mb-3">🔍 Filtros</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                    <input 
+                        type="date" 
+                        name="startDate" 
+                        value={filters.startDate} 
+                        onChange={handleChange}
+                        placeholder="Desde"
+                        className="border p-2 rounded"
+                    />
+                    <input 
+                        type="date" 
+                        name="endDate" 
+                        value={filters.endDate} 
+                        onChange={handleChange}
+                        placeholder="Hasta"
+                        className="border p-2 rounded"
+                    />
+                    <select
+                        name="status"
+                        value={filters.status}
+                        onChange={handleChange}
+                        className="border p-2 rounded"
+                    >
+                        <option value="">Todos los estados</option>
+                        <option value="pendiente">Pendiente</option>
+                        <option value="ejecutando">En ejecución</option>
+                        <option value="pausado">Pausada</option>
+                        <option value="completado">Completada</option>
+                        <option value="cancelado">Cancelada</option>
+                        <option value="fallido">Fallida</option>
+                    </select>
+                    <input 
+                        type="text" 
+                        name="asesor" 
+                        placeholder="Buscar asesor" 
+                        value={filters.asesor}
+                        onChange={handleChange} 
+                        className="border p-2 rounded"
+                    />
+                    <input 
+                        type="text" 
+                        name="q" 
+                        placeholder="Buscar campaña..." 
+                        value={filters.q}
+                        onChange={handleChange} 
+                        className="border p-2 rounded lg:col-span-1"
+                    />
+                </div>
+                <div className="mt-3 flex gap-2">
+                    <button 
+                        onClick={fetchCampaigns} 
+                        className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                    >
+                        🔄 Actualizar
+                    </button>
+                    <button 
+                        onClick={() => { 
+                            setFilters({ startDate: "", endDate: "", status: "", asesor: "", q: "" }); 
+                            setPage(1); 
+                        }}
+                        className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300"
+                    >
+                        Limpiar filtros
+                    </button>
                 </div>
             </motion.div>
 
-            {/* Tabla */}
+            {/* Tabla de Campañas */}
             <motion.div
-                className="bg-white p-4 rounded shadow overflow-x-auto"
+                className="bg-white rounded shadow overflow-x-auto"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2, duration: 0.4 }}
             >
-                <table className="w-full border">
-                    <thead>
-                        <tr className="bg-gray-100">
-                            <th className="border p-2 text-left">Fecha</th>
-                            <th className="border p-2 text-left">Teléfono</th>
-                            <th className="border p-2 text-left">Nombre</th>
-                            <th className="border p-2 text-left">Obra social</th>
-                            <th className="border p-2 text-left">¿Respondió?</th>
-                            <th className="border p-2 text-left">Asesor</th>
-                            <th className="border p-2 text-left">Grupo</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {current.length > 0 ? (
-                            current.map((r) => (
-                                <tr key={r._id}>
-                                    <td className="border p-2">{formatDate(r.fecha)}</td>
-                                    <td className="border p-2">{r.telefono}</td>
-                                    <td className="border p-2">{r.nombre}</td>
-                                    <td className="border p-2">{r.obraSocial}</td>
-                                    <td className="border p-2">{r.respondio ? "Sí" : "No"}</td>
-                                    <td className="border p-2">{r.asesorNombre}</td>
-                                    <td className="border p-2">{r.grupo}</td>
-                                </tr>
-                            ))
-                        ) : (
-                            <tr>
-                                <td colSpan="7" className="p-4 text-center text-gray-500">
-                                    No hay datos disponibles
-                                </td>
+                {loading ? (
+                    <div className="p-8 text-center text-gray-500">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                        Cargando campañas...
+                    </div>
+                ) : (
+                    <table className="w-full border-collapse">
+                        <thead>
+                            <tr className="bg-gray-100 border-b">
+                                <th className="p-3 text-left text-sm font-semibold">Fecha/Hora</th>
+                                <th className="p-3 text-left text-sm font-semibold">Campaña</th>
+                                <th className="p-3 text-left text-sm font-semibold">Asesor</th>
+                                <th className="p-3 text-left text-sm font-semibold">Contactos</th>
+                                <th className="p-3 text-left text-sm font-semibold">Enviados</th>
+                                <th className="p-3 text-left text-sm font-semibold">Fallidos</th>
+                                <th className="p-3 text-left text-sm font-semibold">Estado</th>
+                                <th className="p-3 text-left text-sm font-semibold">Acciones</th>
                             </tr>
-                        )}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {current.length > 0 ? (
+                                current.map((campaign) => {
+                                    const stats = campaign.stats || { total: 0, sent: 0, failed: 0 };
+                                    const statusColor = statusColors[campaign.status] || "bg-gray-100 text-gray-800";
+                                    const statusLabel = statusLabels[campaign.status] || campaign.status;
+                                    
+                                    return (
+                                        <tr key={campaign._id} className="border-b hover:bg-gray-50">
+                                            <td className="p-3 text-sm">
+                                                {formatDateTime(campaign.scheduledFor || campaign.createdAt)}
+                                            </td>
+                                            <td className="p-3">
+                                                <div className="font-medium text-sm">{campaign.name}</div>
+                                            </td>
+                                            <td className="p-3 text-sm">
+                                                <div>{campaign.createdBy?.nombre || "N/A"}</div>
+                                                {campaign.createdBy?.numeroEquipo && (
+                                                    <div className="text-xs text-gray-500">
+                                                        Equipo {campaign.createdBy.numeroEquipo}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="p-3 text-sm text-center font-semibold">
+                                                {stats.total}
+                                            </td>
+                                            <td className="p-3 text-sm text-center">
+                                                <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
+                                                    ✅ {stats.sent}
+                                                </span>
+                                            </td>
+                                            <td className="p-3 text-sm text-center">
+                                                <span className="inline-flex items-center px-2 py-1 bg-red-100 text-red-800 rounded text-xs font-semibold">
+                                                    ❌ {stats.failed}
+                                                </span>
+                                            </td>
+                                            <td className="p-3 text-sm">
+                                                <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-semibold ${statusColor}`}>
+                                                    {statusLabel}
+                                                </span>
+                                            </td>
+                                            <td className="p-3 text-sm">
+                                                <button
+                                                    onClick={() => handleExportCampaign(campaign._id)}
+                                                    className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 flex items-center gap-1"
+                                                    title="Descargar Excel detallado"
+                                                >
+                                                    📥 Excel
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            ) : (
+                                <tr>
+                                    <td colSpan="8" className="p-8 text-center text-gray-500">
+                                        {loading ? "Cargando..." : "No hay campañas para mostrar"}
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                )}
             </motion.div>
 
             {/* Paginación */}
@@ -290,14 +353,26 @@ export default function Reports() {
                 transition={{ delay: 0.3, duration: 0.4 }}
             >
                 <div className="text-sm text-gray-600">
-                    Mostrando {Math.min((page - 1) * perPage + 1, total)} - {Math.min(page * perPage, total)} de {total}
+                    Mostrando <span className="font-semibold">{Math.min((page - 1) * perPage + 1, total)}</span> - <span className="font-semibold">{Math.min(page * perPage, total)}</span> de <span className="font-semibold">{total}</span> campañas
                 </div>
                 <div className="flex items-center gap-2">
-                    <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}
-                        className="px-3 py-1 rounded bg-gray-200 disabled:opacity-50">Anterior</button>
-                    <span className="px-2">{page} / {totalPages}</span>
-                    <button disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                        className="px-3 py-1 rounded bg-gray-200 disabled:opacity-50">Siguiente</button>
+                    <button 
+                        disabled={page <= 1} 
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        ← Anterior
+                    </button>
+                    <span className="px-3 text-sm">
+                        Página <span className="font-semibold">{page}</span> de <span className="font-semibold">{totalPages}</span>
+                    </span>
+                    <button 
+                        disabled={page >= totalPages} 
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        Siguiente →
+                    </button>
                 </div>
             </motion.div>
         </motion.div>

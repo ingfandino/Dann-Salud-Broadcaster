@@ -68,6 +68,8 @@ export function AuthProvider({ children }) {
             // Conectar socket si no está conectado
             try {
                 if (!socket.connected) socket.connect();
+                // Exponer socket globalmente para notificaciones
+                window.socket = socket;
             } catch {}
         } else {
             localStorage.removeItem("token");
@@ -75,6 +77,7 @@ export function AuthProvider({ children }) {
             // Desconectar socket si estaba conectado
             try {
                 if (socket.connected) socket.disconnect();
+                window.socket = null;
             } catch {}
         }
     }, [token]);

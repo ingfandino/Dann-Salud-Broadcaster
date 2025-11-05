@@ -11,7 +11,64 @@ const logger = require("../utils/logger");
 
 logger.info(`[SendMessageService] Usando ${USE_BAILEYS ? 'Baileys' : 'whatsapp-web.js'}, Multi: ${USE_MULTI}`);
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// 🛡️ ANTI-DETECCIÓN: Delays más humanos con distribución gaussiana
+function humanDelay(min, max) {
+    // Usar distribución normal en lugar de uniforme
+    const mean = (min + max) / 2;
+    const stdDev = (max - min) / 4;
+    
+    // Box-Muller transform para generar distribución normal
+    const u1 = Math.random();
+    const u2 = Math.random();
+    const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    
+    let result = mean + z * stdDev;
+    result = Math.max(min, Math.min(max, result)); // Clamp entre min y max
+    
+    return Math.floor(result);
+}
+
+// 🛡️ ANTI-DETECCIÓN: Simular tiempo de escritura basado en longitud del mensaje
+function calculateTypingTime(messageLength) {
+    // Humano promedio: 40-60 palabras por minuto = ~200-300 caracteres/minuto
+    // Pero con errores, pausas, correcciones: más lento
+    const baseCharsPerSecond = 3 + Math.random() * 2; // 3-5 chars/segundo
+    const typingTime = (messageLength / baseCharsPerSecond) * 1000;
+    
+    // Agregar variabilidad (distracciones, pausas para pensar)
+    const variability = 1 + (Math.random() * 0.5 - 0.25); // ±25%
+    
+    // Mínimo 2s, máximo 30s (nadie escribe más de 30s seguidos)
+    return Math.min(30000, Math.max(2000, typingTime * variability));
+}
+
+// 🛡️ ANTI-DETECCIÓN: Detectar si estamos en horario laboral
+function isWorkingHours() {
+    const now = new Date();
+    const hour = now.getHours();
+    const day = now.getDay(); // 0 = Domingo, 6 = Sábado
+    
+    // Lunes a Viernes: 8am - 8pm
+    // Sábados: 9am - 2pm
+    // Domingos: No enviar
+    
+    if (day === 0) return false; // Domingo
+    if (day === 6) return hour >= 9 && hour < 14; // Sábado 9am-2pm
+    return hour >= 8 && hour < 20; // Lun-Vie 8am-8pm
+}
+
+// 🛡️ ANTI-DETECCIÓN: Pausa aleatoria ocasional (simula distracciones humanas)
+function shouldTakeRandomBreak() {
+    // 5% de probabilidad de tomar una pausa corta
+    return Math.random() < 0.05;
+}
+
+function getRandomBreakDuration() {
+    // Pausa corta: 30s - 3 minutos
+    return (30 + Math.random() * 150) * 1000;
+}
 
 // ✅ CORRECCIÓN: Control de tasa global para evitar rate limiting de WhatsApp
 const MESSAGE_RATE_LIMITER = {
@@ -267,16 +324,54 @@ async function processJob(jobId) {
         }
 
         if (i < contactsToSend.length - 1) {
+            // 🛡️ ANTI-DETECCIÓN: Verificar horario laboral
+            if (!isWorkingHours()) {
+                logger.info(`🌙 Fuera de horario laboral. Pausando hasta mañana...`);
+                const now = new Date();
+                const tomorrow8am = new Date(now);
+                tomorrow8am.setDate(tomorrow8am.getDate() + (now.getDay() === 6 ? 2 : 1)); // Skip domingo
+                tomorrow8am.setHours(8, 0, 0, 0);
+                const waitTime = tomorrow8am - now;
+                
+                await addLog({
+                    tipo: "info",
+                    mensaje: `Job pausado hasta ${tomorrow8am.toLocaleString('es-AR')} (fuera de horario)`,
+                    metadata: { jobId, waitTimeHours: Math.round(waitTime / 3600000) }
+                });
+                
+                await delay(Math.min(waitTime, 3600000)); // Máx 1 hora, luego re-chequear
+                continue; // Re-evaluar horario
+            }
+            
             const min = Math.max(0, dMin);
             const max = Math.max(min, dMax);
-            const randomDelay = Math.floor(Math.random() * (max - min + 1) + min);
-            logger.info(`⏳ Delay de ${randomDelay}s...`);
-            await delay(randomDelay * 1000);
+            
+            // 🛡️ ANTI-DETECCIÓN: Delay más humano con distribución gaussiana
+            const randomDelay = humanDelay(min, max);
+            
+            // 🛡️ ANTI-DETECCIÓN: Simular tiempo de escritura
+            const typingTime = calculateTypingTime(messageText.length);
+            const typingSeconds = Math.round(typingTime / 1000);
+            
+            logger.info(`⌨️ Simulando escritura (${typingSeconds}s) + delay (${randomDelay}s)...`);
+            await delay(typingTime); // Simular typing
+            await delay(randomDelay * 1000); // Delay post-envío
+            
+            // 🛡️ ANTI-DETECCIÓN: Pausa aleatoria ocasional (5% probabilidad)
+            if (shouldTakeRandomBreak()) {
+                const breakDuration = getRandomBreakDuration();
+                logger.info(`☕ Pausa aleatoria: ${Math.round(breakDuration / 1000)}s (simulando distracción humana)`);
+                await delay(breakDuration);
+            }
         }
 
         if ((i + 1) % jobBatchSize === 0 && i < contactsToSend.length - 1) {
-            const pauseMs = Math.max(0, pauseMinutes) * 60 * 1000;
-            logger.info(`😴 Pausa de ${pauseMs / 1000}s (fin de lote)...`);
+            // 🛡️ ANTI-DETECCIÓN: Pausa de lote con variabilidad
+            const basePause = Math.max(0, pauseMinutes) * 60 * 1000;
+            const variability = 0.8 + Math.random() * 0.4; // ±20%
+            const pauseMs = Math.floor(basePause * variability);
+            
+            logger.info(`😴 Pausa de lote: ${Math.round(pauseMs / 1000)}s (fin de batch ${Math.floor((i + 1) / jobBatchSize)})`);
             await delay(pauseMs);
         }
     }

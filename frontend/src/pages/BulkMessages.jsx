@@ -17,6 +17,7 @@ import { getWhatsappStatus, logoutWhatsapp } from "../services/api";
 import apiClient from "../services/api";
 import logger from "../utils/logger";
 import { fetchAutoresponses, createAutoresponse, updateAutoresponse, deleteAutoresponse } from "../services/autoresponseService";
+import socket, { subscribeToJobs } from "../services/socket";
 
 export default function BulkMessages() {
     const [jobs, setJobs] = useState([]);
@@ -124,6 +125,44 @@ export default function BulkMessages() {
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // solo al montar
+
+    // ✅ Suscripción a actualizaciones de jobs en tiempo real
+    useEffect(() => {
+        if (!socket.connected) {
+            socket.connect();
+        }
+
+        // Suscribirse a actualizaciones de jobs
+        const cleanup = subscribeToJobs((updatedJobs) => {
+            logger.info("📊 Jobs actualizados vía socket:", updatedJobs);
+            // Si es un array, actualizar toda la lista
+            if (Array.isArray(updatedJobs)) {
+                setJobs(updatedJobs);
+            } else {
+                // Si es un job individual
+                setJobs((prevJobs) => {
+                    // Si el job fue eliminado, removerlo de la lista
+                    if (updatedJobs.deleted) {
+                        return prevJobs.filter(j => j._id !== updatedJobs._id);
+                    }
+                    
+                    // Actualizar el job existente
+                    const index = prevJobs.findIndex(j => j._id === updatedJobs._id);
+                    if (index !== -1) {
+                        const newJobs = [...prevJobs];
+                        newJobs[index] = { ...newJobs[index], ...updatedJobs };
+                        return newJobs;
+                    }
+                    // Si no existe, agregarlo (nuevo job creado por otro usuario)
+                    return [updatedJobs, ...prevJobs];
+                });
+            }
+        });
+
+        return () => {
+            cleanup();
+        };
+    }, []);
 
     useEffect(() => {
         let mounted = true;
@@ -402,21 +441,57 @@ export default function BulkMessages() {
                 return;
             }
 
+            // ✅ MEJORA: Verificar jerarquía antes de actualizar plantilla existente
             if (form.templateId) {
-                const updated = await updateTemplate(form.templateId, {
-                    nombre: form.name || "Plantilla sin nombre",
-                    contenido: form.message,
-                });
-                toast.success("Plantilla actualizada ");
-                await loadTemplates();
+                const currentTemplate = templates.find(t => t._id === form.templateId);
+                
+                // Jerarquía: admin/gerencia > supervisor > revendedor > asesor
+                const roleHierarchy = {
+                    admin: 4,
+                    gerencia: 4,
+                    supervisor: 3,
+                    revendedor: 2,
+                    asesor: 1
+                };
+                
+                const userRole = String(user?.role || "").toLowerCase();
+                const ownerRole = String(currentTemplate?.createdBy?.role || "").toLowerCase();
+                const userLevel = roleHierarchy[userRole] || 0;
+                const ownerLevel = roleHierarchy[ownerRole] || 0;
+                
+                // Si el usuario tiene menor jerarquía que el creador, crear nueva plantilla
+                if (userLevel < ownerLevel) {
+                    logger.info(`Usuario ${user.nombre} (${userRole}) creando copia de plantilla de ${currentTemplate?.createdBy?.nombre} (${ownerRole})`);
+                    
+                    const nueva = await createTemplate({
+                        nombre: form.name || "Plantilla sin nombre",
+                        contenido: form.message,
+                    });
+                    toast.success(`✅ Plantilla creada a tu nombre (no puedes editar plantillas de ${ownerRole})`);
+                    
+                    await loadTemplates();
+                    setForm((prev) => ({
+                        ...prev,
+                        templateId: nueva._id,
+                        name: nueva.nombre,
+                        message: nueva.contenido,
+                    }));
+                } else {
+                    // Tiene permisos para actualizar
+                    const updated = await updateTemplate(form.templateId, {
+                        nombre: form.name || "Plantilla sin nombre",
+                        contenido: form.message,
+                    });
+                    toast.success("✅ Plantilla actualizada");
+                    await loadTemplates();
+                }
             } else {
-                // Siempre crear una nueva plantilla para evitar sobrescrituras accidentales
+                // Crear nueva plantilla
                 const nueva = await createTemplate({
                     nombre: form.name || "Plantilla sin nombre",
                     contenido: form.message,
                 });
-                toast.success("Plantilla creada ");
-                // No fijar templateId automáticamente; dejar que el usuario la seleccione si desea
+                toast.success("✅ Plantilla creada");
 
                 await loadTemplates();
                 setForm((prev) => ({
@@ -426,7 +501,8 @@ export default function BulkMessages() {
                     templateId: "",
                 }));
             }
-        } catch {
+        } catch (err) {
+            logger.error("Error al guardar plantilla:", err);
             toast.error("Error al guardar plantilla");
         }
     };
@@ -790,55 +866,130 @@ export default function BulkMessages() {
                     </div>
                 )}
 
-                {/* Tabla de Jobs */}
+                {/* Tabla de Jobs con métricas mejoradas */}
                 <div className="mt-8">
                     <h2 className="text-xl font-semibold mb-2">📋 Campañas creadas</h2>
-                    <table className="w-full border text-left">
-                        <thead>
-                            <tr className="bg-gray-100">
-                                <th className="p-2 border">Nombre</th>
-                                <th className="p-2 border">Estado</th>
-                                <th className="p-2 border">Progreso</th>
-                                <th className="p-2 border">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {jobs.map((job) => (
-                                <tr key={job._id}>
-                                    <td className="p-2 border">
-                                        <button
-                                            onClick={() => navigate(`/jobs/${job._id}`)}
-                                            className="text-blue-600 underline"
-                                        >
-                                            {job.name}
-                                        </button>
-                                    </td>
-                                    <td className="p-2 border">{job.status}</td>
-                                    <td className="p-2 border">{job.progress || 0}%</td>
-                                    <td className="p-2 border space-x-2">
-                                        <button
-                                            onClick={() => handleAction(job._id, "pause")}
-                                            className="px-2 py-1 bg-yellow-500 text-white rounded"
-                                        >
-                                            Pausar
-                                        </button>
-                                        <button
-                                            onClick={() => handleAction(job._id, "resume")}
-                                            className="px-2 py-1 bg-green-500 text-white rounded"
-                                        >
-                                            Reanudar
-                                        </button>
-                                        <button
-                                            onClick={() => handleAction(job._id, "cancel")}
-                                            className="px-2 py-1 bg-red-500 text-white rounded"
-                                        >
-                                            Cancelar
-                                        </button>
-                                    </td>
+                    <div className="overflow-x-auto">
+                        <table className="w-full border text-left">
+                            <thead>
+                                <tr className="bg-gray-100">
+                                    <th className="p-2 border">Nombre</th>
+                                    <th className="p-2 border">Usuario/Equipo</th>
+                                    <th className="p-2 border">Estado</th>
+                                    <th className="p-2 border">Progreso</th>
+                                    <th className="p-2 border">Métricas</th>
+                                    <th className="p-2 border">Acciones</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                {jobs.map((job) => {
+                                    const progress = parseFloat(job.progress || 0);
+                                    const stats = job.stats || { total: 0, sent: 0, failed: 0, pending: 0 };
+                                    
+                                    // Colores según estado
+                                    const statusColors = {
+                                        pendiente: "bg-blue-100 text-blue-800",
+                                        "en_progreso": "bg-green-100 text-green-800",
+                                        pausado: "bg-yellow-100 text-yellow-800",
+                                        completado: "bg-emerald-100 text-emerald-800",
+                                        cancelado: "bg-red-100 text-red-800",
+                                        fallido: "bg-red-100 text-red-800"
+                                    };
+                                    
+                                    const statusColor = statusColors[job.status] || "bg-gray-100 text-gray-800";
+                                    
+                                    return (
+                                        <tr key={job._id} className="hover:bg-gray-50">
+                                            <td className="p-2 border">
+                                                <button
+                                                    onClick={() => navigate(`/jobs/${job._id}`)}
+                                                    className="text-blue-600 hover:text-blue-800 underline font-medium"
+                                                >
+                                                    {job.name}
+                                                </button>
+                                            </td>
+                                            <td className="p-2 border">
+                                                <div className="text-sm">
+                                                    <div className="font-medium text-gray-800">
+                                                        {job.createdBy?.nombre || "N/A"}
+                                                    </div>
+                                                    {job.createdBy?.numeroEquipo && (
+                                                        <div className="text-xs text-gray-500">
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold">
+                                                                👥 {job.createdBy.numeroEquipo}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="p-2 border">
+                                                <span className={`px-2 py-1 rounded text-xs font-semibold ${statusColor}`}>
+                                                    {job.status}
+                                                </span>
+                                            </td>
+                                            <td className="p-2 border">
+                                                <div className="space-y-1">
+                                                    {/* Barra de progreso visual */}
+                                                    <div className="w-full bg-gray-200 rounded-full h-2.5">
+                                                        <div
+                                                            className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                                                            style={{ width: `${Math.min(progress, 100)}%` }}
+                                                        ></div>
+                                                    </div>
+                                                    <span className="text-xs text-gray-600 font-medium">
+                                                        {progress.toFixed(1)}%
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="p-2 border">
+                                                <div className="flex gap-2 text-xs">
+                                                    <span className="px-2 py-1 bg-green-100 text-green-800 rounded" title="Enviados">
+                                                        ✅ {stats.sent}
+                                                    </span>
+                                                    <span className="px-2 py-1 bg-red-100 text-red-800 rounded" title="Fallidos">
+                                                        ❌ {stats.failed}
+                                                    </span>
+                                                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded" title="Pendientes">
+                                                        ⏳ {stats.pending}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="p-2 border space-x-2">
+                                                <button
+                                                    onClick={() => handleAction(job._id, "pause")}
+                                                    disabled={job.status === "pausado" || job.status === "completado" || job.status === "cancelado"}
+                                                    className="px-2 py-1 bg-yellow-500 text-white rounded text-sm hover:bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    ⏸️
+                                                </button>
+                                                <button
+                                                    onClick={() => handleAction(job._id, "resume")}
+                                                    disabled={job.status !== "pausado"}
+                                                    className="px-2 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    ▶️
+                                                </button>
+                                                <button
+                                                    onClick={() => handleAction(job._id, "cancel")}
+                                                    disabled={job.status === "completado" || job.status === "cancelado"}
+                                                    className="px-2 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    🗑️
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                                {jobs.length === 0 && (
+                                    <tr>
+                                        <td colSpan="6" className="p-4 text-center text-gray-500">
+                                            No hay campañas creadas aún
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
                 {showAutoResp && (
                     <div className="fixed inset-0 z-50 flex">

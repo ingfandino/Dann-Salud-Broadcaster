@@ -20,6 +20,9 @@ const reportRoutes = require("./reportRoutes");
 const auditRoutes = require("./auditRoutes");
 const metricsRoutes = require("./metricsRoutes");
 const recoveryRoutes = require("./recoveryRoutes");
+const internalMessageRoutes = require("./internalMessageRoutes");
+const affiliateRoutes = require("./affiliates");
+const bannedWordRoutes = require("./bannedWords");
 
 // 📌 Rutas públicas
 router.use("/auth", authRoutes);
@@ -42,5 +45,8 @@ router.use("/reports", reportRoutes);
 router.use("/audits", auditRoutes);
 router.use("/metrics", metricsRoutes);
 router.use("/recovery", recoveryRoutes);
+router.use("/internal-messages", internalMessageRoutes);
+router.use("/affiliates", affiliateRoutes);
+router.use("/banned-words", bannedWordRoutes);
 
 module.exports = router;

@@ -53,6 +53,9 @@ function initSocket(server, app = null, allowedOrigins = []) {
     }
 
     if (app) app.set("io", ioInstance);
+    
+    // Exponer io globalmente para servicios de notificación
+    global.io = ioInstance;
 
     // Middleware de autenticación JWT (no obligatorio para recibir broadcast públicos como eventos de WhatsApp)
     ioInstance.use((socket, next) => {

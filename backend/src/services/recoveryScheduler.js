@@ -2,6 +2,7 @@
 
 const Audit = require('../models/Audit');
 const logger = require('../utils/logger');
+const { notifyAuditRecovery } = require('./notificationService');
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000; // cada 5 minutos
 
@@ -12,6 +13,12 @@ async function moveEligibleToRecovery() {
     recoveryEligibleAt: { $ne: null, $lte: now },
     isRecovery: { $ne: true }
   };
+  
+  // Obtener auditorías antes de actualizar para enviar notificaciones
+  const auditsToMove = await Audit.find(filter)
+    .populate('createdBy', 'nombre email numeroEquipo')
+    .lean();
+  
   const update = {
     $set: {
       isRecovery: true,
@@ -22,6 +29,21 @@ async function moveEligibleToRecovery() {
   const res = await Audit.updateMany(filter, update);
   if (res.modifiedCount) {
     logger.info(`RecoveryScheduler: marcadas ${res.modifiedCount} auditorías como isRecovery`);
+    
+    // 🔔 Enviar notificaciones a revendedores
+    for (const audit of auditsToMove) {
+      try {
+        await notifyAuditRecovery({
+          audit: {
+            ...audit,
+            fechaTurno: audit.scheduledAt,
+            obraSocial: audit.obraSocialVendida
+          }
+        });
+      } catch (err) {
+        logger.error(`Error enviando notificación de recovery para ${audit.cuil}:`, err);
+      }
+    }
   }
 }
 

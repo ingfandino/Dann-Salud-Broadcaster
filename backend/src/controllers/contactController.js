@@ -186,14 +186,44 @@ exports.importContacts = async (req, res) => {
             const existing = existingByPhone.get(String(normalizedPhone)) || null;
 
             if (existing) {
-                // ✅ CORRECCIÓN: Rechazar contacto si ya existe en la BD (duplicado)
-                warnings.push({
-                    telefono: normalizedPhone,
-                    tipo: "duplicado_en_bd",
-                    detalle: `El contacto ya existe en la base de datos`
+                // ✅ CORRECCIÓN: Verificar si el contacto ya recibió mensajes exitosos
+                const hasSuccessfulMessages = await Message.countDocuments({
+                    contact: existing._id,
+                    status: "enviado"
                 });
-                invalid++;
-                continue;
+
+                if (hasSuccessfulMessages > 0) {
+                    // Contacto ya recibió mensajes → Rechazar como duplicado legítimo
+                    warnings.push({
+                        telefono: normalizedPhone,
+                        tipo: "duplicado_con_mensajes",
+                        detalle: `El contacto ya recibió ${hasSuccessfulMessages} mensaje(s) exitoso(s)`
+                    });
+                    invalid++;
+                    continue;
+                } else {
+                    // Contacto existe pero NO recibió mensajes → Eliminar y permitir recarga
+                    logger.info(`🔄 Eliminando contacto sin mensajes exitosos: ${normalizedPhone} (ID: ${existing._id})`);
+                    await Contact.findByIdAndDelete(existing._id);
+                    
+                    // Eliminar también cualquier mensaje fallido asociado para limpiar
+                    const deletedMessages = await Message.deleteMany({ contact: existing._id });
+                    if (deletedMessages.deletedCount > 0) {
+                        logger.info(`🗑️ Eliminados ${deletedMessages.deletedCount} mensaje(s) fallido(s) asociado(s)`);
+                    }
+                    
+                    // Remover del Map para evitar re-detección
+                    existingByPhone.delete(String(normalizedPhone));
+                    
+                    warnings.push({
+                        telefono: normalizedPhone,
+                        tipo: "reemplazado",
+                        detalle: `Contacto anterior sin mensajes exitosos fue eliminado y será reemplazado`
+                    });
+                    
+                    // Continuar con la inserción del nuevo contacto
+                    // (no hacer continue aquí, seguir el flujo normal)
+                }
             }
 
             // acumular para inserción masiva

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import apiClient from "../services/api";
 import { toast } from "react-toastify";
 import NotificationService from "../services/NotificationService";
+import { useAuth } from "../context/AuthContext";
 
 const STATUS_OPTIONS = [
     "Mensaje enviado",
@@ -25,6 +26,7 @@ const OBRAS_VENDIDAS = ["Binimed", "Meplife", "Medicenter"];
 const TIPO_VENTA = ["Alta", "Cambio"];
 
 export default function AuditEditModal({ audit, onClose, onSave }) {
+    const { user } = useAuth();
     const [form, setForm] = useState({
         nombre: audit.nombre || "",
         cuil: audit.cuil || "",
@@ -89,14 +91,29 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
         return all.map((t) => ({ time: t, disabled: (map[t] || 0) >= 4 }));
     }
     const timeOptions = getEnabledTimeOptions();
+    
+    // Filtrar estados disponibles según el rol del usuario
+    const getAvailableStatuses = () => {
+        const userRole = user?.role?.toLowerCase();
+        // Solo admin y gerencia pueden ver/seleccionar "QR hecho"
+        if (userRole === 'admin' || userRole === 'gerencia') {
+            return STATUS_OPTIONS;
+        }
+        // Para otros roles, excluir "QR hecho"
+        return STATUS_OPTIONS.filter(status => status !== "QR hecho");
+    };
+    
+    const availableStatuses = getAvailableStatuses();
 
     useEffect(() => {
         const fetchAuditores = async () => {
             try {
-                const { data } = await apiClient.get("/users", {
-                    params: { roles: ["supervisor", "auditor", "administrador"] },
-                });
-                setAuditores(data);
+                const { data } = await apiClient.get("/users");
+                // Filtrar solo usuarios con roles: admin, gerencia, auditor, supervisor
+                const filtered = data.filter(u => 
+                    ['admin', 'gerencia', 'auditor', 'supervisor'].includes(u.role?.toLowerCase())
+                );
+                setAuditores(filtered);
             } catch (err) {
                 console.error("Error al cargar auditores", err);
                 toast.error("No se pudieron cargar los auditores");
@@ -231,7 +248,7 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                                 className="border rounded p-2 w-full"
                             >
                                 <option value="">Seleccione</option>
-                                {STATUS_OPTIONS.map((o) => (
+                                {availableStatuses.map((o) => (
                                     <option key={o} value={o}>{o}</option>
                                 ))}
                             </select>

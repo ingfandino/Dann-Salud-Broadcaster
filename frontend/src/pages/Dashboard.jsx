@@ -5,7 +5,7 @@ import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { BarChart2, MessageSquare, Users, LogOut, SquareUserRound, ClipboardList } from "lucide-react";
+import { BarChart2, MessageSquare, Users, LogOut, SquareUserRound, ClipboardList, Database, Shield } from "lucide-react";
 import { API_URL } from "../config.js";
 import { getWhatsappStatus } from "../services/api";
 
@@ -56,6 +56,8 @@ export default function Dashboard() {
         gerencia: [
             { to: "/reports", icon: <BarChart2 className="w-5 h-5" />, label: "Reportes Globales" },
             { to: "/bulk-messages", icon: <MessageSquare className="w-5 h-5" />, label: "Mensajería Masiva" },
+            { to: "/affiliates", icon: <Database className="w-5 h-5" />, label: "Base de Afiliados" },
+            { to: "/banned-words", icon: <Shield className="w-5 h-5" />, label: "Palabras Prohibidas" },
             { to: "/audits", icon: <SquareUserRound className="w-5 h-5" />, label: "Auditorías" },
             { to: "/admin/users", icon: <Users className="w-5 h-5" />, label: "Gestionar Usuarios" },
         ],

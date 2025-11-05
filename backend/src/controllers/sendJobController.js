@@ -85,6 +85,30 @@ exports.startJob = async (req, res) => {
             return res.status(400).json({ error: "Debes especificar un templateId válido o un mensaje de texto" });
         }
 
+        // 🚨 DETECCIÓN DE PALABRAS PROHIBIDAS
+        const bannedWordController = require("./bannedWordController");
+        const detectedWords = await bannedWordController.detectBannedWords(finalMessage);
+        
+        if (detectedWords.length > 0) {
+            logger.warn(`⚠️ Palabras prohibidas detectadas en campaña: ${detectedWords.map(w => w.word).join(", ")}`);
+            
+            // Notificar a gerencia y supervisores
+            for (const detected of detectedWords) {
+                await bannedWordController.notifyBannedWordDetection({
+                    word: detected.word,
+                    wordId: detected.wordId,
+                    userId: createdBy,
+                    campaignName: name || "Sin nombre",
+                    messageContent: finalMessage,
+                    detectedIn: "bulk_message"
+                });
+            }
+            
+            // OPCIONAL: Decidir si bloquear el envío o solo alertar
+            // Por ahora solo alertamos, pero la campaña continúa
+            logger.info(`✅ Notificaciones de palabras prohibidas enviadas. Campaña continúa.`);
+        }
+
         // parámetros de envío
         const delayMin = Number.isFinite(parseInt(req.body.delayMin, 10)) ? parseInt(req.body.delayMin, 10) : 2;
         const delayMax = Number.isFinite(parseInt(req.body.delayMax, 10)) ? parseInt(req.body.delayMax, 10) : 5;

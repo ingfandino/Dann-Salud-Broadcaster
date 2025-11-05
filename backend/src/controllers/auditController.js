@@ -10,6 +10,12 @@ const {
 } = require("../config/socket");
 const { Parser } = require('json2csv');
 const logger = require("../utils/logger");
+const {
+    notifyAuditDeleted,
+    notifyAuditCreated,
+    notifyAuditCompleted,
+    notifyAuditQRDone
+} = require("../services/notificationService");
 
 /**
  * Parsea un string tipo 'YYYY-MM-DDTHH:mm' a Date local
@@ -85,7 +91,25 @@ exports.createAudit = async (req, res) => {
     });
 
     await audit.save();
+    
+    // Poblar datos para notificación
+    await audit.populate('createdBy', 'nombre email role numeroEquipo');
+    
     try { emitNewAudit(audit); } catch (e) { logger.error("socket emit error", e); }
+    
+    // 🔔 Notificar a auditores sobre nueva auditoría
+    try {
+        await notifyAuditCreated({ 
+            audit: {
+                ...audit.toObject(),
+                fechaTurno: audit.scheduledAt,
+                obraSocial: audit.obraSocialVendida
+            }
+        });
+    } catch (e) {
+        logger.error("Error enviando notificación de auditoría creada:", e);
+    }
+    
     return res.status(201).json(audit);
 };
 
@@ -381,6 +405,14 @@ exports.updateAudit = async (req, res) => {
         return res.status(403).json({ message: 'No autorizado' });
     }
 
+    // Obtener auditoría anterior para comparar cambios
+    const oldAudit = await Audit.findById(id);
+    if (!oldAudit) {
+        return res.status(404).json({ message: 'Auditoría no encontrada' });
+    }
+    
+    const oldStatus = oldAudit.status;
+
     // No sobreescribir auditor automáticamente. Solo cambiar si viene en el payload.
 
     const audit = await Audit.findByIdAndUpdate(
@@ -388,8 +420,9 @@ exports.updateAudit = async (req, res) => {
         updates,
         { new: true }
     )
-        .populate('asesor', 'nombre name email')
+        .populate('asesor', 'nombre name email numeroEquipo')
         .populate('auditor', 'nombre name email')
+        .populate('createdBy', 'nombre name email numeroEquipo')
         .populate('groupId', 'nombre name');
 
     if (!audit) {
@@ -400,6 +433,39 @@ exports.updateAudit = async (req, res) => {
         emitAuditUpdate(audit._id, audit);
     } catch (e) {
         logger.error("emitAuditUpdate error", e);
+    }
+    
+    // 🔔 Notificaciones según cambio de estado
+    const newStatus = audit.status;
+    
+    // Notificar cuando pasa a "Completa"
+    if (oldStatus !== "Completa" && newStatus === "Completa") {
+        try {
+            await notifyAuditCompleted({
+                audit: {
+                    ...audit.toObject(),
+                    fechaTurno: audit.scheduledAt,
+                    obraSocial: audit.obraSocialVendida
+                }
+            });
+        } catch (e) {
+            logger.error("Error enviando notificación de auditoría completa:", e);
+        }
+    }
+    
+    // Notificar cuando pasa a "QR Hecho"
+    if (oldStatus !== "QR Hecho" && newStatus === "QR Hecho") {
+        try {
+            await notifyAuditQRDone({
+                audit: {
+                    ...audit.toObject(),
+                    fechaTurno: audit.scheduledAt,
+                    obraSocial: audit.obraSocialVendida
+                }
+            });
+        } catch (e) {
+            logger.error("Error enviando notificación de QR hecho:", e);
+        }
     }
 
     res.json(audit);
@@ -473,12 +539,42 @@ exports.uploadMultimedia = async (req, res) => {
             audit.multimedia.afiliadoKeyDefinitiva = afiliadoKeyDefinitiva.trim();
         }
 
+        // Verificar si la auditoría está completa (tiene todos los archivos necesarios)
+        const wasIncomplete = audit.status !== "Completa";
+        const hasVideo = audit.multimedia.video;
+        const hasImages = audit.multimedia.images && audit.multimedia.images.length >= 2; // DNI frente y dorso
+        const isNowComplete = hasVideo && hasImages;
+        
+        // Si se completó justo ahora, actualizar estado y notificar
+        if (wasIncomplete && isNowComplete && audit.status !== "Completa") {
+            audit.status = "Completa";
+        }
+        
         await audit.save();
+        
+        // Poblar para notificaciones
+        await audit.populate('createdBy', 'nombre email role numeroEquipo');
+        await audit.populate('auditor', 'nombre email');
 
         try {
             emitAuditUpdate(audit);
         } catch (e) {
             logger.error("socket emit error uploadMultimedia", e);
+        }
+        
+        // 🔔 Notificar a admins si se completó
+        if (wasIncomplete && isNowComplete) {
+            try {
+                await notifyAuditCompleted({
+                    audit: {
+                        ...audit.toObject(),
+                        fechaTurno: audit.scheduledAt,
+                        obraSocial: audit.obraSocialVendida
+                    }
+                });
+            } catch (e) {
+                logger.error("Error enviando notificación de auditoría completa:", e);
+            }
         }
 
         res.json(audit);
@@ -499,10 +595,10 @@ exports.deleteAudit = async (req, res) => {
         return res.status(403).json({ message: 'No autorizado' });
     }
 
-    // Obtener auditoría para validar permisos de supervisor
+    // Obtener auditoría para validar permisos de supervisor y enviar notificaciones
     const audit = await Audit.findById(id)
-        .populate({ path: 'asesor', select: 'numeroEquipo _id' })
-        .populate({ path: 'createdBy', select: '_id' });
+        .populate({ path: 'asesor', select: 'numeroEquipo _id nombre email' })
+        .populate({ path: 'createdBy', select: '_id nombre email numeroEquipo' });
 
     if (!audit) {
         return res.status(404).json({ message: 'Auditoría no encontrada' });
@@ -518,6 +614,24 @@ exports.deleteAudit = async (req, res) => {
         if (!sameGroup && !createdByMe) {
             return res.status(403).json({ message: 'No autorizado a eliminar este turno' });
         }
+    }
+    
+    // 🔔 Enviar notificación ANTES de eliminar
+    try {
+        await notifyAuditDeleted({
+            audit: {
+                ...audit.toObject(),
+                fechaTurno: audit.scheduledAt,
+                obraSocial: audit.obraSocialVendida
+            },
+            deletedBy: {
+                nombre: req.user.nombre,
+                email: req.user.email,
+                role: req.user.role
+            }
+        });
+    } catch (e) {
+        logger.error("Error enviando notificación de auditoría eliminada:", e);
     }
 
     await Audit.findByIdAndDelete(id);

@@ -12,6 +12,8 @@ const { initSocket, getIO } = require("./config/socket");
 const { initWhatsappClient, whatsappEvents } = require("./config/whatsapp");
 const { startScheduler } = require("./services/jobScheduler");
 const { startRecoveryScheduler } = require("./services/recoveryScheduler");
+const { startAuditReminderCron } = require("./services/auditReminderCron");
+const { startAffiliateExportCron } = require("./services/affiliateExportCron");
 const { pushMetrics } = require("./services/metricsService");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
@@ -21,6 +23,8 @@ const Autoresponse = require("./models/Autoresponse");
 const AutoResponseLog = require("./models/AutoResponseLog");
 const Message = require("./models/Message");
 const SendJob = require("./models/SendJob");
+const Affiliate = require("./models/Affiliate");
+const AffiliateExportConfig = require("./models/AffiliateExportConfig");
 const routes = require("./routes");
 const { requireAuth } = require("./middlewares/authMiddleware");
 const { validateEnv, ENV } = require("./config");
@@ -62,6 +66,20 @@ if (process.env.NODE_ENV !== "test") {
           logger.info("✅ Índices de SendJob sincronizados");
         } catch (e) {
           logger.warn("⚠️  No se pudieron sincronizar índices de SendJob", { error: e?.message });
+        }
+
+        try {
+          await Affiliate.syncIndexes();
+          logger.info("✅ Índices de Affiliate sincronizados");
+        } catch (e) {
+          logger.warn("⚠️  No se pudieron sincronizar índices de Affiliate", { error: e?.message });
+        }
+
+        try {
+          await AffiliateExportConfig.syncIndexes();
+          logger.info("✅ Índices de AffiliateExportConfig sincronizados");
+        } catch (e) {
+          logger.warn("⚠️  No se pudieron sincronizar índices de AffiliateExportConfig", { error: e?.message });
         }
 
         // 🌱 Semilla opcional para crear auditor
@@ -303,6 +321,8 @@ let metricsInterval;
 if (process.env.NODE_ENV !== "test") {
   startScheduler();
   startRecoveryScheduler();
+  startAuditReminderCron();
+  startAffiliateExportCron();
 
   initSocket(appServer, app, allowedOrigins);
 
@@ -356,7 +376,14 @@ if (process.env.NODE_ENV !== "test") {
   process.on("SIGINT", () => shutdown("SIGINT"));
 
   process.on("uncaughtException", (err) => {
-    logger.error("Uncaught Exception", { error: err });
+    console.error("\n❌ ========== UNCAUGHT EXCEPTION ==========");
+    console.error("Message:", err.message);
+    console.error("Stack:", err.stack);
+    logger.error("Uncaught Exception", { 
+      error: err.message, 
+      stack: err.stack,
+      name: err.name 
+    });
     try {
       if (metricsInterval) clearInterval(metricsInterval);
       appServer.close(() => process.exit(1));

@@ -12,14 +12,14 @@ body {
   /* evita scroll lateral por blobs */
 }
 
-/* 🎨 Blob superior izquierdo */
+/* 🎨 Blob superior izquierdo - Azul brillante */
 body::before {
   content: "";
   position: absolute;
   width: 400px;
   height: 400px;
-  background: #3b82f6;
-  /* azul vivo */
+  background: #009FC2;
+  /* Azul brillante */
   border-radius: 50%;
   filter: blur(150px);
   top: -100px;
@@ -28,14 +28,14 @@ body::before {
   opacity: 0.6;
 }
 
-/* 🎨 Blob inferior derecho */
+/* 🎨 Blob inferior derecho - Violeta claro */
 body::after {
   content: "";
   position: absolute;
   width: 500px;
   height: 500px;
-  background: #8b5cf6;
-  /* violeta */
+  background: #C76CF5;
+  /* Violeta claro */
   border-radius: 50%;
   filter: blur(150px);
   bottom: -150px;
