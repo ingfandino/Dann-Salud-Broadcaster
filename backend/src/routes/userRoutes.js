@@ -71,4 +71,11 @@ router.patch(
     userController.updateUserRole
 );
 
+router.get(
+    "/admin/grupos",
+    requireAuth,
+    permit("gerencia"),
+    userController.getAvailableGroups
+);
+
 module.exports = router;

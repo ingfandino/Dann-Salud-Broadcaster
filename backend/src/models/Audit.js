@@ -5,7 +5,7 @@ const { Schema } = mongoose;
 
 const AuditSchema = new Schema({
     nombre: { type: String, required: true },
-    cuil: { type: String, required: true },
+    cuil: { type: String, required: false }, // Opcional
     telefono: { type: String, required: true },
     tipoVenta: { type: String, enum: ['alta', 'cambio'], default: 'alta' },
     obraSocialAnterior: { type: String },

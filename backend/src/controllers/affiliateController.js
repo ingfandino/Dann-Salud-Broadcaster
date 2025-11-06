@@ -416,6 +416,10 @@ exports.getStats = async (req, res) => {
     try {
         const total = await Affiliate.countDocuments({ active: true });
         
+        // ✅ Estadísticas de exportación
+        const exported = await Affiliate.countDocuments({ active: true, exported: true });
+        const available = total - exported;
+        
         const obrasSociales = await Affiliate.aggregate([
             { $match: { active: true } },
             { $group: { _id: "$obraSocial", count: { $sum: 1 } } },
@@ -437,6 +441,8 @@ exports.getStats = async (req, res) => {
 
         res.json({
             total,
+            exported,
+            available,
             obrasSociales: obrasSociales.map(os => ({ name: os._id, count: os.count })),
             recentBatches
         });

@@ -281,10 +281,29 @@ async function initClientForUser(userId) {
         return;
       }
 
+      // Marcar mensaje outbound como respondido
       await Message.updateMany(
         { to: msg.from, direction: "outbound" },
         { $set: { respondio: true } }
       );
+      
+      // ✅ CORRECCIÓN BUG 5: Crear registro del mensaje inbound
+      try {
+        await Message.create({
+          contact: enviado.contact,
+          createdBy: userId,
+          job: enviado.job,
+          contenido: msg.body || '',
+          direction: 'inbound',
+          status: 'recibido',
+          timestamp: new Date(),
+          to: msg.from,
+          from: msg.to || userId
+        });
+        logger.info(`[WA][${userId}] Mensaje inbound registrado de ${msg.from}`);
+      } catch (e) {
+        logger.error(`[WA][${userId}] Error registrando mensaje inbound:`, e.message);
+      }
 
       // Cargar reglas de auto-respuesta
       const reglas = await Autoresponse.find({ createdBy: userId, active: true });
@@ -314,12 +333,19 @@ async function initClientForUser(userId) {
               await client.sendMessage(msg.from, rule.response);
               logger.info(`[WA][${userId}] Auto-respuesta enviada (${rule.keyword || "fallback"})`);
 
-              // Registrar en log
+              // Registrar en log con detalles completos
               await AutoResponseLog.create({
                 createdBy: userId,
                 chatId: msg.from,
                 ruleId: rule._id,
-                respondedAt: new Date()
+                respondedAt: new Date(),
+                // ✅ MEJORA 3: Datos adicionales para reporte
+                job: enviado.job,
+                contact: enviado.contact,
+                keyword: rule.keyword || null,
+                response: rule.response,
+                isFallback: rule.isFallback || false,
+                userMessage: msg.body || ''
               });
             } catch (e) {
               logger.warn(`[WA][${userId}] Error enviando auto-respuesta:`, e.message);

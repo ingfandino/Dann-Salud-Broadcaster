@@ -76,10 +76,11 @@ export default function SalesForm({ currentUser }) {
             return 'Ya existe un afiliado con ese nombre';
         }
 
-        if (!form.cuil.trim()) return 'CUIL es requerido';
-        if (!/^\d{11}$/.test(form.cuil)) return 'CUIL debe tener exactamente 11 dígitos';
-        if (existingAudits.some(a => a.cuil?.trim() === form.cuil.trim())) {
-            return 'Ya existe un afiliado con ese CUIL';
+        if (form.cuil.trim()) {
+            if (!/^\d{11}$/.test(form.cuil)) return 'CUIL debe tener exactamente 11 dígitos';
+            if (existingAudits.some(a => a.cuil?.trim() === form.cuil.trim())) {
+                return 'Ya existe un afiliado con ese CUIL';
+            }
         }
 
         if (!/^\d{10}$/.test(form.telefono.replace(/\D/g, ''))) return 'Teléfono debe tener 10 dígitos';
@@ -180,8 +181,8 @@ export default function SalesForm({ currentUser }) {
                         <input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} className="w-full p-2 border rounded" />
                     </div>
                     <div>
-                        <label className="block text-sm">CUIL</label>
-                        <input value={form.cuil} onChange={e => setForm({ ...form, cuil: e.target.value })} className="w-full p-2 border rounded" />
+                        <label className="block text-sm">CUIL <span className="text-gray-400 text-xs">(opcional)</span></label>
+                        <input value={form.cuil} onChange={e => setForm({ ...form, cuil: e.target.value })} className="w-full p-2 border rounded" placeholder="11 dígitos" />
                     </div>
                     <div>
                         <label className="block text-sm">Teléfono</label>

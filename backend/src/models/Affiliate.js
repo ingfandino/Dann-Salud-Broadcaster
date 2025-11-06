@@ -91,6 +91,23 @@ const affiliateSchema = new mongoose.Schema(
             default: true
         },
         
+        // ✅ Control de exportaciones
+        exported: {
+            type: Boolean,
+            default: false,
+            index: true
+        },
+        exportedAt: {
+            type: Date
+        },
+        exportedTo: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User" // Supervisor al que se le asignó
+        },
+        exportBatchId: {
+            type: String // ID del lote de exportación
+        },
+        
         // Campos adicionales dinámicos (para datos extra del Excel)
         additionalData: {
             type: Map,

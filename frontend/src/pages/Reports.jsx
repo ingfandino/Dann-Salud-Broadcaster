@@ -127,6 +127,36 @@ export default function Reports() {
             toast.error("Error descargando Excel");
         }
     };
+    
+    // ✅ MEJORA 3: Exportar reporte de auto-respuestas
+    const handleExportAutoResponses = async (jobId) => {
+        try {
+            const res = await apiClient.get(`/send-jobs/${jobId}/autoresponse-report`, {
+                responseType: "blob"
+            });
+            
+            const blob = new Blob([res.data], {
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.setAttribute("download", `autorespuestas_${jobId}.xlsx`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+            
+            toast.success("✅ Reporte de auto-respuestas descargado");
+        } catch (err) {
+            if (err.response?.status === 404) {
+                toast.warning("⚠️ No hay auto-respuestas registradas para esta campaña");
+            } else {
+                logger.error("Error descargando reporte de auto-respuestas:", err);
+                toast.error("Error descargando reporte");
+            }
+        }
+    };
 
     // ✅ Mapeo de estados a colores
     const statusColors = {
@@ -276,6 +306,7 @@ export default function Reports() {
                                 <th className="p-3 text-left text-sm font-semibold">Contactos</th>
                                 <th className="p-3 text-left text-sm font-semibold">Enviados</th>
                                 <th className="p-3 text-left text-sm font-semibold">Fallidos</th>
+                                <th className="p-3 text-left text-sm font-semibold">Respuestas</th>
                                 <th className="p-3 text-left text-sm font-semibold">Estado</th>
                                 <th className="p-3 text-left text-sm font-semibold">Acciones</th>
                             </tr>
@@ -316,26 +347,40 @@ export default function Reports() {
                                                     ❌ {stats.failed}
                                                 </span>
                                             </td>
+                                            <td className="p-3 text-sm text-center">
+                                                <span className="inline-flex items-center px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-semibold">
+                                                    💬 {campaign.repliesCount || 0}
+                                                </span>
+                                            </td>
                                             <td className="p-3 text-sm">
                                                 <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-semibold ${statusColor}`}>
                                                     {statusLabel}
                                                 </span>
                                             </td>
                                             <td className="p-3 text-sm">
-                                                <button
-                                                    onClick={() => handleExportCampaign(campaign._id)}
-                                                    className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 flex items-center gap-1"
-                                                    title="Descargar Excel detallado"
-                                                >
-                                                    📥 Excel
-                                                </button>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={() => handleExportCampaign(campaign._id)}
+                                                        className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 flex items-center gap-1"
+                                                        title="Descargar Excel detallado"
+                                                    >
+                                                        📥 Excel
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleExportAutoResponses(campaign._id)}
+                                                        className="px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 flex items-center gap-1"
+                                                        title="Reporte de auto-respuestas"
+                                                    >
+                                                        🤖 Auto-resp.
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     );
                                 })
                             ) : (
                                 <tr>
-                                    <td colSpan="8" className="p-8 text-center text-gray-500">
+                                    <td colSpan="9" className="p-8 text-center text-gray-500">
                                         {loading ? "Cargando..." : "No hay campañas para mostrar"}
                                     </td>
                                 </tr>

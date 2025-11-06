@@ -38,42 +38,48 @@ const upload = multer({
     }
 });
 
-// 🔐 Todas las rutas requieren autenticación + rol Gerencia
+// 🔐 Todas las rutas requieren autenticación
 router.use(requireAuth);
-router.use(affiliateController.requireGerencia);
 
-// 📤 Subir archivo de afiliados
-router.post("/upload", upload.single("file"), affiliateController.uploadAffiliates);
+// 📤 Subir archivo de afiliados (solo Gerencia)
+router.post("/upload", affiliateController.requireGerencia, upload.single("file"), affiliateController.uploadAffiliates);
 
-// 📥 Descargar reporte de duplicados
-router.get("/download-report/:filename", affiliateController.downloadReport);
+// 📥 Descargar reporte de duplicados (solo Gerencia)
+router.get("/download-report/:filename", affiliateController.requireGerencia, affiliateController.downloadReport);
 
-// 🔍 Buscar/filtrar afiliados
-router.get("/search", affiliateController.searchAffiliates);
+// 🔍 Buscar/filtrar afiliados (solo Gerencia)
+router.get("/search", affiliateController.requireGerencia, affiliateController.searchAffiliates);
 
-// 📊 Obtener estadísticas
-router.get("/stats", affiliateController.getStats);
+// 📊 Obtener estadísticas (solo Gerencia)
+router.get("/stats", affiliateController.requireGerencia, affiliateController.getStats);
 
-// ⚙️ Configurar exportación programada
-router.post("/export-config", affiliateController.configureExport);
+// ⚙️ Configurar exportación programada (solo Gerencia)
+router.post("/export-config", affiliateController.requireGerencia, affiliateController.configureExport);
 
-// 📋 Obtener configuración actual
-router.get("/export-config", affiliateController.getExportConfig);
+// 📋 Obtener configuración actual (solo Gerencia)
+router.get("/export-config", affiliateController.requireGerencia, affiliateController.getExportConfig);
 
-// 📁 Obtener lista de exportaciones disponibles
+// 📁 Obtener lista de exportaciones disponibles (Gerencia y Supervisores)
 router.get("/exports", async (req, res) => {
     try {
-        const exports = await getAvailableExports();
+        const exports = await getAvailableExports(req.user);
         res.json({ exports });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
-// 📥 Descargar archivo CSV exportado
+// 📥 Descargar archivo XLSX exportado (Gerencia y Supervisores)
 router.get("/download-export/:filename", async (req, res) => {
     try {
         const { filename } = req.params;
+        const userRole = req.user?.role?.toLowerCase();
+        
+        // Solo gerencia y supervisores pueden descargar
+        if (!["gerencia", "supervisor", "admin"].includes(userRole)) {
+            return res.status(403).json({ error: "No autorizado para descargar archivos" });
+        }
+        
         const filePath = path.join(__dirname, "../../uploads/affiliate-exports", filename);
 
         // Seguridad: verificar que el archivo existe
@@ -81,6 +87,15 @@ router.get("/download-export/:filename", async (req, res) => {
         const exists = await fs.access(filePath).then(() => true).catch(() => false);
         if (!exists) {
             return res.status(404).json({ error: "Archivo no encontrado" });
+        }
+        
+        // Si es supervisor, verificar que el archivo le pertenece
+        if (userRole === "supervisor") {
+            const userId = req.user._id.toString();
+            // El filename debe incluir el userId del supervisor
+            if (!filename.includes(userId)) {
+                return res.status(403).json({ error: "No autorizado para descargar este archivo" });
+            }
         }
 
         res.download(filePath, filename);
@@ -90,7 +105,7 @@ router.get("/download-export/:filename", async (req, res) => {
     }
 });
 
-// 🗑️ Eliminar afiliado
-router.delete("/:id", affiliateController.deleteAffiliate);
+// 🗑️ Eliminar afiliado (solo Gerencia)
+router.delete("/:id", affiliateController.requireGerencia, affiliateController.deleteAffiliate);
 
 module.exports = router;

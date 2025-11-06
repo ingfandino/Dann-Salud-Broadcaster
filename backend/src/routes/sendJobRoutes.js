@@ -52,6 +52,11 @@ router.get("/:id", requireAuth, permit("asesor", "supervisor", "admin", "gerenci
 router.get("/:id/export", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
     await sendJobController.exportJobResultsExcel(req, res);
 });
+// 🔹 MEJORA 3: Exportar reporte de auto-respuestas
+router.get("/:id/autoresponse-report", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
+    logger.info(`🚦 [sendJobRoutes] GET /send-jobs/${req.params.id}/autoresponse-report`);
+    await sendJobController.exportAutoResponseReport(req, res);
+});
 router.get("/", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
     logger.info("🚦 [sendJobRoutes] GET /send-jobs/");
     await sendJobController.listJobs(req, res);

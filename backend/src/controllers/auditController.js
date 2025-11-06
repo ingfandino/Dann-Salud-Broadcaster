@@ -58,10 +58,12 @@ exports.createAudit = async (req, res) => {
         return res.status(400).json({ message: 'Fecha inválida' });
     }
 
-    // 👉 Validación de CUIL único (independiente de la fecha)
-    const existing = await Audit.findOne({ cuil: cuil.trim() });
-    if (existing) {
-        return res.status(400).json({ message: 'Ya existe un afiliado con ese CUIL' });
+    // 👉 Validación de CUIL único (solo si se proporciona)
+    if (cuil && cuil.trim()) {
+        const existing = await Audit.findOne({ cuil: cuil.trim() });
+        if (existing) {
+            return res.status(400).json({ message: 'Ya existe un afiliado con ese CUIL' });
+        }
     }
 
     const slotStart = new Date(sched);

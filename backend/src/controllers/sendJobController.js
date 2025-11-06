@@ -362,16 +362,26 @@ exports.listJobs = async (req, res) => {
             jobs = jobs.filter(j => j.createdBy && String(j.createdBy.role).toLowerCase() === "revendedor");
         }
 
-        const enriched = jobs.map(job => {
+        // Calcular respuestas (mensajes inbound) para cada job
+        const enriched = await Promise.all(jobs.map(async (job) => {
             const total = job.contacts.length || 0;
             const progress = total > 0 ? ((job.currentIndex / total) * 100).toFixed(2) : 0;
+            
+            // Contar respuestas recibidas (mensajes inbound)
+            const repliesCount = await Message.countDocuments({
+                job: job._id,
+                direction: 'inbound'
+            });
+            
             return {
                 _id: job._id,
                 name: job.name,
                 status: job.status,
                 progress,
                 scheduledFor: job.scheduledFor,
+                createdAt: job.createdAt,
                 stats: job.stats,
+                repliesCount,
                 createdBy: job.createdBy
                     ? {
                         _id: job.createdBy._id,
@@ -382,7 +392,7 @@ exports.listJobs = async (req, res) => {
                     }
                     : null,
             };
-        });
+        }));
 
         res.json(enriched);
     } catch (err) {
@@ -440,6 +450,168 @@ exports.exportJobResultsExcel = async (req, res) => {
         res.end();
     } catch (err) {
         logger.error("❌ Error exportando resultados:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// 🔹 MEJORA 3: Exportar reporte de auto-respuestas de un job
+exports.exportAutoResponseReport = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const AutoResponseLog = require("../models/AutoResponseLog");
+        const Contact = require("../models/Contact");
+        
+        // Obtener job para verificar permisos
+        const job = await SendJob.findById(id);
+        if (!job) return res.status(404).json({ error: "Job no encontrado" });
+        
+        // Verificar permisos (similar a exportJobResultsExcel)
+        const userRole = req.user?.role?.toLowerCase();
+        const userId = req.user?._id;
+        
+        if (!["admin", "gerencia"].includes(userRole)) {
+            if (userRole === "supervisor") {
+                const jobCreatorEquipo = job.createdBy?.numeroEquipo;
+                const userEquipo = req.user?.numeroEquipo;
+                if (jobCreatorEquipo !== userEquipo) {
+                    return res.status(403).json({ error: "No autorizado" });
+                }
+            } else if (userRole === "asesor") {
+                if (String(job.createdBy) !== String(userId)) {
+                    return res.status(403).json({ error: "No autorizado" });
+                }
+            }
+        }
+        
+        // Obtener logs de auto-respuestas para este job
+        const logs = await AutoResponseLog.find({ job: id })
+            .populate('contact', 'nombre telefono')
+            .sort({ respondedAt: 1 });
+        
+        if (logs.length === 0) {
+            return res.status(404).json({ 
+                error: "No hay auto-respuestas registradas para esta campaña" 
+            });
+        }
+        
+        const workbook = new ExcelJS.Workbook();
+        
+        // ═══════════════════════════════════════════════════════════
+        // HOJA 1: DETALLE DE AUTO-RESPUESTAS
+        // ═══════════════════════════════════════════════════════════
+        const detailSheet = workbook.addWorksheet('Detalle Auto-respuestas');
+        
+        detailSheet.columns = [
+            { header: 'Fecha/Hora', key: 'fecha', width: 20 },
+            { header: 'Afiliado', key: 'nombre', width: 30 },
+            { header: 'Teléfono', key: 'telefono', width: 15 },
+            { header: 'Mensaje del Usuario', key: 'userMessage', width: 40 },
+            { header: 'Palabra Clave', key: 'keyword', width: 20 },
+            { header: 'Auto-respuesta Enviada', key: 'response', width: 50 }
+        ];
+        
+        // Agregar datos
+        logs.forEach(log => {
+            detailSheet.addRow({
+                fecha: log.respondedAt ? new Date(log.respondedAt).toLocaleString('es-AR') : 'N/A',
+                nombre: log.contact?.nombre || 'Desconocido',
+                telefono: log.contact?.telefono || 'N/A',
+                userMessage: log.userMessage || '',
+                keyword: log.isFallback ? 'Comodín' : (log.keyword || 'N/A'),
+                response: log.response || ''
+            });
+        });
+        
+        // Estilo del header
+        detailSheet.getRow(1).eachCell(cell => {
+            cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FF4472C4' }
+            };
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        });
+        
+        // ═══════════════════════════════════════════════════════════
+        // HOJA 2: RESUMEN POR PALABRA CLAVE
+        // ═══════════════════════════════════════════════════════════
+        const summarySheet = workbook.addWorksheet('Resumen');
+        
+        summarySheet.columns = [
+            { header: 'Palabra Clave', key: 'keyword', width: 25 },
+            { header: 'Cantidad de Respuestas', key: 'count', width: 25 },
+            { header: 'Porcentaje', key: 'percentage', width: 15 }
+        ];
+        
+        // Agrupar por keyword
+        const grouped = logs.reduce((acc, log) => {
+            const key = log.isFallback ? 'Comodín' : (log.keyword || 'Sin keyword');
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+        }, {});
+        
+        const total = logs.length;
+        
+        // Agregar filas de resumen
+        Object.entries(grouped)
+            .sort((a, b) => b[1] - a[1]) // Ordenar por cantidad descendente
+            .forEach(([keyword, count]) => {
+                const percentage = ((count / total) * 100).toFixed(1);
+                summarySheet.addRow({
+                    keyword,
+                    count,
+                    percentage: `${percentage}%`
+                });
+            });
+        
+        // Agregar fila de total
+        summarySheet.addRow({
+            keyword: 'TOTAL',
+            count: total,
+            percentage: '100%'
+        });
+        
+        // Estilo del header
+        summarySheet.getRow(1).eachCell(cell => {
+            cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FF70AD47' }
+            };
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        });
+        
+        // Estilo de la fila de total
+        const lastRow = summarySheet.lastRow;
+        lastRow.eachCell(cell => {
+            cell.font = { bold: true };
+            cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFE7E6E6' }
+            };
+        });
+        
+        // ═══════════════════════════════════════════════════════════
+        // ENVIAR ARCHIVO
+        // ═══════════════════════════════════════════════════════════
+        res.setHeader(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+        res.setHeader(
+            "Content-Disposition",
+            `attachment; filename=autorespuestas_${id}.xlsx`
+        );
+        
+        await workbook.xlsx.write(res);
+        res.end();
+        
+        logger.info(`✅ Reporte de auto-respuestas generado para job ${id}: ${logs.length} registros`);
+    } catch (err) {
+        logger.error("❌ Error generando reporte de auto-respuestas:", err);
         res.status(500).json({ error: err.message });
     }
 };

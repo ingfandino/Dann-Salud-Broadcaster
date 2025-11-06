@@ -232,6 +232,24 @@ class BaileysClient {
           );
           logger.info(`[Baileys][${this.userId}] ✓ Contacto ${phoneNumber} marcado como respondido`);
           
+          // ✅ CORRECCIÓN BUG 5: Crear registro del mensaje inbound
+          try {
+            await Message.create({
+              contact: enviado.contact,
+              createdBy: this.userId,
+              job: enviado.job,
+              contenido: text || '',
+              direction: 'inbound',
+              status: 'recibido',
+              timestamp: new Date(),
+              to: searchJid,
+              from: this.userId
+            });
+            logger.info(`[Baileys][${this.userId}] Mensaje inbound registrado de ${phoneNumber}`);
+          } catch (e) {
+            logger.error(`[Baileys][${this.userId}] Error registrando mensaje inbound:`, e.message);
+          }
+          
           // Cargar reglas de auto-respuesta activas
           const reglas = await Autoresponse.find({ createdBy: this.userId, active: true });
           
@@ -266,12 +284,19 @@ class BaileysClient {
                   await this.sendMessage(from, rule.response);
                   logger.info(`[Baileys][${this.userId}] 🤖 Auto-respuesta enviada (${rule.keyword || "fallback"})`);
                   
-                  // Registrar en log
+                  // Registrar en log con detalles completos
                   await AutoResponseLog.create({
                     createdBy: this.userId,
                     chatId: searchJid,
                     ruleId: rule._id,
-                    respondedAt: new Date()
+                    respondedAt: new Date(),
+                    // ✅ MEJORA 3: Datos adicionales para reporte
+                    job: enviado.job,
+                    contact: enviado.contact,
+                    keyword: rule.keyword || null,
+                    response: rule.response,
+                    isFallback: rule.isFallback || false,
+                    userMessage: text || ''
                   });
                 } catch (e) {
                   logger.warn(`[Baileys][${this.userId}] Error enviando auto-respuesta:`, e.message);

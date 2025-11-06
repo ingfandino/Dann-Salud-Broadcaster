@@ -14,6 +14,8 @@ export default function AdminUsers() {
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState("");
+    const [grupo, setGrupo] = useState("");
+    const [grupos, setGrupos] = useState([]);
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [sort, setSort] = useState("createdAt");
@@ -26,7 +28,7 @@ export default function AdminUsers() {
     const fetchUsers = async () => {
         try {
             const res = await apiClient.get("/users/admin/users", {
-                params: { page, limit: 10, search, sortBy: sort, order },
+                params: { page, limit: 10, search, grupo, sortBy: sort, order },
             });
             setUsers(res.data.users);
             setTotalPages(res.data.pages || 1);
@@ -35,6 +37,16 @@ export default function AdminUsers() {
             toast.error("Error al obtener usuarios");
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchGrupos = async () => {
+        try {
+            const res = await apiClient.get("/users/admin/grupos");
+            setGrupos(res.data.grupos || []);
+        } catch (err) {
+            logger.error(err);
+            toast.error("Error al obtener grupos");
         }
     };
 
@@ -69,7 +81,11 @@ export default function AdminUsers() {
     useEffect(() => {
         fetchUsers();
         // eslint-disable-next-line
-    }, [page, sort, order]);
+    }, [page, sort, order, grupo]);
+
+    useEffect(() => {
+        fetchGrupos();
+    }, []);
 
     // Obtener ID y rol del usuario actual
     const getCurrentUserId = () => {
@@ -155,18 +171,54 @@ export default function AdminUsers() {
                     </button>
                 </form>
 
-                {/* 🔽 Orden */}
-                <div className="flex gap-2 mb-4">
+                {/* 🔽 Filtros y Orden */}
+                <div className="flex gap-2 mb-4 flex-wrap">
+                    {/* Filtro por grupo */}
+                    <select 
+                        value={grupo} 
+                        onChange={(e) => {
+                            setGrupo(e.target.value);
+                            setPage(1);
+                        }} 
+                        className="border p-2 rounded min-w-[180px]"
+                    >
+                        <option value="">🏢 Todos los grupos</option>
+                        {grupos.map((g) => (
+                            <option key={g} value={g}>
+                                Grupo {g}
+                            </option>
+                        ))}
+                    </select>
+
+                    {/* Ordenar por */}
                     <select value={sort} onChange={(e) => setSort(e.target.value)} className="border p-2 rounded">
                         <option value="createdAt">Fecha creación</option>
                         <option value="email">Email</option>
                         <option value="nombre">Nombre</option>
                         <option value="role">Rol</option>
                     </select>
+
+                    {/* Orden */}
                     <select value={order} onChange={(e) => setOrder(e.target.value)} className="border p-2 rounded">
                         <option value="asc">Ascendente</option>
                         <option value="desc">Descendente</option>
                     </select>
+
+                    {/* Botón para limpiar filtros */}
+                    {(search || grupo) && (
+                        <button
+                            onClick={() => {
+                                setSearch("");
+                                setGrupo("");
+                                setPage(1);
+                            }}
+                            className="px-3 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 flex items-center gap-1"
+                            title="Limpiar filtros"
+                        >
+                            <RefreshCcw className="w-4 h-4" />
+                            Limpiar
+                        </button>
+                    )}
                 </div>
 
                 {/* 📋 Tabla */}

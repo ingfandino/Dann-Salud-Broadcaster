@@ -45,6 +45,12 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
 
     const [loading, setLoading] = useState(false);
     const [reprogramar, setReprogramar] = useState(false);
+    
+    // Guardar fecha y hora originales
+    const originalSchedule = {
+        fecha: audit.scheduledAt ? audit.scheduledAt.split("T")[0] : "",
+        hora: audit.scheduledAt ? audit.scheduledAt.split("T")[1]?.slice(0, 5) : ""
+    };
 
     const [auditores, setAuditores] = useState([]);
     const [availableSlots, setAvailableSlots] = useState([]);
@@ -104,6 +110,17 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
     };
     
     const availableStatuses = getAvailableStatuses();
+
+    // Restaurar fecha y hora originales cuando se desactiva reprogramar
+    useEffect(() => {
+        if (!reprogramar) {
+            setForm(prev => ({
+                ...prev,
+                fecha: originalSchedule.fecha,
+                hora: originalSchedule.hora
+            }));
+        }
+    }, [reprogramar]);
 
     useEffect(() => {
         const fetchAuditores = async () => {

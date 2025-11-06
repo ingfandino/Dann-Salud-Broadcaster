@@ -200,7 +200,7 @@ async function getUsersAdmin(req, res) {
             return res.status(403).json({ error: "Acceso denegado" });
         }
 
-        let { page = 1, limit = 10, search = "", sortBy = "createdAt", order = "desc" } = req.query;
+        let { page = 1, limit = 10, search = "", sortBy = "createdAt", order = "desc", grupo = "" } = req.query;
         page = parseInt(page);
         limit = parseInt(limit);
 
@@ -210,6 +210,11 @@ async function getUsersAdmin(req, res) {
                 { nombre: { $regex: search, $options: "i" } },
                 { email: { $regex: search, $options: "i" } }
             ];
+        }
+        
+        // Filtro por grupo
+        if (grupo) {
+            query.numeroEquipo = grupo;
         }
 
         const sortOrder = order === "asc" ? 1 : -1;
@@ -281,6 +286,28 @@ async function updateUserRole(req, res) {
     }
 }
 
+// 📋 Obtener lista de grupos únicos
+async function getAvailableGroups(req, res) {
+    try {
+        if (!(req.user.role === "admin" || req.user.role === "gerencia")) {
+            return res.status(403).json({ error: "Acceso denegado" });
+        }
+
+        const grupos = await User.distinct("numeroEquipo", { 
+            deletedAt: null,
+            numeroEquipo: { $exists: true, $ne: null, $ne: "" }
+        });
+
+        // Ordenar alfabéticamente
+        grupos.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+        res.json({ grupos });
+    } catch (err) {
+        logger.error("❌ Error obteniendo grupos:", err);
+        res.status(500).json({ error: err.message });
+    }
+}
+
 module.exports = {
     createUser,
     getUsers,
@@ -290,5 +317,6 @@ module.exports = {
     deleteUserAdmin,
     toggleActiveUser,
     getUsersAdmin,
-    updateUserRole
+    updateUserRole,
+    getAvailableGroups
 };

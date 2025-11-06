@@ -210,11 +210,32 @@ async function processJob(jobId) {
         const placeholders = placeholderMatches.map(m => m[1]);
         const placeholdersNormalized = Array.from(new Set(placeholders.map(k => normalizeKey(k))));
         const dataKeys = Array.from(dataMap.keys());
-        logger.info("🔎 Placeholder debug", { jobId: initialJob._id, contactId: contact?._id, placeholders, placeholdersNormalized, dataKeys });
+        
+        // 🔍 Debug mejorado: mostrar valores del dataMap
+        const dataMapObj = Object.fromEntries(dataMap);
+        logger.info("🔎 Placeholder debug", { 
+            jobId: initialJob._id, 
+            contactId: contact?._id, 
+            telefono: contact?.telefono,
+            placeholders, 
+            placeholdersNormalized, 
+            dataKeys,
+            dataMapSample: dataMapObj // Mostrar todos los datos disponibles
+        });
 
         let rendered = initialJob.message.replace(/{{\s*(.*?)\s*}}/g, (match, key) => {
             const nk = normalizeKey(key);
-            return dataMap.has(nk) ? String(dataMap.get(nk)) : "";
+            if (dataMap.has(nk)) {
+                return String(dataMap.get(nk));
+            } else {
+                // ⚠️ Si no se encuentra, mantener el placeholder original para debugging
+                logger.warn(`⚠️ Placeholder no encontrado: "${key}" (normalizado: "${nk}")`, {
+                    jobId: initialJob._id,
+                    contactId: contact?._id,
+                    availableKeys: dataKeys
+                });
+                return match; // Devolver {{key}} original en lugar de vacío
+            }
         });
         const messageText = parseSpintax(rendered);
 
@@ -267,33 +288,55 @@ async function processJob(jobId) {
 
             if (!sent) throw lastError || new Error("Fallo desconocido en sendMessage");
 
-            const newMsg = new Message({
-                contact: contact._id,
-                createdBy: initialJob.createdBy,
+            // ✅ CORRECCIÓN BUG 1: Verificar si ya existe mensaje para este contacto en este job
+            const existingMsg = await Message.findOne({
                 job: initialJob._id,
-                contenido: messageText,
-                direction: "outbound",
-                status: "enviado",
-                timestamp: new Date(),
+                to: to,
+                direction: "outbound"
             });
-            await newMsg.save();
-
-            logger.info(`✅ Enviado a ${contact.telefono}`);
-            wasSent = true;
+            
+            if (existingMsg) {
+                logger.warn(`⚠️ Mensaje duplicado detectado en BD para ${contact.telefono}, omitiendo...`);
+                wasSent = true; // Contar como enviado para no afectar stats
+            } else {
+                const newMsg = new Message({
+                    contact: contact._id,
+                    createdBy: initialJob.createdBy,
+                    job: initialJob._id,
+                    contenido: messageText,
+                    to: to,
+                    direction: "outbound",
+                    status: "enviado",
+                    timestamp: new Date(),
+                });
+                await newMsg.save();
+                logger.info(`✅ Enviado a ${contact.telefono}`);
+                wasSent = true;
+            }
 
         } catch (err) {
             logger.error(`❌ Error enviando a ${contact.telefono}`, { error: err.message });
 
-            const failedMsg = new Message({
-                contact: contact._id,
-                createdBy: initialJob.createdBy,
+            // Verificar si ya existe registro antes de guardar como fallido
+            const existingMsg = await Message.findOne({
                 job: initialJob._id,
-                contenido: messageText,
-                direction: "outbound",
-                status: "fallido",
-                timestamp: new Date(),
+                to: to,
+                direction: "outbound"
             });
-            await failedMsg.save();
+            
+            if (!existingMsg) {
+                const failedMsg = new Message({
+                    contact: contact._id,
+                    createdBy: initialJob.createdBy,
+                    job: initialJob._id,
+                    contenido: messageText,
+                    to: to,
+                    direction: "outbound",
+                    status: "fallido",
+                    timestamp: new Date(),
+                });
+                await failedMsg.save();
+            }
         } finally {
             await SendJob.updateOne(
                 { _id: jobId },

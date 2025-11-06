@@ -211,15 +211,34 @@ Esta notificación es automática y no requiere respuesta.
 // 🔔 4. Notificación cuando auditoría pasa a estado 'Completa'
 async function notifyAuditCompleted({ audit }) {
     try {
-        // Obtener usuarios con rol 'admin'
-        const adminUsers = await User.find({ role: "admin", active: true }).select("_id");
+        const recipients = [];
         
-        if (adminUsers.length === 0) {
-            logger.warn("⚠️ No hay admins activos para notificar");
-            return;
+        // Notificar al asesor que creó la auditoría
+        if (audit.createdBy && audit.createdBy._id) {
+            recipients.push(audit.createdBy._id);
         }
         
-        const recipients = adminUsers.map(u => u._id);
+        // Notificar al supervisor del mismo equipo
+        if (audit.createdBy && audit.createdBy.numeroEquipo) {
+            const supervisors = await User.find({
+                role: "supervisor",
+                numeroEquipo: audit.createdBy.numeroEquipo,
+                active: true
+            }).select("_id");
+            recipients.push(...supervisors.map(u => u._id));
+        }
+        
+        // También notificar a admins
+        const adminUsers = await User.find({ role: "admin", active: true }).select("_id");
+        recipients.push(...adminUsers.map(u => u._id));
+        
+        // Eliminar duplicados
+        const uniqueRecipients = [...new Set(recipients.map(r => r.toString()))];
+        
+        if (uniqueRecipients.length === 0) {
+            logger.warn("⚠️ No hay destinatarios para notificación de auditoría completa");
+            return;
+        }
         
         const content = `
 ✅ VIDEO-AUDITORÍA COMPLETADA - ACCIÓN REQUERIDA
@@ -249,12 +268,12 @@ Esta notificación es automática y no requiere respuesta.
         `.trim();
 
         await sendInternalNotification({
-            toUserIds: recipients,
+            toUserIds: uniqueRecipients,
             subject: "✅ Auditoría Completada - Crear QR",
             content
         });
         
-        logger.info(`✅ Notificación de completitud enviada a ${recipients.length} admin(s) para CUIL: ${audit.cuil}`);
+        logger.info(`✅ Notificación de completitud enviada a ${uniqueRecipients.length} usuario(s) para CUIL: ${audit.cuil}`);
     } catch (error) {
         logger.error("❌ Error notificando completitud de auditoría:", error);
     }

@@ -1,6 +1,6 @@
 // frontend/src/pages/BulkMessages.jsx
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { fetchJobs, createJob, jobAction } from "../services/jobService";
 import {
     fetchTemplates,
@@ -866,9 +866,9 @@ export default function BulkMessages() {
                     </div>
                 )}
 
-                {/* Tabla de Jobs con métricas mejoradas */}
+                {/* Tabla de Jobs con métricas mejoradas - SOLO CAMPAÑAS DEL DÍA */}
                 <div className="mt-8">
-                    <h2 className="text-xl font-semibold mb-2">📋 Campañas creadas</h2>
+                    <h2 className="text-xl font-semibold mb-2">📋 Campañas creadas hoy</h2>
                     <div className="overflow-x-auto">
                         <table className="w-full border text-left">
                             <thead>
@@ -878,11 +878,34 @@ export default function BulkMessages() {
                                     <th className="p-2 border">Estado</th>
                                     <th className="p-2 border">Progreso</th>
                                     <th className="p-2 border">Métricas</th>
+                                    <th className="p-2 border">Hora Creación</th>
                                     <th className="p-2 border">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {jobs.map((job) => {
+                                {(() => {
+                                    // Filtrar solo campañas del día actual
+                                    const today = new Date();
+                                    today.setHours(0, 0, 0, 0);
+                                    const tomorrow = new Date(today);
+                                    tomorrow.setDate(tomorrow.getDate() + 1);
+                                    
+                                    const todayJobs = jobs.filter(job => {
+                                        const createdAt = new Date(job.createdAt);
+                                        return createdAt >= today && createdAt < tomorrow;
+                                    });
+                                    
+                                    if (todayJobs.length === 0) {
+                                        return (
+                                            <tr>
+                                                <td colSpan="7" className="p-4 text-center text-gray-500">
+                                                    No hay campañas creadas hoy
+                                                </td>
+                                            </tr>
+                                        );
+                                    }
+                                    
+                                    return todayJobs.map((job) => {
                                     const progress = parseFloat(job.progress || 0);
                                     const stats = job.stats || { total: 0, sent: 0, failed: 0, pending: 0 };
                                     
@@ -954,6 +977,12 @@ export default function BulkMessages() {
                                                     </span>
                                                 </div>
                                             </td>
+                                            <td className="p-2 border text-sm text-gray-700">
+                                                {new Date(job.createdAt).toLocaleTimeString('es-AR', {
+                                                    hour: '2-digit',
+                                                    minute: '2-digit'
+                                                })}
+                                            </td>
                                             <td className="p-2 border space-x-2">
                                                 <button
                                                     onClick={() => handleAction(job._id, "pause")}
@@ -979,14 +1008,8 @@ export default function BulkMessages() {
                                             </td>
                                         </tr>
                                     );
-                                })}
-                                {jobs.length === 0 && (
-                                    <tr>
-                                        <td colSpan="6" className="p-4 text-center text-gray-500">
-                                            No hay campañas creadas aún
-                                        </td>
-                                    </tr>
-                                )}
+                                    });
+                                })()}
                             </tbody>
                         </table>
                     </div>

@@ -55,7 +55,7 @@ export default function App() {
                 <Route
                     path="/affiliates"
                     element={
-                        <RoleRoute roles={["gerencia"]}>
+                        <RoleRoute roles={["gerencia", "supervisor"]}>
                             <AffiliateDatabase />
                         </RoleRoute>
                     }

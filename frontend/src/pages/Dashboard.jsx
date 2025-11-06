@@ -45,6 +45,7 @@ export default function Dashboard() {
         supervisor: [
             { to: "/reports", icon: <BarChart2 className="w-5 h-5" />, label: "Reportes de mi Equipo" },
             { to: "/bulk-messages", icon: <MessageSquare className="w-5 h-5" />, label: "Mensajería Masiva" },
+            { to: "/affiliates", icon: <Database className="w-5 h-5" />, label: "Mis Exportaciones" },
             { to: "/audits", icon: <SquareUserRound className="w-5 h-5" />, label: "Auditorías" },
         ],
         auditor: [

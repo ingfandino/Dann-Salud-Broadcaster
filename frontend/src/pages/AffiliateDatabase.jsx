@@ -11,7 +11,11 @@ import logger from "../utils/logger";
 export default function AffiliateDatabase() {
     const { user } = useAuth();
     const navigate = useNavigate();
-    const [activeTab, setActiveTab] = useState("upload");
+    const userRole = user?.role?.toLowerCase();
+    const isSupervisor = userRole === "supervisor";
+    
+    // Supervisores solo ven la pestaña "Exportaciones"
+    const [activeTab, setActiveTab] = useState(isSupervisor ? "exports" : "upload");
     const [loading, setLoading] = useState(false);
     const [file, setFile] = useState(null);
     const [uploadProgress, setUploadProgress] = useState(null);
@@ -31,11 +35,24 @@ export default function AffiliateDatabase() {
     const [lastUploadResult, setLastUploadResult] = useState(null);
 
     useEffect(() => {
-        loadStats();
-        loadExportConfig();
+        // Supervisores no necesitan cargar stats ni config
+        if (!isSupervisor) {
+            loadStats();
+            loadExportConfig();
+        }
+        // Todos cargan sus exportaciones
+        if (isSupervisor) {
+            loadExports();
+        }
     }, []);
 
     useEffect(() => {
+        // Supervisores solo acceden a exports
+        if (isSupervisor && activeTab !== "exports") {
+            setActiveTab("exports");
+            return;
+        }
+        
         if (activeTab === "search") {
             // Limpiar datos viejos primero
             if (stats?.total === 0) {
@@ -216,18 +233,20 @@ export default function AffiliateDatabase() {
         }
     };
 
-    if (user?.role !== "gerencia") {
+    // Permitir acceso a Gerencia y Supervisores
+    const allowedRoles = ["gerencia", "supervisor", "admin"];
+    if (!allowedRoles.includes(userRole)) {
         return (
             <div className="min-h-screen bg-gradient-to-br from-red-50 to-red-100 flex items-center justify-center p-4">
                 <motion.div
-                    className="bg-white p-8 rounded-lg shadow-xl max-w-md text-center"
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="bg-white rounded-lg shadow-xl p-8 max-w-md text-center"
                 >
                     <div className="text-6xl mb-4">🔒</div>
                     <h2 className="text-2xl font-bold text-red-600 mb-2">Acceso Denegado</h2>
                     <p className="text-gray-600">
-                        Esta funcionalidad está restringida exclusivamente a usuarios con rol <strong>Gerencia</strong>.
+                        Esta funcionalidad está restringida a usuarios con rol <strong>Gerencia</strong> o <strong>Supervisor</strong>.
                     </p>
                 </motion.div>
             </div>
@@ -312,12 +331,14 @@ export default function AffiliateDatabase() {
             >
                 <div className="flex border-b overflow-x-auto">
                         {[
-                            { id: "upload", icon: "📤", label: "Cargar Archivo" },
-                            { id: "search", icon: "🔍", label: "Buscar Afiliados" },
-                            { id: "config", icon: "⚙️", label: "Configuración de Envíos" },
-                            { id: "exports", icon: "📁", label: "Exportaciones" },
-                            { id: "stats", icon: "📊", label: "Estadísticas" }
-                        ].map(tab => (
+                            { id: "upload", icon: "📤", label: "Cargar Archivo", roles: ["gerencia", "admin"] },
+                            { id: "search", icon: "🔍", label: "Buscar Afiliados", roles: ["gerencia", "admin"] },
+                            { id: "config", icon: "⚙️", label: "Configuración de Envíos", roles: ["gerencia", "admin"] },
+                            { id: "exports", icon: "📁", label: "Exportaciones", roles: ["gerencia", "admin", "supervisor"] },
+                            { id: "stats", icon: "📊", label: "Estadísticas", roles: ["gerencia", "admin"] }
+                        ]
+                        .filter(tab => !tab.roles || tab.roles.includes(userRole))
+                        .map(tab => (
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
@@ -628,7 +649,7 @@ export default function AffiliateDatabase() {
                                     
                                     <div className="mb-6 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
                                         <p className="text-sm text-yellow-800">
-                                            ℹ️ Los archivos CSV se generarán automáticamente cada día a la hora indicada y se enviarán a todos los <strong>Supervisores</strong> vía mensajería interna.
+                                            ℹ️ Los archivos <strong>XLSX (Excel)</strong> se generarán automáticamente cada día a la hora indicada. Cada <strong>Supervisor</strong> recibirá su archivo exclusivo vía mensajería interna.
                                         </p>
                                     </div>
 
@@ -649,7 +670,10 @@ export default function AffiliateDatabase() {
                                                 className="w-full md:w-64 border rounded px-3 py-2"
                                             />
                                             <p className="text-sm text-gray-600 mt-1">
-                                                Si hay {stats?.total || 0} afiliados, se generarán {Math.ceil((stats?.total || 0) / exportConfig.affiliatesPerFile)} archivo(s)
+                                                📋 Si hay {stats?.available || stats?.total || 0} afiliados disponibles (sin usar), se generarán aproximadamente {Math.ceil((stats?.available || stats?.total || 0) / exportConfig.affiliatesPerFile)} archivo(s) <strong>en total</strong> (distribuidos a lo largo del tiempo).
+                                            </p>
+                                            <p className="text-xs text-blue-600 mt-1">
+                                                🔄 Cada envío usará {exportConfig.affiliatesPerFile} afiliados × cantidad de supervisores activos. Los afiliados usados se marcan como "exportados" y no se reutilizan.
                                             </p>
                                         </div>
 
@@ -710,13 +734,33 @@ export default function AffiliateDatabase() {
                                                             {new Date(exp.createdAt).toLocaleString("es-AR")} • {(exp.size / 1024).toFixed(2)} KB
                                                         </div>
                                                     </div>
-                                                    <a
-                                                        href={`${apiClient.defaults.baseURL}${exp.downloadUrl}`}
-                                                        download
+                                                    <button
+                                                        onClick={async () => {
+                                                            try {
+                                                                logger.info("Descargando archivo:", exp.downloadUrl);
+                                                                const response = await apiClient.get(exp.downloadUrl, {
+                                                                    responseType: 'blob'
+                                                                });
+                                                                
+                                                                const url = window.URL.createObjectURL(new Blob([response.data]));
+                                                                const link = document.createElement('a');
+                                                                link.href = url;
+                                                                link.setAttribute('download', exp.filename);
+                                                                document.body.appendChild(link);
+                                                                link.click();
+                                                                link.remove();
+                                                                window.URL.revokeObjectURL(url);
+                                                                
+                                                                toast.success("✅ Archivo descargado");
+                                                            } catch (error) {
+                                                                logger.error("Error descargando archivo:", error);
+                                                                toast.error(error.response?.data?.error || "Error al descargar archivo");
+                                                            }
+                                                        }}
                                                         className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                                                     >
                                                         📥 Descargar
-                                                    </a>
+                                                    </button>
                                                 </div>
                                             ))}
                                         </div>
@@ -728,12 +772,50 @@ export default function AffiliateDatabase() {
                                 <motion.div key="stats" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
                                     <h2 className="text-xl font-bold mb-4">Estadísticas de la Base</h2>
                                     
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                                         <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-lg shadow-lg">
                                             <div className="text-5xl font-bold mb-2">{stats.total}</div>
                                             <div className="text-blue-100">Afiliados Totales</div>
                                         </div>
 
+                                        <div className="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-lg shadow-lg">
+                                            <div className="text-5xl font-bold mb-2">{stats.available || 0}</div>
+                                            <div className="text-green-100">✨ Disponibles (Sin usar)</div>
+                                        </div>
+
+                                        <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-6 rounded-lg shadow-lg">
+                                            <div className="text-5xl font-bold mb-2">{stats.exported || 0}</div>
+                                            <div className="text-orange-100">📤 Ya Exportados</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Barra de progreso visual */}
+                                    <div className="bg-white border-2 border-gray-200 p-6 rounded-lg mb-6">
+                                        <h3 className="font-semibold text-gray-800 mb-3">Estado de Uso</h3>
+                                        <div className="relative h-8 bg-gray-200 rounded-full overflow-hidden">
+                                            <div 
+                                                className="absolute h-full bg-gradient-to-r from-green-400 to-green-600 flex items-center justify-center text-white text-sm font-semibold"
+                                                style={{ width: `${stats.total > 0 ? (stats.available / stats.total * 100) : 0}%` }}
+                                            >
+                                                {stats.total > 0 && (stats.available / stats.total * 100).toFixed(1)}% Disponibles
+                                            </div>
+                                            <div 
+                                                className="absolute h-full bg-gradient-to-r from-orange-400 to-orange-600 flex items-center justify-center text-white text-sm font-semibold"
+                                                style={{ 
+                                                    width: `${stats.total > 0 ? (stats.exported / stats.total * 100) : 0}%`,
+                                                    left: `${stats.total > 0 ? (stats.available / stats.total * 100) : 0}%`
+                                                }}
+                                            >
+                                                {stats.total > 0 && (stats.exported / stats.total * 100).toFixed(1)}% Usados
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between mt-2 text-sm text-gray-600">
+                                            <span>💚 {stats.available || 0} frescos</span>
+                                            <span>🟠 {stats.exported || 0} exportados</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div className="bg-white border-2 border-gray-200 p-6 rounded-lg">
                                             <h3 className="font-semibold text-gray-800 mb-3">Top Obras Sociales</h3>
                                             <div className="space-y-2">
@@ -746,7 +828,7 @@ export default function AffiliateDatabase() {
                                             </div>
                                         </div>
 
-                                        <div className="bg-white border-2 border-gray-200 p-6 rounded-lg md:col-span-2">
+                                        <div className="bg-white border-2 border-gray-200 p-6 rounded-lg">
                                             <h3 className="font-semibold text-gray-800 mb-3">Cargas Recientes</h3>
                                             <div className="space-y-2">
                                                 {stats.recentBatches.map((batch) => (
