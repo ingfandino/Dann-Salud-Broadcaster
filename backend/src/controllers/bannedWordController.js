@@ -54,7 +54,7 @@ exports.addBannedWord = async (req, res) => {
         await bannedWord.save();
         await bannedWord.populate("addedBy", "name email");
 
-        logger.info(`Palabra prohibida agregada: "${word}" por ${req.user.email}`);
+        logger.info(`Palabra prohibida agregada: "${word}" por ${req.user.nombre || req.user.name || req.user.email}`);
 
         res.json({
             success: true,
@@ -116,7 +116,7 @@ exports.deleteBannedWord = async (req, res) => {
 
         await BannedWord.findByIdAndDelete(id);
 
-        logger.info(`Palabra prohibida eliminada: "${bannedWord.word}" por ${req.user.email}`);
+        logger.info(`Palabra prohibida eliminada: "${bannedWord.word}" por ${req.user.nombre || req.user.name || req.user.email}`);
 
         res.json({
             success: true,

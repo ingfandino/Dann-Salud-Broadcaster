@@ -5,7 +5,7 @@ import { toast } from "react-toastify";
 export default function RecoveryForm() {
     const [form, setForm] = useState({ nombre: "", cuil: "", telefono: "", obraSocialVendida: "Binimed", fecha: "", hora: "", datosExtra: "" });
     const [loading, setLoading] = useState(false);
-    const OBRAS_VENDIDAS = ["Binimed", "Meplife", "Medicenter"];
+    const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"];
 
     const onChange = (e) => setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
 

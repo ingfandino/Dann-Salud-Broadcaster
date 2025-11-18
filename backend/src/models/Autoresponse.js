@@ -28,7 +28,7 @@ const autoresponseSchema = new mongoose.Schema(
         matchType: {
             type: String,
             enum: ["exact", "contains"],
-            default: "contains"
+            default: "exact" // ✅ Comparación exacta por defecto (solo mayús/minús y espacios tolerados)
         },
         isFallback: {
             type: Boolean,

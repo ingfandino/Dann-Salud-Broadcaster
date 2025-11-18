@@ -17,7 +17,7 @@ function errorHandler(err, req, res, next) {
         stack: err.stack,
         route: req.originalUrl,
         method: req.method,
-        user: req.user ? req.user._id : 'no autenticado',
+        user: req.user ? (req.user.nombre || req.user.name || req.user.email || req.user._id) : 'no autenticado',
         ip: req.ip
     });
     

@@ -20,6 +20,7 @@ import Audits from "./pages/Audits";
 import AffiliateDatabase from "./pages/AffiliateDatabase";
 import BannedWords from "./pages/BannedWords";
 import ColorPalette from "./pages/ColorPalette";
+import RecursosHumanos from "./pages/RecursosHumanos";
 
 // Contexto y rutas protegidas
 import { AuthProvider } from "./context/AuthContext";
@@ -121,6 +122,16 @@ export default function App() {
                         <GerenciaRoute>
                             <AdminUsers />
                         </GerenciaRoute>
+                    }
+                />
+
+                {/* Recursos Humanos - Gerencia, RRHH y Supervisor */}
+                <Route
+                    path="/recursos-humanos"
+                    element={
+                        <RoleRoute roles={["gerencia", "rrhh", "supervisor"]}>
+                            <RecursosHumanos />
+                        </RoleRoute>
                     }
                 />
 

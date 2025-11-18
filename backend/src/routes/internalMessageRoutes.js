@@ -80,6 +80,9 @@ router.post("/", requireAuth, upload.array("attachments", 5), internalMessageCon
 // 🗑️ Eliminar mensaje
 router.delete("/:id", requireAuth, internalMessageController.deleteMessage);
 
+// 🗑️ Eliminar TODOS los mensajes del usuario
+router.delete("/", requireAuth, internalMessageController.deleteAllMessages);
+
 // ⭐ Marcar/desmarcar como destacado
 router.patch("/:id/starred", requireAuth, internalMessageController.toggleStarred);
 

@@ -31,16 +31,26 @@ whatsappEvents.on("message", async (msg) => {
         );
         logger.info(`📩 Respuesta recibida de contacto de campaña: ${msg.from}`);
 
-        const reglas = await Autoresponse.find();
+        // ✅ CORRECCIÓN: Auto-respuestas con comparación exacta por defecto
+        const reglas = await Autoresponse.find({ active: true });
         if (reglas.length) {
-            const lowerBody = msg.body.toLowerCase();
-            const matched = reglas.find(r => lowerBody.includes(r.keyword.toLowerCase()));
+            const normalize = (s) => (s || "").toLowerCase().trim();
+            const bodyNorm = normalize(msg.body);
+            
+            // Buscar regla que coincida
+            const matched = reglas.find(r => {
+                const kw = normalize(r.keyword);
+                if (!kw) return false;
+                const mt = r.matchType || "exact"; // Default a exact
+                return mt === "exact" ? bodyNorm === kw : bodyNorm.includes(kw);
+            });
+            
             const rule = matched || reglas.find(r => r.isFallback);
             if (rule) {
                 const client = getWhatsappClient();
                 if (client) {
                     await client.sendMessage(msg.from, rule.response);
-                    logger.info(`🤖 Auto-respuesta enviada (${rule.keyword || "fallback"})`);
+                    logger.info(`🤖 Auto-respuesta enviada (${rule.keyword || "fallback"}) - matchType: ${rule.matchType || "exact"}`);
                 }
             }
         }

@@ -86,6 +86,7 @@ function initSocket(server, app = null, allowedOrigins = []) {
         const user = socket.user || {};
         // JWT payload usa 'sub' como subject; mantener compat con 'id' si existiera
         const userId = user.sub || user.id;
+        const userName = user.nombre || user.name || user.email || userId || "?";
 
         if (userId) {
             addUser(userId); // Agrega usuario conectado
@@ -94,7 +95,7 @@ function initSocket(server, app = null, allowedOrigins = []) {
             } catch {}
         }
 
-        logger.info(` Socket conectado: ${socket.id} (user: ${userId || "?"}, rol: ${user.role || "?"})`);
+        logger.info(` Socket conectado: ${socket.id} (user: ${userName}, rol: ${user.role || "?"})`);
 
         // Suscripciones básicas
         socket.on("metrics:subscribe", () => {
@@ -176,7 +177,7 @@ function initSocket(server, app = null, allowedOrigins = []) {
             if (userId) {
                 removeUser(userId); // ✅ Elimina usuario conectado
             }
-            logger.info(`🔌 Socket desconectado: ${socket.id} (user: ${userId || "?"})`);
+            logger.info(`🔌 Socket desconectado: ${socket.id} (user: ${userName})`);
         });
     });
 

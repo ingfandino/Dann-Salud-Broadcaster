@@ -10,15 +10,103 @@ const fs = require("fs").promises;
 const ExcelJS = require("exceljs");
 
 /**
+ * Obtener afiliados según distribución de obra social
+ * @param {Array} distribution - Distribución [{obraSocial, cantidad}]
+ * @param {Object} baseQuery - Query base para filtros
+ * @param {Set} usedIds - IDs ya usados (para evitar duplicados)
+ */
+async function getAffiliatesByDistribution(distribution, baseQuery, usedIds = new Set()) {
+    const affiliates = [];
+    
+    if (!distribution || distribution.length === 0) {
+        // Sin distribución: obtener afiliados aleatorios
+        return [];
+    }
+    
+    for (const dist of distribution) {
+        const query = { ...baseQuery, _id: { $nin: Array.from(usedIds) } };
+        
+        if (dist.obraSocial === "*") {
+            // Obtener afiliados de obras sociales NO especificadas
+            const usedObraSociales = distribution
+                .filter(d => d.obraSocial !== "*")
+                .map(d => d.obraSocial);
+            
+            if (usedObraSociales.length > 0) {
+                query.obraSocial = { $nin: usedObraSociales };
+            }
+        } else {
+            // Obtener afiliados de obra social específica
+            query.obraSocial = dist.obraSocial;
+        }
+        
+        const affs = await Affiliate.find(query)
+            .limit(dist.cantidad)
+            .sort({ uploadDate: 1 })
+            .lean();
+        
+        affiliates.push(...affs);
+        affs.forEach(aff => usedIds.add(aff._id));
+        
+        if (affs.length < dist.cantidad) {
+            logger.warn(`⚠️ Solo se encontraron ${affs.length}/${dist.cantidad} afiliados de ${dist.obraSocial === "*" ? "otras obras sociales" : dist.obraSocial}`);
+        }
+    }
+    
+    return affiliates;
+}
+
+/**
+ * Generar archivo XLSX con afiliados
+ */
+async function generateXLSXFile(supervisor, affiliates, uploadDir) {
+    const formattedData = affiliates.map(aff => ({
+        nombre: aff.nombre,
+        telefono: aff.telefono1,
+        obra_social: aff.obraSocial,
+        localidad: aff.localidad,
+        edad: aff.edad || "",
+        cuil: aff.cuil
+    }));
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Afiliados');
+    
+    worksheet.columns = [
+        { header: 'nombre', key: 'nombre', width: 30 },
+        { header: 'telefono', key: 'telefono', width: 15 },
+        { header: 'obra_social', key: 'obra_social', width: 25 },
+        { header: 'localidad', key: 'localidad', width: 20 },
+        { header: 'edad', key: 'edad', width: 10 },
+        { header: 'cuil', key: 'cuil', width: 15 }
+    ];
+    
+    formattedData.forEach(row => worksheet.addRow(row));
+    
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF4472C4' }
+    };
+    
+    const filename = `afiliados_${supervisor._id}_${Date.now()}.xlsx`;
+    const filePath = path.join(uploadDir, filename);
+    
+    await workbook.xlsx.writeFile(filePath);
+    
+    return { filename, filePath, count: affiliates.length };
+}
+
+/**
  * Generar y enviar archivos XLSX de afiliados a supervisores
- * ✅ CORRECCIÓN BUG 3: Solo genera N archivos según supervisores activos
- * ✅ CORRECCIÓN BUG 4: Usa formato XLSX en lugar de CSV
+ * ✅ Soporte para envío MASIVO y AVANZADO
+ * ✅ Distribución por obra social
  */
 async function generateAndSendAffiliateCSVs() {
     try {
         logger.info("🔄 Iniciando generación programada de archivos XLSX de afiliados...");
 
-        // Obtener configuración activa
         const config = await AffiliateExportConfig.findOne({ active: true });
         
         if (!config) {
@@ -32,18 +120,13 @@ async function generateAndSendAffiliateCSVs() {
         const scheduledHour = parseInt(hours);
         const scheduledMinute = parseInt(minutes);
         
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-
-        // Ejecutar solo si la hora actual coincide con la hora programada
-        if (currentHour !== scheduledHour || currentMinute !== scheduledMinute) {
-            return; // No es la hora todavía
+        if (now.getHours() !== scheduledHour || now.getMinutes() !== scheduledMinute) {
+            return;
         }
 
         // Verificar si ya se ejecutó hoy
-        const lastExecuted = config.lastExecuted;
-        if (lastExecuted) {
-            const lastExecDate = new Date(lastExecuted);
+        if (config.lastExecuted) {
+            const lastExecDate = new Date(config.lastExecuted);
             const today = new Date();
             if (
                 lastExecDate.getDate() === today.getDate() &&
@@ -56,194 +139,173 @@ async function generateAndSendAffiliateCSVs() {
         }
 
         logger.info(`⏰ Ejecutando exportación programada (${config.scheduledTime})`);
+        logger.info(`📋 Tipo de envío: ${config.sendType}`);
 
-        // ✅ BUG 3: Obtener supervisores activos primero
-        const supervisors = await User.find({ role: "supervisor", active: true }).lean();
-        
-        if (supervisors.length === 0) {
-            logger.warn("⚠️ No hay supervisores activos para enviar archivos");
-            config.lastExecuted = new Date();
-            await config.save();
-            return;
-        }
-        
-        logger.info(`👥 Supervisores activos: ${supervisors.length}`);
-        
-        // ✅ BUG 3: Calcular total de afiliados necesarios
-        const affiliatesPerFile = config.affiliatesPerFile;
-        const totalNeeded = supervisors.length * affiliatesPerFile;
-        
-        logger.info(`📋 Afiliados necesarios: ${totalNeeded} (${affiliatesPerFile} por supervisor)`);
-
-        // Obtener afiliados NO EXPORTADOS según filtros
-        const query = { active: true, exported: false };
-        if (config.filters) {
-            if (config.filters.obraSocial) query.obraSocial = config.filters.obraSocial;
-            if (config.filters.localidad) query.localidad = config.filters.localidad;
-            if (config.filters.minAge || config.filters.maxAge) {
-                query.edad = {};
-                if (config.filters.minAge) query.edad.$gte = config.filters.minAge;
-                if (config.filters.maxAge) query.edad.$lte = config.filters.maxAge;
-            }
-        }
-
-        const availableAffiliates = await Affiliate.find(query)
-            .limit(totalNeeded)
-            .sort({ uploadDate: 1 })
-            .lean();
-
-        if (availableAffiliates.length === 0) {
-            logger.info("⚠️ No hay afiliados disponibles (sin exportar) para generar archivos");
-            config.lastExecuted = new Date();
-            await config.save();
-            return;
-        }
-
-        logger.info(`📊 Afiliados disponibles: ${availableAffiliates.length}`);
-
-        // ✅ BUG 3: Dividir SOLO en archivos por supervisor (no usar todos)
-        const filesData = [];
-        const totalFiles = supervisors.length;
-
-        const batchId = `batch_${Date.now()}`;
-        const affiliateIds = []; // Para marcar como exportados
-        
-        for (let i = 0; i < totalFiles; i++) {
-            const supervisor = supervisors[i];
-            const start = i * affiliatesPerFile;
-            const end = Math.min(start + affiliatesPerFile, availableAffiliates.length);
-            const chunk = availableAffiliates.slice(start, end);
-            
-            if (chunk.length === 0) {
-                logger.warn(`⚠️ No hay suficientes afiliados para supervisor ${supervisor.nombre}`);
-                continue;
-            }
-
-            // Formatear para mensajería masiva
-            const formattedData = chunk.map(aff => ({
-                nombre: aff.nombre,
-                telefono: aff.telefono1,
-                obra_social: aff.obraSocial,
-                localidad: aff.localidad,
-                edad: aff.edad || "",
-                cuil: aff.cuil
-            }));
-
-            // ✅ BUG 4: Generar XLSX en lugar de CSV
-            const workbook = new ExcelJS.Workbook();
-            const worksheet = workbook.addWorksheet('Afiliados');
-            
-            // Definir columnas
-            worksheet.columns = [
-                { header: 'nombre', key: 'nombre', width: 30 },
-                { header: 'telefono', key: 'telefono', width: 15 },
-                { header: 'obra_social', key: 'obra_social', width: 25 },
-                { header: 'localidad', key: 'localidad', width: 20 },
-                { header: 'edad', key: 'edad', width: 10 },
-                { header: 'cuil', key: 'cuil', width: 15 }
-            ];
-            
-            // Agregar datos
-            formattedData.forEach(row => worksheet.addRow(row));
-            
-            // Estilo del header
-            worksheet.getRow(1).font = { bold: true };
-            worksheet.getRow(1).fill = {
-                type: 'pattern',
-                pattern: 'solid',
-                fgColor: { argb: 'FF4472C4' }
-            };
-            
-            const filename = `afiliados_${supervisor._id}_${Date.now()}.xlsx`;
-            
-            filesData.push({
-                filename,
-                workbook,
-                count: chunk.length,
-                supervisor
-            });
-            
-            // Recopilar IDs para marcar como exportados
-            chunk.forEach(aff => affiliateIds.push(aff._id));
-        }
-
-        // Guardar archivos XLSX
         const uploadDir = path.join(__dirname, "../../uploads/affiliate-exports");
         await fs.mkdir(uploadDir, { recursive: true });
 
+        const batchId = `batch_${Date.now()}`;
         const savedFiles = [];
-        for (const fileData of filesData) {
-            const filePath = path.join(uploadDir, fileData.filename);
-            await fileData.workbook.xlsx.writeFile(filePath);
-            savedFiles.push({
-                path: filePath,
-                filename: fileData.filename,
-                count: fileData.count,
-                supervisor: fileData.supervisor
-            });
+        const usedAffiliateIds = new Set();
+        
+        // Query base para filtros globales
+        // exported: { $ne: true } incluye false, null, undefined
+        const baseQuery = { active: true, exported: { $ne: true } };
+        if (config.filters) {
+            if (config.filters.localidad) baseQuery.localidad = config.filters.localidad;
+            if (config.filters.minAge || config.filters.maxAge) {
+                baseQuery.edad = {};
+                if (config.filters.minAge) baseQuery.edad.$gte = config.filters.minAge;
+                if (config.filters.maxAge) baseQuery.edad.$lte = config.filters.maxAge;
+            }
+        }
+
+        // ========== ENVÍO MASIVO ==========
+        if (config.sendType === "masivo") {
+            logger.info("📤 Modo: Envío Masivo");
+            
+            const supervisors = await User.find({ role: "supervisor", active: true }).lean();
+            
+            if (supervisors.length === 0) {
+                logger.warn("⚠️ No hay supervisores activos");
+                config.lastExecuted = new Date();
+                await config.save();
+                return;
+            }
+            
+            logger.info(`👥 Supervisores activos: ${supervisors.length}`);
+            
+            for (const supervisor of supervisors) {
+                let affiliates = [];
+                
+                // Con distribución de obras sociales
+                if (config.obraSocialDistribution && config.obraSocialDistribution.length > 0) {
+                    logger.info(`📊 Distribución por OS para ${supervisor.nombre}`);
+                    affiliates = await getAffiliatesByDistribution(
+                        config.obraSocialDistribution,
+                        baseQuery,
+                        usedAffiliateIds
+                    );
+                } else {
+                    // Sin distribución: aleatorio
+                    const query = { ...baseQuery, _id: { $nin: Array.from(usedAffiliateIds) } };
+                    affiliates = await Affiliate.find(query)
+                        .limit(config.affiliatesPerFile)
+                        .sort({ uploadDate: 1 })
+                        .lean();
+                    
+                    affiliates.forEach(aff => usedAffiliateIds.add(aff._id));
+                }
+                
+                if (affiliates.length === 0) {
+                    logger.warn(`⚠️ No hay afiliados disponibles para ${supervisor.nombre}`);
+                    continue;
+                }
+                
+                const fileInfo = await generateXLSXFile(supervisor, affiliates, uploadDir);
+                savedFiles.push({
+                    ...fileInfo,
+                    supervisor,
+                    affiliates: affiliates.map(a => a._id)
+                });
+                
+                logger.info(`✅ Archivo generado para ${supervisor.nombre}: ${affiliates.length} afiliados`);
+            }
+        }
+        
+        // ========== ENVÍO AVANZADO ==========
+        else if (config.sendType === "avanzado") {
+            logger.info("⚙️ Modo: Envío Avanzado");
+            
+            if (!config.supervisorConfigs || config.supervisorConfigs.length === 0) {
+                logger.warn("⚠️ No hay configuraciones de supervisores");
+                config.lastExecuted = new Date();
+                await config.save();
+                return;
+            }
+            
+            for (const supConfig of config.supervisorConfigs) {
+                const supervisor = await User.findById(supConfig.supervisorId).lean();
+                
+                if (!supervisor || !supervisor.active) {
+                    logger.warn(`⚠️ Supervisor ${supConfig.supervisorId} no encontrado o inactivo`);
+                    continue;
+                }
+                
+                let affiliates = [];
+                
+                // Con distribución de obras sociales
+                if (supConfig.obraSocialDistribution && supConfig.obraSocialDistribution.length > 0) {
+                    logger.info(`📊 Distribución personalizada para ${supervisor.nombre}`);
+                    affiliates = await getAffiliatesByDistribution(
+                        supConfig.obraSocialDistribution,
+                        baseQuery,
+                        usedAffiliateIds
+                    );
+                } else {
+                    // Sin distribución: aleatorio
+                    const query = { ...baseQuery, _id: { $nin: Array.from(usedAffiliateIds) } };
+                    affiliates = await Affiliate.find(query)
+                        .limit(supConfig.affiliatesPerFile)
+                        .sort({ uploadDate: 1 })
+                        .lean();
+                    
+                    affiliates.forEach(aff => usedAffiliateIds.add(aff._id));
+                }
+                
+                if (affiliates.length === 0) {
+                    logger.warn(`⚠️ No hay afiliados disponibles para ${supervisor.nombre}`);
+                    continue;
+                }
+                
+                const fileInfo = await generateXLSXFile(supervisor, affiliates, uploadDir);
+                savedFiles.push({
+                    ...fileInfo,
+                    supervisor,
+                    affiliates: affiliates.map(a => a._id)
+                });
+                
+                logger.info(`✅ Archivo generado para ${supervisor.nombre}: ${affiliates.length} afiliados`);
+            }
+        }
+
+        if (savedFiles.length === 0) {
+            logger.warn("⚠️ No se generaron archivos");
+            config.lastExecuted = new Date();
+            await config.save();
+            return;
         }
 
         logger.info(`✅ ${savedFiles.length} archivos XLSX generados`);
         
-        // ✅ BUG 3: Marcar afiliados como exportados
-        if (affiliateIds.length > 0) {
-            const updateResult = await Affiliate.updateMany(
-                { _id: { $in: affiliateIds } },
+        // Marcar afiliados como exportados
+        for (const fileInfo of savedFiles) {
+            await Affiliate.updateMany(
+                { _id: { $in: fileInfo.affiliates } },
                 { 
                     $set: { 
                         exported: true,
                         exportedAt: new Date(),
+                        exportedTo: fileInfo.supervisor._id,
                         exportBatchId: batchId
                     }
                 }
             );
-            logger.info(`✅ ${updateResult.modifiedCount} afiliados marcados como exportados`);
         }
 
-        // Verificar que hay archivos para enviar
-        if (savedFiles.length === 0) {
-            logger.warn("⚠️ No se generaron archivos para enviar");
-            config.lastExecuted = new Date();
-            await config.save();
-            return;
-        }
-
-        // Obtener usuario del sistema para enviar mensajes
+        // Enviar notificaciones
         let systemUser = await User.findOne({ email: "system@dann-salud.com" });
         if (!systemUser) {
             const admins = await User.find({ role: "admin", active: true }).limit(1);
             systemUser = admins[0];
         }
 
-        if (!systemUser) {
-            logger.error("❌ No se encontró usuario del sistema para enviar mensajes");
-            return;
-        }
-
-        // ✅ Enviar mensaje INDIVIDUAL a cada supervisor con SU archivo
-        const subject = `📊 Tu Listado de Afiliados - ${new Date().toLocaleDateString("es-AR")}`;
-
-        // Enviar mensaje INDIVIDUAL a cada supervisor con SU archivo específico
-        const io = global.io;
-        
-        for (const fileInfo of savedFiles) {
-            try {
-                const supervisor = fileInfo.supervisor;
-                
-                // Marcar afiliados de este archivo como asignados a este supervisor
-                const fileAffiliateIds = availableAffiliates
-                    .slice(
-                        savedFiles.indexOf(fileInfo) * affiliatesPerFile,
-                        (savedFiles.indexOf(fileInfo) + 1) * affiliatesPerFile
-                    )
-                    .map(aff => aff._id);
-                
-                await Affiliate.updateMany(
-                    { _id: { $in: fileAffiliateIds } },
-                    { $set: { exportedTo: supervisor._id } }
-                );
-                
-                const content = `¡Hola ${supervisor.nombre}!
+        if (systemUser) {
+            const subject = `📊 Tu Listado de Afiliados - ${new Date().toLocaleDateString("es-AR")}`;
+            const io = global.io;
+            
+            for (const fileInfo of savedFiles) {
+                const content = `¡Hola ${fileInfo.supervisor.nombre}!
 
 Se ha generado tu listado de afiliados programado para hoy.
 
@@ -251,7 +313,7 @@ Se ha generado tu listado de afiliados programado para hoy.
 👥 Afiliados en tu archivo: ${fileInfo.count}
 📅 Fecha: ${new Date().toLocaleDateString("es-AR")}
 
-El archivo está listo para usar en campañas de mensajería masiva. Contiene los datos en formato XLSX con las columnas: nombre, teléfono, obra social, localidad, edad, cuil.
+El archivo está listo para usar en campañas de mensajería masiva.
 
 🔹 Para usar:
 1. Ve a: Base de Afiliados → Exportaciones
@@ -259,16 +321,13 @@ El archivo está listo para usar en campañas de mensajería masiva. Contiene lo
 3. Ve a Mensajería Masiva
 4. Carga el archivo XLSX y crea tu campaña
 
-⚠️ Este archivo es exclusivo para ti. Cada supervisor recibe su propio listado.
-
-Este mensaje fue generado automáticamente por el sistema.
+⚠️ Este archivo es exclusivo para ti.
 
 Att. Sistema Dann Salud`;
                 
-                // Crear mensaje individual
                 const message = new InternalMessage({
                     from: systemUser._id,
-                    to: supervisor._id,
+                    to: fileInfo.supervisor._id,
                     subject,
                     content,
                     read: false
@@ -276,9 +335,8 @@ Att. Sistema Dann Salud`;
 
                 await message.save();
 
-                // Emitir notificación Socket.io
                 if (io) {
-                    io.to(`user_${supervisor._id}`).emit("new_message", {
+                    io.to(`user_${fileInfo.supervisor._id}`).emit("new_message", {
                         _id: message._id,
                         from: { nombre: systemUser.nombre, email: systemUser.email },
                         subject: message.subject,
@@ -288,21 +346,17 @@ Att. Sistema Dann Salud`;
                     });
                 }
 
-                logger.info(`📨 Mensaje enviado a supervisor: ${supervisor.nombre} (${fileInfo.filename})`);
-
-            } catch (error) {
-                logger.error(`Error enviando mensaje a supervisor:`, error);
+                logger.info(`📨 Mensaje enviado a: ${fileInfo.supervisor.nombre}`);
             }
         }
 
-        // Marcar configuración como ejecutada
         config.lastExecuted = new Date();
         await config.save();
 
-        logger.info(`✅ Exportación completada y enviada a ${savedFiles.length} supervisor(es)`);
+        logger.info(`✅ Exportación completada: ${savedFiles.length} supervisor(es)`);
 
     } catch (error) {
-        logger.error("❌ Error en generación programada de CSVs:", error);
+        logger.error("❌ Error en generación programada:", error);
     }
 }
 
@@ -334,12 +388,40 @@ async function getAvailableExports(user = null) {
                 const match = filename.match(/afiliados_([a-f0-9]+)_\d+\.xlsx/);
                 const supervisorId = match ? match[1] : null;
                 
+                // Obtener nombre del supervisor
+                let supervisorName = "Desconocido";
+                if (supervisorId) {
+                    try {
+                        const supervisor = await User.findById(supervisorId).select('nombre').lean();
+                        if (supervisor) {
+                            supervisorName = supervisor.nombre;
+                        }
+                    } catch (err) {
+                        logger.warn(`No se pudo obtener nombre del supervisor ${supervisorId}`);
+                    }
+                }
+                
+                // Contar afiliados en el archivo
+                let affiliateCount = 0;
+                try {
+                    const workbook = new ExcelJS.Workbook();
+                    await workbook.xlsx.readFile(filePath);
+                    const worksheet = workbook.getWorksheet('Afiliados');
+                    if (worksheet) {
+                        affiliateCount = worksheet.rowCount - 1; // -1 para excluir header
+                    }
+                } catch (err) {
+                    logger.warn(`No se pudo contar afiliados en ${filename}`);
+                }
+                
                 return {
                     filename,
                     size: stats.size,
                     createdAt: stats.birthtime,
                     downloadUrl: `/affiliates/download-export/${filename}`,
-                    supervisorId
+                    supervisorId,
+                    supervisorName,
+                    affiliateCount
                 };
             })
         );

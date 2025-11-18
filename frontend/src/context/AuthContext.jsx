@@ -85,15 +85,21 @@ export function AuthProvider({ children }) {
     const login = async (email, password) => {
         try {
             const { token: newToken, user } = await loginApi({ email, password });
+            console.log('🔍 AuthContext - login() respuesta completa:', { token: newToken, user });
+            console.log('🔍 AuthContext - user.numeroEquipo:', user?.numeroEquipo);
             if (user.role !== "admin" && !user.active) {
                 return { ok: false, msg: "Tu cuenta está pendiente de activación." };
             }
             setToken(newToken);
             setUser(user);
-            try { localStorage.setItem("user", JSON.stringify(user)); } catch {}
+            try { 
+                localStorage.setItem("user", JSON.stringify(user));
+                console.log('✅ AuthContext - Usuario guardado en localStorage (login):', user);
+            } catch {}
             navigate("/", { replace: true });
             return { ok: true };
         } catch (err) {
+            console.error('❌ AuthContext - Error en login():', err);
             return { ok: false, msg: err.response?.data?.error || "Credenciales inválidas" };
         }
     };
@@ -122,11 +128,17 @@ export function AuthProvider({ children }) {
             }
             try {
                 const me = await getMe();
+                console.log('🔍 AuthContext - getMe() respuesta completa:', me);
+                console.log('🔍 AuthContext - me.numeroEquipo:', me?.numeroEquipo);
                 if (!mounted) return;
                 setUser(me || null);
                 setToken(t);
-                try { localStorage.setItem("user", JSON.stringify(me || null)); } catch {}
+                try { 
+                    localStorage.setItem("user", JSON.stringify(me || null));
+                    console.log('✅ AuthContext - Usuario guardado en localStorage:', me);
+                } catch {}
             } catch (err) {
+                console.error('❌ AuthContext - Error en getMe():', err);
                 // Solo cerrar sesión si el backend confirma 401
                 const status = err?.response?.status;
                 if (mounted) {

@@ -42,8 +42,8 @@ exports.getTemplates = async (req, res) => {
                 ...admins.map(u => u._id)
             ];
             filter = { createdBy: { $in: allowed } };
-        } else if (role === "asesor" || role === "revendedor") {
-            // ver propias + de supervisores del mismo equipo
+        } else if (role === "asesor" || role === "revendedor" || role === "auditor") {
+            // ✅ ver propias + de supervisores del mismo equipo + gerencia + admin
             const supervisors = await User.find({ role: "supervisor", numeroEquipo: equipo }).select("_id");
             const gerencias = await User.find({ role: "gerencia" }).select("_id");
             const admins = await User.find({ role: "admin" }).select("_id");

@@ -8,6 +8,7 @@ const upload = require('../middlewares/uploadMiddleware');
 
 // 📌 Rutas específicas primero
 router.get('/available-slots', requireAuth, auditCtrl.getAvailableSlots);
+router.get('/sales-stats', requireAuth, auditCtrl.getSalesStats);
 router.get('/by-cuil/:cuil', requireAuth, auditCtrl.getAuditByCuil);
 router.get('/export', requireAuth, auditCtrl.exportByDate);
 router.get("/date-range", requireAuth, auditCtrl.getAuditsByDateRange);

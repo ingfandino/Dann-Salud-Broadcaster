@@ -167,6 +167,7 @@ exports.login = async (req, res) => {
         nombre: user.nombre,
         email: user.email,
         role: user.role,
+        numeroEquipo: user.numeroEquipo, // ✅ Agregar numeroEquipo
         supervisor: user.supervisor || null,
         active: user.active,
       },
@@ -198,6 +199,7 @@ exports.me = async (req, res) => {
         nombre: user.nombre,
         email: user.email,
         role: user.role,
+        numeroEquipo: user.numeroEquipo, // ✅ Agregar numeroEquipo
         supervisor: user.supervisor || null,
         active: user.active,
       }

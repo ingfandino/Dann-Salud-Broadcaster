@@ -61,8 +61,9 @@ function isWorkingHours() {
 
 // 🛡️ ANTI-DETECCIÓN: Pausa aleatoria ocasional (simula distracciones humanas)
 function shouldTakeRandomBreak() {
-    // 5% de probabilidad de tomar una pausa corta
-    return Math.random() < 0.05;
+    // ✅ 15% de probabilidad de tomar una pausa corta (antes: 5%)
+    // Más pausas = más humano = menos detección
+    return Math.random() < 0.15;
 }
 
 function getRandomBreakDuration() {
@@ -73,14 +74,20 @@ function getRandomBreakDuration() {
 // ✅ CORRECCIÓN: Control de tasa global para evitar rate limiting de WhatsApp
 const MESSAGE_RATE_LIMITER = {
     lastMessageTime: 0,
-    minIntervalMs: 2000, // Mínimo 2 segundos entre mensajes a nivel global
+    minIntervalMs: 3000, // ✅ Aumentado: Mínimo 3 segundos (antes: 2s)
+    maxIntervalMs: 10000, // ✅ NUEVO: Máximo 10 segundos (variabilidad)
 };
 
 async function throttleMessage() {
     const now = Date.now();
     const elapsed = now - MESSAGE_RATE_LIMITER.lastMessageTime;
-    if (elapsed < MESSAGE_RATE_LIMITER.minIntervalMs) {
-        const waitTime = MESSAGE_RATE_LIMITER.minIntervalMs - elapsed;
+    
+    // ✅ Delay variable entre 3-10 segundos (más humano, menos predecible)
+    const targetDelay = MESSAGE_RATE_LIMITER.minIntervalMs + 
+                       Math.random() * (MESSAGE_RATE_LIMITER.maxIntervalMs - MESSAGE_RATE_LIMITER.minIntervalMs);
+    
+    if (elapsed < targetDelay) {
+        const waitTime = targetDelay - elapsed;
         await delay(waitTime);
     }
     MESSAGE_RATE_LIMITER.lastMessageTime = Date.now();
@@ -105,12 +112,40 @@ async function processJob(jobId) {
         return;
     }
 
+    // ✅ CORRECCIÓN: Límite de intentos para evitar bucles infinitos
+    const MAX_ATTEMPTS = 10;
+    const currentAttempts = initialJob.attempts || 0;
+    
+    if (currentAttempts >= MAX_ATTEMPTS) {
+        logger.error(`❌ Job ${jobId} excedió el límite de intentos (${currentAttempts}/${MAX_ATTEMPTS}). Marcando como fallido.`);
+        initialJob.status = "fallido";
+        initialJob.finishedAt = new Date();
+        await initialJob.save();
+        await addLog({ 
+            tipo: "error", 
+            mensaje: `Job ${jobId} marcado como fallido tras ${currentAttempts} intentos (WhatsApp no disponible)` 
+        });
+        return;
+    }
+
     // ⚠️ Verificamos conexión con WhatsApp para el creador del job
     const userId = USE_MULTI ? initialJob.createdBy : null;
     const readyNow = isReady(userId);
     if (!readyNow) {
-        logger.warn("⏸️ WhatsApp no está listo para el usuario; re-programando job como 'pendiente'", { userId, jobId });
+        // ✅ CORRECCIÓN: Re-programar con delay de 2 minutos para evitar bucle infinito
+        const delayMinutes = 2;
+        const nextAttempt = new Date(Date.now() + delayMinutes * 60 * 1000);
+        
+        logger.warn(`⏸️ WhatsApp no está listo; re-programando job para ${nextAttempt.toLocaleTimeString('es-AR')}`, { 
+            userId, 
+            jobId, 
+            attempts: (initialJob.attempts || 0) + 1,
+            nextAttempt 
+        });
+        
         initialJob.status = "pendiente";
+        initialJob.scheduledFor = nextAttempt; // ✅ Posponer 2 minutos
+        initialJob.attempts = (initialJob.attempts || 0) + 1; // ✅ Incrementar contador
         await initialJob.save();
         return;
     }
@@ -132,8 +167,9 @@ async function processJob(jobId) {
     });
 
     // Parámetros por Job con fallback a configuración global
-    const dMin = Number.isFinite(parseInt(initialJob.delayMin, 10)) ? parseInt(initialJob.delayMin, 10) : (config.minDelay || 2);
-    const dMax = Number.isFinite(parseInt(initialJob.delayMax, 10)) ? parseInt(initialJob.delayMax, 10) : (config.maxDelay || 5);
+    // ✅ Delays aumentados: mínimo 5s (antes: 2s), máximo 15s (antes: 5s)
+    const dMin = Number.isFinite(parseInt(initialJob.delayMin, 10)) ? parseInt(initialJob.delayMin, 10) : (config.minDelay || 5);
+    const dMax = Number.isFinite(parseInt(initialJob.delayMax, 10)) ? parseInt(initialJob.delayMax, 10) : (config.maxDelay || 15);
     const jobBatchSize = Number.isFinite(parseInt(initialJob.batchSize, 10)) ? parseInt(initialJob.batchSize, 10) : (config.batchSize || 10);
     const pauseMinutes = Number.isFinite(parseInt(initialJob.pauseBetweenBatchesMinutes, 10)) ? parseInt(initialJob.pauseBetweenBatchesMinutes, 10) : Math.ceil((config.batchPause || 60) / 60);
 
@@ -240,12 +276,48 @@ async function processJob(jobId) {
         const messageText = parseSpintax(rendered);
 
         const toDigits = normalizeArNumber(contact.telefono);
-        // Evitar duplicados en el mismo Job
+        // ✅ CORRECCIÓN CRÍTICA: Evitar duplicados en el mismo Job
         if (seenPhones.has(toDigits)) {
-            logger.warn(`⚠️ Duplicado en job: ${toDigits} ya fue procesado. Se omite.`);
+            logger.warn(`⚠️ Duplicado en job: ${toDigits} ya fue procesado. Se omite sin afectar stats.`);
             await addLog({ tipo: "warning", mensaje: `Duplicado en job omitido: ${toDigits}`, metadata: { jobId: initialJob._id, index: i } });
-            // ✅ CORRECCIÓN: No decrementar pending, solo avanzar currentIndex
-            // El duplicado no cuenta como enviado, fallido ni pendiente
+            // El duplicado NO cuenta como enviado, fallido NI se decrementa pending
+            // Solo avanzar currentIndex para no quedarse atascado
+            await SendJob.updateOne(
+                { _id: jobId },
+                {
+                    $set: { currentIndex: i + 1 },
+                    // NO tocar stats aquí
+                }
+            );
+            continue;
+        }
+
+        const to = `${toDigits}@c.us`;
+
+        // 🚨 VERIFICACIÓN GLOBAL: Evitar duplicados ENTRE CAMPAÑAS
+        // Verificar si ya se envió un mensaje a este número en las últimas 24 horas
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const recentMessage = await Message.findOne({
+            to: to,
+            direction: "outbound",
+            timestamp: { $gte: twentyFourHoursAgo },
+            status: { $in: ["enviado", "entregado", "leido"] } // Solo exitosos
+        });
+
+        if (recentMessage) {
+            logger.warn(`🚨 DUPLICADO GLOBAL: ${toDigits} ya recibió mensaje hace ${Math.round((Date.now() - recentMessage.timestamp) / 60000)} minutos. OMITIENDO.`);
+            await addLog({ 
+                tipo: "warning", 
+                mensaje: `Duplicado global omitido: ${toDigits} (ya contactado en campaña anterior)`, 
+                metadata: { 
+                    jobId: initialJob._id, 
+                    index: i,
+                    previousJob: recentMessage.job,
+                    minutesAgo: Math.round((Date.now() - recentMessage.timestamp) / 60000)
+                } 
+            });
+            
+            // NO enviar, avanzar currentIndex sin afectar stats
             await SendJob.updateOne(
                 { _id: jobId },
                 {
@@ -254,39 +326,16 @@ async function processJob(jobId) {
             );
             continue;
         }
+        
         seenPhones.add(toDigits);
-
-        const to = `${toDigits}@c.us`;
 
         let wasSent = false;
         try {
             // ✅ CORRECCIÓN: Aplicar throttling global antes de enviar
             await throttleMessage();
             
-            let attempt = 0;
-            let sent = false;
-            let lastError = null;
-
-            while (attempt < 3 && !sent) {
-                attempt++;
-                try {
-                    // ✅ Usar wrapper unificado que funciona con Baileys y whatsapp-web.js
-                    await sendMessage(userId, to, messageText);
-                    sent = true;
-                } catch (err) {
-                    lastError = err;
-                    const msg = String(err.message || "").toLowerCase();
-                    if (msg.includes("rate")) {
-                        const backoff = 2000 * Math.pow(2, attempt - 1); // ✅ Aumentar backoff inicial
-                        logger.warn(`⚠️ Rate limit, reintento ${attempt} en ${backoff}ms`);
-                        await delay(backoff);
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            if (!sent) throw lastError || new Error("Fallo desconocido en sendMessage");
+            // ✅ CORRECCIÓN: SOLO 1 INTENTO - No reintentar si falla
+            await sendMessage(userId, to, messageText);
 
             // ✅ CORRECCIÓN BUG 1: Verificar si ya existe mensaje para este contacto en este job
             const existingMsg = await Message.findOne({
@@ -296,7 +345,7 @@ async function processJob(jobId) {
             });
             
             if (existingMsg) {
-                logger.warn(`⚠️ Mensaje duplicado detectado en BD para ${contact.telefono}, omitiendo...`);
+                logger.warn(`⚠️ Mensaje duplicado detectado en BD para ${contact.telefono}, omitiendo guardado pero marcando como enviado...`);
                 wasSent = true; // Contar como enviado para no afectar stats
             } else {
                 const newMsg = new Message({
@@ -338,29 +387,39 @@ async function processJob(jobId) {
                 await failedMsg.save();
             }
         } finally {
+            // ✅ CORRECCIÓN: Actualizar stats correctamente
             await SendJob.updateOne(
                 { _id: jobId },
                 {
                     $inc: {
                         "stats.sent": wasSent ? 1 : 0,
                         "stats.failed": wasSent ? 0 : 1,
-                        "stats.pending": -1,
+                        "stats.pending": -1, // Decrementar porque procesamos un contacto real
                     },
                     $set: { currentIndex: i + 1 },
                 }
             );
 
             if (wasSent) sentLocal++; else failedLocal++;
-            pendingLocal = Math.max(0, pendingLocal - 1);
+            pendingLocal = Math.max(0, pendingLocal - 1); // Nunca negativo
 
             const now = Date.now();
             const milestone = Math.max(1, Math.floor(totalLocal / 50));
             if (now - lastEmitTs >= 1000 || (i + 1) === totalLocal || ((i + 1) % milestone === 0)) {
+                // ✅ CORRECCIÓN: Calcular progreso basado en procesados vs total
+                const processed = sentLocal + failedLocal;
+                const progressPercent = Math.min(100, Math.round((processed / totalLocal) * 100));
+                
                 emitJobProgress(initialJob._id.toString(), {
                     currentIndex: i + 1,
                     total: totalLocal,
-                    progress: Math.round(((i + 1) / totalLocal) * 100),
+                    progress: progressPercent,
                     status: "ejecutando",
+                    stats: {
+                        sent: sentLocal,
+                        failed: failedLocal,
+                        pending: Math.max(0, totalLocal - processed)
+                    }
                 });
                 lastEmitTs = now;
             }
@@ -414,8 +473,46 @@ async function processJob(jobId) {
             const variability = 0.8 + Math.random() * 0.4; // ±20%
             const pauseMs = Math.floor(basePause * variability);
             
-            logger.info(`😴 Pausa de lote: ${Math.round(pauseMs / 1000)}s (fin de batch ${Math.floor((i + 1) / jobBatchSize)})`);
-            await delay(pauseMs);
+            // ✅ Cambiar estado a "descanso" durante la pausa de lote
+            if (pauseMs > 0) {
+                await SendJob.findByIdAndUpdate(jobId, { 
+                    $set: { status: "descanso" } 
+                });
+                
+                emitJobProgress(jobId.toString(), {
+                    currentIndex: i + 1,
+                    total: totalLocal,
+                    progress: progressPercent,
+                    status: "descanso"
+                });
+                
+                logger.info(`😴 Pausa de lote: ${Math.round(pauseMs / 1000)}s (fin de batch ${Math.floor((i + 1) / jobBatchSize)})`);
+                await addLog({
+                    tipo: "info",
+                    mensaje: `Job ${jobId} en descanso entre lotes`,
+                    metadata: { 
+                        batchNumber: Math.floor((i + 1) / jobBatchSize),
+                        pauseDurationSeconds: Math.round(pauseMs / 1000),
+                        currentIndex: i + 1
+                    }
+                });
+                
+                await delay(pauseMs);
+                
+                // ✅ Volver a estado "ejecutando" después de la pausa
+                await SendJob.findByIdAndUpdate(jobId, { 
+                    $set: { status: "ejecutando" } 
+                });
+                
+                emitJobProgress(jobId.toString(), {
+                    currentIndex: i + 1,
+                    total: totalLocal,
+                    progress: progressPercent,
+                    status: "ejecutando"
+                });
+                
+                logger.info(`▶️ Reanudando job después del descanso...`);
+            }
         }
     }
 

@@ -302,7 +302,7 @@ exports.sendMessage = async (req, res) => {
             }
         }
 
-        logger.info(`📨 Mensaje enviado de ${req.user.nombre} a ${validRecipients.length} destinatario(s)`);
+        logger.info(`📨 Mensaje enviado de ${req.user.nombre || req.user.name || req.user.email} a ${validRecipients.length} destinatario(s)`);
 
         // Retornar el primer mensaje (o todos si es útil)
         res.status(201).json({
@@ -341,6 +341,39 @@ exports.deleteMessage = async (req, res) => {
         res.json({ message: "Mensaje eliminado" });
     } catch (error) {
         logger.error("Error eliminando mensaje:", error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// 🗑️ Eliminar TODOS los mensajes del usuario (soft delete)
+exports.deleteAllMessages = async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // Buscar todos los mensajes donde el usuario es from o to y que no hayan sido eliminados por él
+        const messages = await InternalMessage.find({
+            $or: [{ from: userId }, { to: userId }],
+            deletedBy: { $ne: userId }
+        });
+
+        let deletedCount = 0;
+        
+        // Agregar usuario a deletedBy en cada mensaje
+        for (const message of messages) {
+            if (!message.deletedBy.includes(userId)) {
+                message.deletedBy.push(userId);
+                await message.save();
+                deletedCount++;
+            }
+        }
+
+        logger.info(`✅ Usuario ${userId} eliminó ${deletedCount} mensajes de su buzón`);
+        res.json({ 
+            message: `Se eliminaron ${deletedCount} mensaje(s)`,
+            deletedCount 
+        });
+    } catch (error) {
+        logger.error("Error eliminando todos los mensajes:", error);
         res.status(500).json({ error: error.message });
     }
 };

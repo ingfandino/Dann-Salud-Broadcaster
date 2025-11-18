@@ -24,7 +24,7 @@ const sendJobSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["pendiente", "ejecutando", "pausado", "completado", "fallido", "cancelado"],
+        enum: ["pendiente", "ejecutando", "pausado", "completado", "fallido", "cancelado", "descanso"],
         default: "pendiente",
     },
     // Parámetros de envío
@@ -49,6 +49,11 @@ const sendJobSchema = new mongoose.Schema({
     startedAt: Date,
     finishedAt: Date,
     currentIndex: {
+        type: Number,
+        default: 0,
+    },
+    // ✅ CORRECCIÓN: Contador de intentos para evitar bucles infinitos
+    attempts: {
         type: Number,
         default: 0,
     },

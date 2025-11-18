@@ -43,3 +43,91 @@ body::after {
   z-index: -1;
   opacity: 0.6;
 }
+
+/* 📱 RESPONSIVE: Optimización para móviles */
+
+/* Smooth scrolling para mejor UX móvil */
+* {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Aumentar área de touch en botones pequeños */
+@media (max-width: 768px) {
+  /* Botones más grandes en móvil */
+  button, a[role="button"] {
+    min-height: 44px !important;
+    min-width: 44px !important;
+  }
+  
+  /* Inputs más espaciosos */
+  input, select, textarea {
+    font-size: 16px !important; /* Previene zoom automático en iOS */
+    padding: 12px !important;
+  }
+  
+  /* Tablas scrolleables horizontalmente */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  
+  /* Modales a pantalla completa en móvil */
+  .modal-responsive {
+    position: fixed !important;
+    inset: 0 !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    overflow-y: auto !important;
+  }
+  
+  /* Ocultar blobs en móvil para mejor rendimiento */
+  body::before,
+  body::after {
+    display: none;
+  }
+  
+  /* Espaciado más generoso */
+  .px-2 {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+  
+  .py-1\.5 {
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+  }
+}
+
+/* Tablets (portrait) */
+@media (min-width: 769px) and (max-width: 1024px) {
+  /* Ajustes para tablets si necesario */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Estilos para scroll horizontal de tablas */
+.table-scroll-mobile {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-scroll-mobile::-webkit-scrollbar {
+  height: 8px;
+}
+
+.table-scroll-mobile::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+.table-scroll-mobile::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 10px;
+}
+
+.table-scroll-mobile::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}

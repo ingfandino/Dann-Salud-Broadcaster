@@ -19,7 +19,7 @@ logger.info("🚦 [sendJobRoutes] Recibida petición POST /send-jobs/start", { h
       next();
     },
     requireAuth,
-    permit("asesor", "supervisor", "admin", "gerencia", "revendedor"),
+    permit("asesor", "auditor", "supervisor", "admin", "gerencia", "revendedor"),
     ...createJobValidator,   // 🔹 validaciones dinámicas (templateId o message libre)
     validateRequest,         // 🔹 middleware centralizado de manejo de errores
     async (req, res) => {
@@ -29,35 +29,35 @@ logger.info("➡️ [sendJobRoutes] Llamando a sendJobController.startJob()");
 );
 
 // Controles
-router.post("/:id/pause", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
+router.post("/:id/pause", requireAuth, permit("asesor", "auditor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
 logger.info(`🚦 [sendJobRoutes] POST /send-jobs/${req.params.id}/pause`);
     await sendJobController.pauseJob(req, res);
 });
-router.post("/:id/resume", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
+router.post("/:id/resume", requireAuth, permit("asesor", "auditor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
     logger.info(`🚦 [sendJobRoutes] POST /send-jobs/${req.params.id}/resume`);
     await sendJobController.resumeJob(req, res);
 });
 
 // 🗑️ Cancelar/eliminar job
-router.delete("/:id/cancel", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
+router.delete("/:id/cancel", requireAuth, permit("asesor", "auditor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
     logger.info(`🚦 [sendJobRoutes] DELETE /send-jobs/${req.params.id}/cancel`);
     await sendJobController.cancelJob(req, res);
 });
 
 // Consultas
-router.get("/:id", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
+router.get("/:id", requireAuth, permit("asesor", "auditor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
     logger.info(`🚦 [sendJobRoutes] GET /send-jobs/${req.params.id}`);
     await sendJobController.getJob(req, res);
 });
-router.get("/:id/export", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
+router.get("/:id/export", requireAuth, permit("asesor", "auditor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
     await sendJobController.exportJobResultsExcel(req, res);
 });
 // 🔹 MEJORA 3: Exportar reporte de auto-respuestas
-router.get("/:id/autoresponse-report", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
+router.get("/:id/autoresponse-report", requireAuth, permit("asesor", "auditor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
     logger.info(`🚦 [sendJobRoutes] GET /send-jobs/${req.params.id}/autoresponse-report`);
     await sendJobController.exportAutoResponseReport(req, res);
 });
-router.get("/", requireAuth, permit("asesor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
+router.get("/", requireAuth, permit("asesor", "auditor", "supervisor", "admin", "gerencia", "revendedor"), async (req, res) => {
     logger.info("🚦 [sendJobRoutes] GET /send-jobs/");
     await sendJobController.listJobs(req, res);
 });

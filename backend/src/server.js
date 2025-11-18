@@ -14,7 +14,11 @@ const { startScheduler } = require("./services/jobScheduler");
 const { startRecoveryScheduler } = require("./services/recoveryScheduler");
 const { startAuditReminderCron } = require("./services/auditReminderCron");
 const { startAffiliateExportCron } = require("./services/affiliateExportCron");
+const { startAuditFollowUpScheduler } = require("./services/auditFollowUpScheduler");
 const { pushMetrics } = require("./services/metricsService");
+
+// ✅ Cron job para Recovery (ejecuta a las 23:01 diariamente)
+require("./cron/recoveryJob");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const errorHandler = require("./middlewares/errorHandler");
@@ -323,6 +327,7 @@ if (process.env.NODE_ENV !== "test") {
   startRecoveryScheduler();
   startAuditReminderCron();
   startAffiliateExportCron();
+  startAuditFollowUpScheduler(); // Notificaciones después de 12h en estado "Falta documentación" o "Falta clave"
 
   initSocket(appServer, app, allowedOrigins);
 

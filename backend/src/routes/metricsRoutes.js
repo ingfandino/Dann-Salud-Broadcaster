@@ -32,7 +32,7 @@ router.get("/dashboard", requireAuth, async (req, res) => {
         const role = (req.user.role || '').toLowerCase();
         let contactosQuery = { createdAt: { $gte: startOfDay, $lt: endOfDay } };
 
-        if (role === 'asesor') {
+        if (role === 'asesor' || role === 'auditor') {
             contactosQuery.createdBy = req.user._id;
         } else if (role === 'supervisor') {
             const myGroup = req.user.numeroEquipo;
@@ -44,7 +44,7 @@ router.get("/dashboard", requireAuth, async (req, res) => {
                 // Si el supervisor no tiene numeroEquipo, al menos contar los propios
                 contactosQuery.createdBy = req.user._id;
             }
-        } else if (role === 'admin' || role === 'auditor' || role === 'gerencia') {
+        } else if (role === 'admin' || role === 'gerencia') {
             // sin filtro por creador -> todos los contactos del día
         } else {
             // rol desconocido: por defecto, solo propios hoy

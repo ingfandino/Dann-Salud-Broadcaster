@@ -6,6 +6,7 @@ import FollowUp from "../pages/FollowUp";
 import SalesForm from "../pages/SalesForm";
 import RecoveryList from "../pages/RecoveryList";
 import RecoveryForm from "../pages/RecoveryForm";
+import LiquidacionList from "../pages/LiquidacionList";
 import { useAuth } from "../context/AuthContext";
 import apiClient from "../services/api";
 
@@ -48,29 +49,33 @@ export default function AuditPanel() {
     // Tabs disponibles
     const isAdmin = user?.role === "admin" || user?.role === "Admin";
     const isGerencia = user?.role === "gerencia" || user?.role === "Gerencia";
+    const isSupervisor = user?.role === "supervisor" || user?.role === "Supervisor";
     const isRevendedor = role === "revendedor";
 
     const tabs = useMemo(() => {
         if (isRevendedor) {
             return [
-                { id: "upload", label: "⬆️ Subir Archivo de Auditoría" },
-                { id: "recovery", label: "♻️ Recuperación y reventas" },
-                { id: "recovery-form", label: "📝 Nueva reventa/renovación" },
+                { id: "upload", label: "⬆️ Subir Archivo de Auditoría", emoji: "⬆️", shortLabel: "Subir" },
+                { id: "recovery", label: "♻️ Recuperación y reventas", emoji: "♻️", shortLabel: "Recuperación" },
+                { id: "recovery-form", label: "📝 Nueva reventa/renovación", emoji: "📝", shortLabel: "Nueva" },
             ];
         }
 
         return [
-            { id: "seguimiento", label: "📋 Seguimiento de Auditorías" },
+            { id: "seguimiento", label: "📋 Seguimiento de Auditorías", emoji: "📋", shortLabel: "Seguimiento" },
             // Ocultar 'pautar' para admin (permitido para resto, incluyendo gerencia)
-            ...(!isAdmin ? [{ id: "pautar", label: "🗓️ Pautar Nueva Venta/Auditoría" }] : []),
-            { id: "upload", label: "⬆️ Subir Archivo de Auditoría" },
-            // Pestañas de recuperación visibles para admin/auditor/revendedor/gerencia
+            ...(!isAdmin ? [{ id: "pautar", label: "🗓️ Pautar Nueva Venta/Auditoría", emoji: "🗓️", shortLabel: "Pautar" }] : []),
+            { id: "upload", label: "⬆️ Subir Archivo de Auditoría", emoji: "⬆️", shortLabel: "Subir" },
+            // Pestaña de recuperación visible para admin/auditor/revendedor/gerencia
             ...(user && ["admin", "auditor", "revendedor", "gerencia"].includes(role) ? [
-                { id: "recovery", label: "♻️ Recuperación y reventas" },
-                { id: "recovery-form", label: "📝 Nueva reventa/renovación" },
+                { id: "recovery", label: "♻️ Recuperación", emoji: "♻️", shortLabel: "Recuperación" },
+            ] : []),
+            // Pestaña de liquidación para gerencia y supervisor
+            ...(isGerencia || isSupervisor ? [
+                { id: "liquidacion", label: "💰 Liquidación", emoji: "💰", shortLabel: "Liquidación" },
             ] : []),
         ];
-    }, [isAdmin, role, user, isRevendedor]);
+    }, [isAdmin, role, user, isRevendedor, isSupervisor]);
 
     useEffect(() => {
         if (tabs.length && !tabs.some((tab) => tab.id === activeTab)) {
@@ -330,17 +335,28 @@ export default function AuditPanel() {
             <h1 className="text-3xl font-bold mb-6">Panel de Auditorías</h1>
 
             {/* Tabs */}
-            <div className="flex gap-3 mb-6">
-                {tabs.map((tab) => (
+            <div className="flex gap-1 md:gap-3 mb-4 md:mb-6 overflow-x-auto">
+                {tabs
+                    .filter(tab => {
+                        // En móvil (< 768px), solo mostrar seguimiento y pautar
+                        const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+                        if (isMobile && !isRevendedor) {
+                            return tab.id === 'seguimiento' || tab.id === 'pautar';
+                        }
+                        return true;
+                    })
+                    .map((tab) => (
                     <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id)}
-                        className={`px-4 py-2 rounded-lg font-medium transition-all ${activeTab === tab.id
+                        className={`px-2 md:px-4 py-2 rounded-lg font-medium transition-all text-xs md:text-base whitespace-nowrap flex-shrink-0 ${activeTab === tab.id
                             ? "bg-brand-blue text-white shadow-md"
                             : "bg-white text-gray-600 border hover:bg-gray-50"
                             }`}
+                        title={tab.label}
                     >
-                        {tab.label}
+                        <span className="md:hidden text-lg">{tab.emoji}</span>
+                        <span className="hidden md:inline">{tab.label}</span>
                     </button>
                 ))}
             </div>
@@ -611,6 +627,7 @@ export default function AuditPanel() {
                 )}
                 {activeTab === "recovery" && <RecoveryList />}
                 {activeTab === "recovery-form" && <RecoveryForm />}
+                {activeTab === "liquidacion" && <LiquidacionList />}
             </motion.div>
         </div>
     );

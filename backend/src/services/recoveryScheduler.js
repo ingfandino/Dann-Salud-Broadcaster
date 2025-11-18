@@ -8,27 +8,46 @@ const DEFAULT_INTERVAL_MS = 5 * 60 * 1000; // cada 5 minutos
 
 async function moveEligibleToRecovery() {
   const now = new Date();
-  const filter = {
-    status: { $in: ["Falta clave", "Rechazada", "Falta documentación"] },
+  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  
+  // ✅ CORRECCIÓN: SOLO estos 4 estados van a Recuperación después de 24h
+  const filter1 = {
+    status: { 
+      $in: [
+        "Falta clave",
+        "Falta documentación",
+        "Falta clave y documentación",
+        "Pendiente"
+      ] 
+    },
     recoveryEligibleAt: { $ne: null, $lte: now },
     isRecovery: { $ne: true }
   };
   
-  // Obtener auditorías antes de actualizar para enviar notificaciones
-  const auditsToMove = await Audit.find(filter)
+  // ✅ CORRECCIÓN: Se eliminó FILTRO 2 (auditorías sin estado)
+  // Solo se mueven a Recuperación los 4 estados específicos después de 24h
+  
+  // Obtener auditorías del filtro 1
+  const auditsToMove = await Audit.find(filter1)
     .populate('createdBy', 'nombre email numeroEquipo')
     .lean();
+  
+  // ✅ CORRECCIÓN: Agregar recoveryMonth para que aparezca en la ventana de Recuperación
+  const currentMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0'); // YYYY-MM
   
   const update = {
     $set: {
       isRecovery: true,
-      recoveryMovedAt: now
+      recoveryMovedAt: now,
+      recoveryMonth: currentMonth  // ✅ CRUCIAL: Sin esto no aparece en Recuperación
     }
   };
 
-  const res = await Audit.updateMany(filter, update);
-  if (res.modifiedCount) {
-    logger.info(`RecoveryScheduler: marcadas ${res.modifiedCount} auditorías como isRecovery`);
+  // Actualizar solo las auditorías con los 4 estados específicos
+  const result = await Audit.updateMany(filter1, update);
+  
+  if (result.modifiedCount) {
+    logger.info(`RecoveryScheduler: marcadas ${result.modifiedCount} auditorías como isRecovery (solo estados: Falta clave, Falta documentación, Falta clave y documentación, Pendiente)`);
     
     // 🔔 Enviar notificaciones a revendedores
     for (const audit of auditsToMove) {

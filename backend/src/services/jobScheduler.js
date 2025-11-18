@@ -6,8 +6,8 @@ const { emitJobsUpdate } = require("../config/socket");
 const logger = require("../utils/logger");
 
 const CHECK_INTERVAL = 15 * 1000;
-// ✅ CORRECCIÓN: Reducir concurrencia para evitar sobrecarga
-const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_JOBS || 2);
+// ✅ Concurrencia optimizada: 8 jobs simultáneos para mejor throughput
+const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_JOBS || 8);
 const activeJobs = new Set();
 const jobStartTimes = new Map(); // Track cuando empezó cada job
 

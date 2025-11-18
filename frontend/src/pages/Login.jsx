@@ -12,10 +12,28 @@ export default function Login() {
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [showPassword, setShowPassword] = useState(false);
+    const [rememberMe, setRememberMe] = useState(false);
+
+    // ✅ Cargar email guardado al montar el componente
+    React.useEffect(() => {
+        const savedEmail = localStorage.getItem('rememberedEmail');
+        if (savedEmail) {
+            setEmail(savedEmail);
+            setRememberMe(true);
+        }
+    }, []);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError("");
+        
+        // ✅ Guardar o eliminar email según checkbox
+        if (rememberMe) {
+            localStorage.setItem('rememberedEmail', email);
+        } else {
+            localStorage.removeItem('rememberedEmail');
+        }
+        
         const { ok, msg } = await login(email, password);
         if (!ok) {
             setError(msg || "Credenciales inválidas");
@@ -129,7 +147,12 @@ export default function Login() {
                                     </div>
                                     <div className="mt-2 flex items-center justify-between">
                                         <label className="flex items-center gap-2 text-sm text-gray-600">
-                                            <input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                                            <input 
+                                                type="checkbox" 
+                                                checked={rememberMe}
+                                                onChange={(e) => setRememberMe(e.target.checked)}
+                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" 
+                                            />
                                             Recordarme
                                         </label>
                                         <button type="button" onClick={() => navigate('/forgot-password')} className="text-sm text-indigo-600 hover:underline">

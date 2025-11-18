@@ -12,9 +12,14 @@ const logger = require("../utils/logger");
 async function sendInternalNotification({ toUserIds, subject, content, metadata = {} }) {
     try {
         // Usuario del sistema (desde donde se envían notificaciones automáticas)
-        const systemUser = await User.findOne({ email: "system@dann-salud.com" });
+        let systemUser = await User.findOne({ email: "system@dann-salud.com" });
         
-        // Si no existe usuario del sistema, usar el primer admin
+        // Si no existe usuario del sistema, buscar usuario de Gerencia
+        if (!systemUser) {
+            systemUser = await User.findOne({ role: "gerencia", active: true });
+        }
+        
+        // Como último recurso, usar admin
         const fromUser = systemUser || await User.findOne({ role: "admin" });
         
         if (!fromUser) {
@@ -58,29 +63,14 @@ async function sendInternalNotification({ toUserIds, subject, content, metadata 
     }
 }
 
-// 🔔 1. Notificación cuando se elimina video-auditoría
+// 🔔 1. Notificación cuando se elimina video-auditoría (SOLO AUDITORES)
 async function notifyAuditDeleted({ audit, deletedBy }) {
     try {
         const recipients = [];
         
-        // Obtener usuarios con rol 'gerencia'
-        const gerenciaUsers = await User.find({ role: "gerencia", active: true }).select("_id");
-        recipients.push(...gerenciaUsers.map(u => u._id));
-        
-        // Notificar al asesor que creó la auditoría
-        if (audit.createdBy && audit.createdBy._id) {
-            recipients.push(audit.createdBy._id);
-        }
-        
-        // Notificar al supervisor del mismo equipo
-        if (audit.createdBy && audit.createdBy.numeroEquipo) {
-            const supervisors = await User.find({
-                role: "supervisor",
-                numeroEquipo: audit.createdBy.numeroEquipo,
-                active: true
-            }).select("_id");
-            recipients.push(...supervisors.map(u => u._id));
-        }
+        // Obtener usuarios con rol 'auditor'
+        const auditorUsers = await User.find({ role: "auditor", active: true }).select("_id");
+        recipients.push(...auditorUsers.map(u => u._id));
         
         // Eliminar duplicados
         const uniqueRecipients = [...new Set(recipients.map(r => r.toString()))];
@@ -208,37 +198,18 @@ Esta notificación es automática y no requiere respuesta.
     }
 }
 
-// 🔔 4. Notificación cuando auditoría pasa a estado 'Completa'
+// 🔔 4. Notificación cuando auditoría pasa a estado 'Completa' (SOLO ADMIN)
 async function notifyAuditCompleted({ audit }) {
     try {
-        const recipients = [];
-        
-        // Notificar al asesor que creó la auditoría
-        if (audit.createdBy && audit.createdBy._id) {
-            recipients.push(audit.createdBy._id);
-        }
-        
-        // Notificar al supervisor del mismo equipo
-        if (audit.createdBy && audit.createdBy.numeroEquipo) {
-            const supervisors = await User.find({
-                role: "supervisor",
-                numeroEquipo: audit.createdBy.numeroEquipo,
-                active: true
-            }).select("_id");
-            recipients.push(...supervisors.map(u => u._id));
-        }
-        
-        // También notificar a admins
+        // SOLO notificar a admins
         const adminUsers = await User.find({ role: "admin", active: true }).select("_id");
-        recipients.push(...adminUsers.map(u => u._id));
         
-        // Eliminar duplicados
-        const uniqueRecipients = [...new Set(recipients.map(r => r.toString()))];
-        
-        if (uniqueRecipients.length === 0) {
-            logger.warn("⚠️ No hay destinatarios para notificación de auditoría completa");
+        if (adminUsers.length === 0) {
+            logger.warn("⚠️ No hay admins activos para notificación de auditoría completa");
             return;
         }
+        
+        const uniqueRecipients = adminUsers.map(u => u._id.toString());
         
         const content = `
 ✅ VIDEO-AUDITORÍA COMPLETADA - ACCIÓN REQUERIDA
@@ -364,8 +335,9 @@ async function notifyAuditQRDone({ audit }) {
 • Nombre: ${audit.nombre || "N/A"}
 • Obra Social: ${audit.obraSocial || "N/A"}
 • Fecha de turno: ${audit.fechaTurno ? new Date(audit.fechaTurno).toLocaleString("es-AR") : "N/A"}
-• Creado por: ${audit.createdBy?.nombre || "N/A"}
+• Creado por (Asesor): ${audit.createdBy?.nombre || "N/A"}
 • Auditor: ${audit.auditor?.nombre || "N/A"}
+• Admin que generó el QR: ${audit.administrador?.nombre || "N/A"}
 
 ✅ Estado: QR Hecho
 📅 Finalizada el: ${new Date().toLocaleString("es-AR")}
@@ -387,6 +359,58 @@ Esta notificación es automática y no requiere respuesta.
     }
 }
 
+// 🔔 7. Notificación cuando auditoría en Recuperación pasa a 'Completa' (SOLO ADMIN)
+async function notifyRecoveryAuditCompleted({ audit }) {
+    try {
+        // SOLO notificar a admins
+        const adminUsers = await User.find({ role: "admin", active: true }).select("_id");
+        
+        if (!adminUsers || adminUsers.length === 0) {
+            logger.warn("⚠️ No hay usuarios admin activos para notificar");
+            return;
+        }
+
+        const adminUserIds = adminUsers.map(u => u._id.toString());
+
+        const subject = "♻️ Auditoría en Recuperación - Completada - Generar QR";
+        const content = `
+🎉 <strong>Auditoría recuperada completada</strong>
+
+Una auditoría que estaba en la pestaña de <strong>Recuperación</strong> ha sido marcada como <strong>Completa</strong>.
+
+📋 <strong>Detalles del afiliado:</strong>
+• <strong>Nombre:</strong> ${audit.nombre || "N/A"}
+• <strong>CUIL:</strong> ${audit.cuil || "N/A"}
+• <strong>Obra Social:</strong> ${audit.obraSocialVendida || "N/A"}
+• <strong>Teléfono:</strong> ${audit.telefono || "N/A"}
+• <strong>Fecha de turno:</strong> ${audit.scheduledAt ? new Date(audit.scheduledAt).toLocaleString("es-AR") : "N/A"}
+• <strong>Asesor:</strong> ${audit.asesor?.nombre || audit.asesor?.name || "N/A"}
+
+📍 <strong>Acción requerida:</strong>
+1. Ingresar a la pestaña <strong>"♻️ Recuperación"</strong> en la interfaz de <strong>Auditoría</strong>
+2. Localizar la auditoría de <strong>${audit.nombre || "este afiliado"}</strong>
+3. Proceder a <strong>generar el código QR</strong>
+
+⏰ Fecha de completado: ${new Date().toLocaleString("es-AR")}
+        `.trim();
+
+        await sendInternalNotification({
+            toUserIds: adminUserIds,
+            subject,
+            content,
+            metadata: {
+                auditId: audit._id,
+                type: "recovery_audit_completed",
+                cuil: audit.cuil
+            }
+        });
+
+        logger.info(`✅ Notificación de recuperación completada enviada a ${adminUserIds.length} admins para auditoría ${audit._id}`);
+    } catch (error) {
+        logger.error("❌ Error en notifyRecoveryAuditCompleted:", error);
+    }
+}
+
 module.exports = {
     sendInternalNotification,
     notifyAuditDeleted,
@@ -394,5 +418,6 @@ module.exports = {
     notifyAuditReminder,
     notifyAuditCompleted,
     notifyAuditRecovery,
-    notifyAuditQRDone
+    notifyAuditQRDone,
+    notifyRecoveryAuditCompleted // ✅ Nueva función
 };

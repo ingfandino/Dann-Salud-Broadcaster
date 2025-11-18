@@ -11,14 +11,47 @@ const affiliateExportConfigSchema = new mongoose.Schema(
             required: true
         },
         
-        // Cantidad de afiliados por archivo CSV
+        // Tipo de envío: "masivo" o "avanzado"
+        sendType: {
+            type: String,
+            enum: ["masivo", "avanzado"],
+            default: "masivo"
+        },
+        
+        // ========== CONFIGURACIÓN MASIVA ==========
+        // Cantidad de afiliados por archivo (solo para envío masivo)
         affiliatesPerFile: {
             type: Number,
-            required: true,
             min: 1,
             max: 10000,
             default: 100
         },
+        
+        // Distribución por obra social (para envío masivo)
+        // Ej: [{ obraSocial: "OSDE", cantidad: 100 }, { obraSocial: "Medifé", cantidad: 50 }]
+        obraSocialDistribution: [{
+            obraSocial: String,
+            cantidad: Number
+        }],
+        
+        // ========== CONFIGURACIÓN AVANZADA ==========
+        // Configuraciones individuales por supervisor (para envío avanzado)
+        supervisorConfigs: [{
+            supervisorId: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User"
+            },
+            affiliatesPerFile: {
+                type: Number,
+                min: 1,
+                max: 10000
+            },
+            // Distribución de obras sociales específica para este supervisor
+            obraSocialDistribution: [{
+                obraSocial: String,
+                cantidad: Number
+            }]
+        }],
         
         // Hora de envío diario (formato HH:mm, ej: "09:00")
         scheduledTime: {
@@ -32,9 +65,8 @@ const affiliateExportConfigSchema = new mongoose.Schema(
             }
         },
         
-        // Filtros opcionales para la generación
+        // Filtros opcionales para la generación (aplicados globalmente)
         filters: {
-            obraSocial: String,
             localidad: String,
             minAge: Number,
             maxAge: Number

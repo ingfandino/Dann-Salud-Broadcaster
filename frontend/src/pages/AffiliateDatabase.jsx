@@ -7,6 +7,13 @@ import { useNavigate } from "react-router-dom";
 import apiClient from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import logger from "../utils/logger";
+import AdvancedExportConfig from "../components/AdvancedExportConfig";
+
+// ✅ Obras sociales disponibles
+const OBRAS_SOCIALES = [
+    "OSECAC", "OSPIP", "OSCARA", "OTSUGRA", "Elevar", "OSSEG", 
+    "OSPRERA", "OSUTHGRA", "OSPAV", "OSPA", "Binimed", "Meplife", "TURF"
+];
 
 export default function AffiliateDatabase() {
     const { user } = useAuth();
@@ -26,19 +33,25 @@ export default function AffiliateDatabase() {
     const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, pages: 0 });
     const [stats, setStats] = useState(null);
     const [exportConfig, setExportConfig] = useState({
+        sendType: "masivo",
         affiliatesPerFile: 100,
+        obraSocialDistribution: [],
+        supervisorConfigs: [],
         scheduledTime: "09:00",
         filters: {}
     });
+    const [supervisors, setSupervisors] = useState([]);
     const [currentConfig, setCurrentConfig] = useState(null);
     const [exports, setExports] = useState([]);
     const [lastUploadResult, setLastUploadResult] = useState(null);
+    const [obrasSocialesDisponibles, setObrasSocialesDisponibles] = useState([]);
 
     useEffect(() => {
         // Supervisores no necesitan cargar stats ni config
         if (!isSupervisor) {
             loadStats();
             loadExportConfig();
+            loadSupervisors(); // ✅ Cargar supervisores para configuración avanzada
         }
         // Todos cargan sus exportaciones
         if (isSupervisor) {
@@ -63,6 +76,11 @@ export default function AffiliateDatabase() {
             }
         } else if (activeTab === "exports") {
             loadExports();
+        } else if (activeTab === "config") {
+            // ✅ Recargar estadísticas al entrar a configuración para obtener obras sociales actualizadas
+            if (!isSupervisor) {
+                loadStats();
+            }
         } else {
             // Al cambiar de tab, limpiar búsqueda si no hay datos reales
             if (stats?.total === 0) {
@@ -76,7 +94,15 @@ export default function AffiliateDatabase() {
             const res = await apiClient.get("/affiliates/stats");
             setStats(res.data);
             
-            // Si no hay datos, limpiar estado completamente
+            // ✅ Cargar obras sociales disponibles para la configuración
+            if (res.data.obrasSocialesDisponibles) {
+                console.log('✅ Obras sociales disponibles cargadas:', res.data.obrasSocialesDisponibles.length);
+                setObrasSocialesDisponibles(res.data.obrasSocialesDisponibles);
+            } else {
+                console.warn('⚠️ No se recibieron obras sociales disponibles');
+            }
+            
+            // Si no hay afiliados, limpiar resultados de búsqueda
             if (res.data.total === 0) {
                 setAffiliates([]);
                 setPagination({ page: 1, limit: 50, total: 0, pages: 0 });
@@ -92,13 +118,24 @@ export default function AffiliateDatabase() {
             if (res.data.config) {
                 setCurrentConfig(res.data.config);
                 setExportConfig({
-                    affiliatesPerFile: res.data.config.affiliatesPerFile,
-                    scheduledTime: res.data.config.scheduledTime,
+                    ...res.data.config,
                     filters: res.data.config.filters || {}
                 });
             }
         } catch (err) {
-            logger.error("Error cargando configuración:", err);
+            logger.error("Error cargando config:", err);
+        }
+    };
+
+    const loadSupervisors = async () => {
+        try {
+            const res = await apiClient.get("/users");
+            const supervisorList = res.data.filter(u => 
+                u.role === 'supervisor' || u.role === 'supervisor_reventa'
+            );
+            setSupervisors(supervisorList);
+        } catch (err) {
+            logger.error("Error cargando supervisores:", err);
         }
     };
 
@@ -203,6 +240,84 @@ export default function AffiliateDatabase() {
         } finally {
             setLoading(false);
         }
+    };
+
+    // ✅ FUNCIONES HELPER PARA CONFIGURACIÓN AVANZADA
+    const handleAddSupervisor = () => {
+        setExportConfig(prev => ({
+            ...prev,
+            supervisorConfigs: [
+                ...prev.supervisorConfigs,
+                {
+                    supervisorId: "",
+                    affiliatesPerFile: 100,
+                    obraSocialDistribution: []
+                }
+            ]
+        }));
+    };
+
+    const handleRemoveSupervisor = (index) => {
+        setExportConfig(prev => ({
+            ...prev,
+            supervisorConfigs: prev.supervisorConfigs.filter((_, i) => i !== index)
+        }));
+    };
+
+    const handleUpdateSupervisorField = (index, field, value) => {
+        setExportConfig(prev => ({
+            ...prev,
+            supervisorConfigs: prev.supervisorConfigs.map((config, i) =>
+                i === index ? { ...config, [field]: value } : config
+            )
+        }));
+    };
+
+    const handleAddObraSocial = (supervisorIndex) => {
+        setExportConfig(prev => ({
+            ...prev,
+            supervisorConfigs: prev.supervisorConfigs.map((config, i) =>
+                i === supervisorIndex
+                    ? {
+                        ...config,
+                        obraSocialDistribution: [
+                            ...config.obraSocialDistribution,
+                            { obraSocial: "", cantidad: 0 }
+                        ]
+                    }
+                    : config
+            )
+        }));
+    };
+
+    const handleUpdateObraSocial = (supervisorIndex, osIndex, field, value) => {
+        setExportConfig(prev => ({
+            ...prev,
+            supervisorConfigs: prev.supervisorConfigs.map((config, i) =>
+                i === supervisorIndex
+                    ? {
+                        ...config,
+                        obraSocialDistribution: config.obraSocialDistribution.map((os, j) =>
+                            j === osIndex ? { ...os, [field]: value } : os
+                        )
+                    }
+                    : config
+            )
+        }));
+    };
+
+    const handleRemoveObraSocial = (supervisorIndex, osIndex) => {
+        setExportConfig(prev => ({
+            ...prev,
+            supervisorConfigs: prev.supervisorConfigs.map((config, i) =>
+                i === supervisorIndex
+                    ? {
+                        ...config,
+                        obraSocialDistribution: config.obraSocialDistribution.filter((_, j) => j !== osIndex)
+                    }
+                    : config
+            )
+        }));
     };
 
     const handleSaveExportConfig = async () => {
@@ -331,24 +446,37 @@ export default function AffiliateDatabase() {
             >
                 <div className="flex border-b overflow-x-auto">
                         {[
-                            { id: "upload", icon: "📤", label: "Cargar Archivo", roles: ["gerencia", "admin"] },
-                            { id: "search", icon: "🔍", label: "Buscar Afiliados", roles: ["gerencia", "admin"] },
-                            { id: "config", icon: "⚙️", label: "Configuración de Envíos", roles: ["gerencia", "admin"] },
-                            { id: "exports", icon: "📁", label: "Exportaciones", roles: ["gerencia", "admin", "supervisor"] },
-                            { id: "stats", icon: "📊", label: "Estadísticas", roles: ["gerencia", "admin"] }
+                            { id: "upload", icon: "📤", label: "Cargar Archivo", roles: ["gerencia", "admin"], mobileVisible: false },
+                            { id: "search", icon: "🔍", label: "Buscar Afiliados", roles: ["gerencia", "admin"], mobileVisible: false },
+                            { id: "config", icon: "⚙️", label: "Configuración de Envíos", roles: ["gerencia", "admin"], mobileVisible: true },
+                            { id: "exports", icon: "📁", label: "Exportaciones", roles: ["gerencia", "admin", "supervisor"], mobileVisible: false },
+                            { id: "stats", icon: "📊", label: "Estadísticas", roles: ["gerencia", "admin"], mobileVisible: true }
                         ]
-                        .filter(tab => !tab.roles || tab.roles.includes(userRole))
+                        .filter(tab => {
+                            // Filtro por rol
+                            if (tab.roles && !tab.roles.includes(userRole)) return false;
+                            // En móvil, solo mostrar tabs marcadas como mobileVisible
+                            const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+                            if (isMobile) {
+                                // En móvil, supervisores no ven nada en esta página
+                                if (userRole === "supervisor") return false;
+                                return tab.mobileVisible;
+                            }
+                            return true;
+                        })
                         .map(tab => (
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
-                                className={`px-6 py-4 font-semibold whitespace-nowrap ${
+                                className={`px-3 md:px-6 py-3 md:py-4 font-semibold whitespace-nowrap text-sm md:text-base ${
                                     activeTab === tab.id
                                         ? "text-blue-600 border-b-2 border-blue-600"
                                         : "text-gray-600 hover:text-blue-600"
                                 }`}
+                                title={tab.label}
                             >
-                                {tab.icon} {tab.label}
+                                <span className="md:hidden text-xl">{tab.icon}</span>
+                                <span className="hidden md:inline">{tab.icon} {tab.label}</span>
                             </button>
                         ))}
                 </div>
@@ -654,31 +782,90 @@ export default function AffiliateDatabase() {
                                     </div>
 
                                     <div className="space-y-6">
+                                        {/* ✅ SELECTOR DE TIPO DE ENVÍO */}
                                         <div>
-                                            <label className="block text-sm font-semibold mb-2">
-                                                Cantidad de afiliados por archivo
+                                            <label className="block text-sm font-semibold mb-3 text-gray-700">
+                                                Tipo de Envío
                                             </label>
-                                            <input
-                                                type="number"
-                                                min="1"
-                                                max="10000"
-                                                value={exportConfig.affiliatesPerFile}
-                                                onChange={(e) => setExportConfig(prev => ({
-                                                    ...prev,
-                                                    affiliatesPerFile: parseInt(e.target.value)
-                                                }))}
-                                                className="w-full md:w-64 border rounded px-3 py-2"
-                                            />
-                                            <p className="text-sm text-gray-600 mt-1">
-                                                📋 Si hay {stats?.available || stats?.total || 0} afiliados disponibles (sin usar), se generarán aproximadamente {Math.ceil((stats?.available || stats?.total || 0) / exportConfig.affiliatesPerFile)} archivo(s) <strong>en total</strong> (distribuidos a lo largo del tiempo).
-                                            </p>
-                                            <p className="text-xs text-blue-600 mt-1">
-                                                🔄 Cada envío usará {exportConfig.affiliatesPerFile} afiliados × cantidad de supervisores activos. Los afiliados usados se marcan como "exportados" y no se reutilizan.
-                                            </p>
+                                            <div className="flex gap-4">
+                                                <button
+                                                    onClick={() => setExportConfig(prev => ({ ...prev, sendType: 'masivo' }))}
+                                                    className={`flex-1 px-6 py-4 rounded-xl border-2 font-semibold transition-all ${
+                                                        exportConfig.sendType === 'masivo'
+                                                            ? 'border-blue-600 bg-blue-50 text-blue-700'
+                                                            : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                                                    }`}
+                                                >
+                                                    📦 Masivo
+                                                    <p className="text-xs font-normal mt-1">
+                                                        Misma cantidad para todos
+                                                    </p>
+                                                </button>
+                                                <button
+                                                    onClick={() => setExportConfig(prev => ({ ...prev, sendType: 'avanzado' }))}
+                                                    className={`flex-1 px-6 py-4 rounded-xl border-2 font-semibold transition-all ${
+                                                        exportConfig.sendType === 'avanzado'
+                                                            ? 'border-purple-600 bg-purple-50 text-purple-700'
+                                                            : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                                                    }`}
+                                                >
+                                                    🎯 Avanzado
+                                                    <p className="text-xs font-normal mt-1">
+                                                        Configurar por supervisor
+                                                    </p>
+                                                </button>
+                                            </div>
                                         </div>
 
+                                        {/* ✅ CONFIGURACIÓN MASIVA */}
+                                        {exportConfig.sendType === 'masivo' && (
+                                            <div className="p-6 border-2 border-blue-200 rounded-xl bg-blue-50">
+                                                <h3 className="text-lg font-semibold text-blue-900 mb-4">📦 Configuración Masiva</h3>
+                                                <div className="space-y-4">
+                                                    <div>
+                                                        <label className="block text-sm font-semibold mb-2 text-gray-700">
+                                                            Cantidad de afiliados por archivo
+                                                        </label>
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            max="10000"
+                                                            value={exportConfig.affiliatesPerFile}
+                                                            onChange={(e) => setExportConfig(prev => ({
+                                                                ...prev,
+                                                                affiliatesPerFile: parseInt(e.target.value) || 0
+                                                            }))}
+                                                            className="w-full md:w-64 border border-gray-300 rounded-lg px-3 py-2"
+                                                        />
+                                                        <p className="text-sm text-gray-600 mt-1">
+                                                            📋 Cantidad igual para todos los supervisores
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* ✅ CONFIGURACIÓN AVANZADA */}
+                                        {exportConfig.sendType === 'avanzado' && (
+                                            <div className="p-6 border-2 border-purple-200 rounded-xl bg-purple-50">
+                                                <h3 className="text-lg font-semibold text-purple-900 mb-4">🎯 Configuración Avanzada</h3>
+                                                <AdvancedExportConfig
+                                                    supervisorConfigs={exportConfig.supervisorConfigs}
+                                                    supervisors={supervisors}
+                                                    obrasSocialesDisponibles={obrasSocialesDisponibles}
+                                                    handleAddSupervisor={handleAddSupervisor}
+                                                    handleRemoveSupervisor={handleRemoveSupervisor}
+                                                    handleUpdateSupervisorField={handleUpdateSupervisorField}
+                                                    handleAddObraSocial={handleAddObraSocial}
+                                                    handleUpdateObraSocial={handleUpdateObraSocial}
+                                                    handleRemoveObraSocial={handleRemoveObraSocial}
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* ✅ HORA DE ENVÍO (COMÚN PARA AMBOS) */}
                                         <div>
-                                            <label className="block text-sm font-semibold mb-2">
+                                            <label className="block text-sm font-semibold mb-2 text-gray-700">
                                                 Hora de envío diario (HH:mm)
                                             </label>
                                             <input
@@ -688,15 +875,22 @@ export default function AffiliateDatabase() {
                                                     ...prev,
                                                     scheduledTime: e.target.value
                                                 }))}
-                                                className="w-full md:w-64 border rounded px-3 py-2"
+                                                className="w-full md:w-64 border border-gray-300 rounded-lg px-3 py-2"
                                             />
                                         </div>
 
+                                        {/* ✅ CONFIGURACIÓN ACTUAL */}
                                         {currentConfig && (
                                             <div className="p-4 bg-green-50 rounded-lg border border-green-200">
                                                 <h3 className="font-semibold text-green-900 mb-2">✅ Configuración Actual</h3>
                                                 <ul className="text-sm text-green-800 space-y-1">
-                                                    <li>• {currentConfig.affiliatesPerFile} afiliados por archivo</li>
+                                                    <li>• Tipo: <strong>{currentConfig.sendType === 'masivo' ? 'Masivo' : 'Avanzado'}</strong></li>
+                                                    {currentConfig.sendType === 'masivo' && (
+                                                        <li>• {currentConfig.affiliatesPerFile} afiliados por archivo</li>
+                                                    )}
+                                                    {currentConfig.sendType === 'avanzado' && (
+                                                        <li>• {currentConfig.supervisorConfigs?.length || 0} supervisor(es) configurado(s)</li>
+                                                    )}
                                                     <li>• Envío diario a las {currentConfig.scheduledTime}</li>
                                                     {currentConfig.lastExecuted && (
                                                         <li>• Última ejecución: {new Date(currentConfig.lastExecuted).toLocaleString("es-AR")}</li>
@@ -705,6 +899,7 @@ export default function AffiliateDatabase() {
                                             </div>
                                         )}
 
+                                        {/* ✅ BOTÓN GUARDAR */}
                                         <button
                                             onClick={handleSaveExportConfig}
                                             disabled={loading}
@@ -727,11 +922,30 @@ export default function AffiliateDatabase() {
                                     ) : (
                                         <div className="space-y-3">
                                             {exports.map((exp, index) => (
-                                                <div key={index} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
-                                                    <div>
-                                                        <div className="font-semibold">{exp.filename}</div>
-                                                        <div className="text-sm text-gray-600">
-                                                            {new Date(exp.createdAt).toLocaleString("es-AR")} • {(exp.size / 1024).toFixed(2)} KB
+                                                <div key={index} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 bg-white shadow-sm">
+                                                    <div className="flex-1">
+                                                        <div className="font-semibold text-gray-800">{exp.filename}</div>
+                                                        <div className="flex flex-wrap gap-3 mt-2 text-sm text-gray-600">
+                                                            {!isSupervisor && exp.supervisorName && (
+                                                                <span className="flex items-center gap-1">
+                                                                    <span className="text-blue-600">👤</span>
+                                                                    <strong>Supervisor:</strong> {exp.supervisorName}
+                                                                </span>
+                                                            )}
+                                                            <span className="flex items-center gap-1">
+                                                                <span className="text-green-600">📅</span>
+                                                                {new Date(exp.createdAt).toLocaleString("es-AR")}
+                                                            </span>
+                                                            <span className="flex items-center gap-1">
+                                                                <span className="text-purple-600">📊</span>
+                                                                <strong>Tamaño:</strong> {(exp.size / 1024).toFixed(2)} KB
+                                                            </span>
+                                                            {exp.affiliateCount > 0 && (
+                                                                <span className="flex items-center gap-1">
+                                                                    <span className="text-orange-600">👥</span>
+                                                                    <strong>Afiliados:</strong> {exp.affiliateCount}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </div>
                                                     <button
@@ -757,7 +971,7 @@ export default function AffiliateDatabase() {
                                                                 toast.error(error.response?.data?.error || "Error al descargar archivo");
                                                             }
                                                         }}
-                                                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                                        className="ml-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-semibold whitespace-nowrap"
                                                     >
                                                         📥 Descargar
                                                     </button>

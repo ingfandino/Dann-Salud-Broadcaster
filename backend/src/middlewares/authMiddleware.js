@@ -31,7 +31,17 @@ exports.requireAuth = async (req, res, next) => {
     req.user = user;
     next();
   } catch (err) {
-    logger.error("❌ Error en requireAuth:", err);
+    // Manejar específicamente el token expirado
+    if (err.name === 'TokenExpiredError') {
+      logger.warn(`⚠️  Token expirado para usuario - ${err.message}`);
+      return res.status(401).json({ 
+        error: "Sesión expirada", 
+        code: "TOKEN_EXPIRED",
+        message: "Tu sesión ha expirado. Por favor, inicia sesión nuevamente." 
+      });
+    }
+    
+    logger.error("❌ Error en requireAuth:", err.message);
     return res.status(401).json({ error: "Token inválido" });
   }
 };

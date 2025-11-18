@@ -25,7 +25,7 @@ const messageSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["pendiente", "enviado", "fallido", "recibido"],
+            enum: ["pendiente", "enviado", "fallido", "recibido", "entregado", "leido"],
             default: "pendiente",
         },
         from: { type: String },
@@ -65,6 +65,16 @@ messageSchema.index(
             job: { $exists: true },
             to: { $exists: true }
         }
+    }
+);
+
+// 🚨 ÍNDICE PARA DEDUPLICACIÓN GLOBAL
+// Optimiza búsqueda de mensajes recientes a un número (previene duplicados entre campañas)
+messageSchema.index(
+    { to: 1, direction: 1, timestamp: -1, status: 1 },
+    { 
+        name: 'global_dedup_index',
+        background: true // Crear en segundo plano sin bloquear
     }
 );
 

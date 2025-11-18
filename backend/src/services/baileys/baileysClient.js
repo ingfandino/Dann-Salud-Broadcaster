@@ -261,7 +261,7 @@ class BaileysClient {
             const matched = reglas.find(r => {
               const kw = normalize(r.keyword);
               if (!kw) return false;
-              const mt = r.matchType || "contains";
+              const mt = r.matchType || "exact"; // ✅ Default a exact (comparación exacta)
               return mt === "exact" ? bodyNorm === kw : bodyNorm.includes(kw);
             });
             

@@ -56,16 +56,21 @@ async function getUsers(req, res) {
     try {
         let queryFilter = {};
         const { _id, role } = req.user;
-        const { scope } = req.query;
+        const { scope, includeAllAuditors } = req.query;
 
-        if (role === "supervisor" && scope === "group") {
-            // Supervisores: devolver asesores de su mismo numeroEquipo
+        // Permitir a supervisores ver todos los auditores (para el dropdown de Auditor en AuditEditModal)
+        if (role === "supervisor" && includeAllAuditors === "true") {
+            // Devolver todos los usuarios sin restricción de equipo
+            // El frontend filtrará solo auditores/admins/supervisors
+            queryFilter = { deletedAt: null };
+        } else if (role === "supervisor" && scope === "group") {
+            // Supervisores: devolver TODOS los usuarios de su mismo numeroEquipo (asesores y auditores)
             let myGroup = req.user.numeroEquipo;
             if (!myGroup) {
                 const me = await User.findById(_id).select("numeroEquipo");
                 myGroup = me?.numeroEquipo || null;
             }
-            queryFilter = { role: "asesor", deletedAt: null };
+            queryFilter = { deletedAt: null };
             if (myGroup !== null) queryFilter.numeroEquipo = myGroup;
         } else if (role === "supervisor") {
             // Por defecto: su equipo directo + él mismo
@@ -104,6 +109,11 @@ async function updateUser(req, res) {
         // Evitar borrar el password accidentalmente
         if (!updateData.password) {
             delete updateData.password;
+        } else {
+            // ✅ Hashear el password antes de actualizar
+            const bcrypt = require('bcryptjs');
+            const salt = await bcrypt.genSalt(10);
+            updateData.password = await bcrypt.hash(updateData.password, salt);
         }
 
         if (!(req.user.role === "admin" || req.user.role === "gerencia")) {
@@ -136,7 +146,7 @@ async function deleteUserAdmin(req, res) {
             return res.status(403).json({ error: "No se puede eliminar una cuenta de Gerencia" });
         }
 
-        logger.info("🗑️ Eliminando usuario definitivamente", { userId: id, email: user.email });
+        logger.info(`🗑️ Eliminando usuario definitivamente: ${user.nombre || user.name || user.email} (${id})`);
 
         await User.findByIdAndDelete(id);
 
@@ -250,7 +260,7 @@ async function updateUserRole(req, res) {
             return res.status(403).json({ error: "Acceso denegado" });
         }
 
-        const validRoles = ["asesor", "supervisor", "auditor", "admin", "revendedor", "gerencia"];
+        const validRoles = ["asesor", "supervisor", "auditor", "admin", "revendedor", "gerencia", "rrhh"];
         if (!validRoles.includes(role)) {
             return res.status(400).json({ error: "Rol no válido" });
         }

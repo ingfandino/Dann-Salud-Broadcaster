@@ -163,7 +163,8 @@ exports.pauseJob = async (req, res) => {
         const role = String(req.user?.role || '').toLowerCase();
         const isPrivileged = ["admin", "supervisor", "gerencia"].includes(role);
         const isOwner = job.createdBy && job.createdBy.equals(req.user._id);
-        if (!isPrivileged && !isOwner) {
+        const canControl = ["asesor", "auditor"].includes(role) && isOwner;
+        if (!isPrivileged && !canControl) {
             return res.status(403).json({ error: "No tienes permisos para pausar este job" });
         }
 
@@ -175,8 +176,9 @@ exports.pauseJob = async (req, res) => {
         
         // ✅ Emitir actualizaciones en tiempo real
         try {
-            const total = job.contacts?.length || 0;
-            const progress = total > 0 ? ((job.currentIndex / total) * 100).toFixed(2) : 0;
+            const total = job.stats?.total || job.contacts?.length || 0;
+            const processed = (job.stats?.sent || 0) + (job.stats?.failed || 0);
+            const progress = total > 0 ? Math.min(100, ((processed / total) * 100).toFixed(2)) : 0;
             
             emitJobProgress(job._id.toString(), {
                 _id: job._id,
@@ -207,7 +209,8 @@ exports.resumeJob = async (req, res) => {
         const role = String(req.user?.role || '').toLowerCase();
         const isPrivileged = ["admin", "supervisor", "gerencia"].includes(role);
         const isOwner = job.createdBy && job.createdBy.equals(req.user._id);
-        if (!isPrivileged && !isOwner) {
+        const canControl = ["asesor", "auditor"].includes(role) && isOwner;
+        if (!isPrivileged && !canControl) {
             return res.status(403).json({ error: "No tienes permisos para reanudar este job" });
         }
 
@@ -223,8 +226,9 @@ exports.resumeJob = async (req, res) => {
         
         // ✅ Emitir actualizaciones en tiempo real
         try {
-            const total = job.contacts?.length || 0;
-            const progress = total > 0 ? ((job.currentIndex / total) * 100).toFixed(2) : 0;
+            const total = job.stats?.total || job.contacts?.length || 0;
+            const processed = (job.stats?.sent || 0) + (job.stats?.failed || 0);
+            const progress = total > 0 ? Math.min(100, ((processed / total) * 100).toFixed(2)) : 0;
             
             emitJobProgress(job._id.toString(), {
                 _id: job._id,
@@ -261,7 +265,8 @@ exports.cancelJob = async (req, res) => {
         const role = String(req.user?.role || '').toLowerCase();
         const isPrivileged = ["admin", "supervisor", "gerencia"].includes(role);
         const isOwner = job.createdBy && job.createdBy.equals(req.user._id);
-        if (!isPrivileged && !isOwner) {
+        const canControl = ["asesor", "auditor"].includes(role) && isOwner;
+        if (!isPrivileged && !canControl) {
             return res.status(403).json({ error: "No tienes permisos para cancelar este job" });
         }
 
@@ -316,8 +321,9 @@ exports.getJob = async (req, res) => {
         }
         if (!allowed) return res.status(403).json({ error: "No autorizado" });
 
-        const total = job.contacts.length || 0;
-        const progress = total > 0 ? ((job.currentIndex / total) * 100).toFixed(2) : 0;
+        const total = job.stats?.total || job.contacts?.length || 0;
+        const processed = (job.stats?.sent || 0) + (job.stats?.failed || 0);
+        const progress = total > 0 ? Math.min(100, ((processed / total) * 100).toFixed(2)) : 0;
 
         res.json({ ...job.toObject(), progress });
     } catch (err) {
@@ -364,8 +370,9 @@ exports.listJobs = async (req, res) => {
 
         // Calcular respuestas (mensajes inbound) para cada job
         const enriched = await Promise.all(jobs.map(async (job) => {
-            const total = job.contacts.length || 0;
-            const progress = total > 0 ? ((job.currentIndex / total) * 100).toFixed(2) : 0;
+            const total = job.stats?.total || job.contacts?.length || 0;
+            const processed = (job.stats?.sent || 0) + (job.stats?.failed || 0);
+            const progress = total > 0 ? Math.min(100, ((processed / total) * 100).toFixed(2)) : 0;
             
             // Contar respuestas recibidas (mensajes inbound)
             const repliesCount = await Message.countDocuments({

@@ -5,6 +5,7 @@ import apiClient from "../services/api";
 import { toast } from "react-toastify";
 import NotificationService from "../services/NotificationService";
 import { useAuth } from "../context/AuthContext";
+import confetti from "canvas-confetti";
 
 const STATUS_OPTIONS = [
     "Mensaje enviado",
@@ -13,20 +14,90 @@ const STATUS_OPTIONS = [
     "Falta documentación",
     "Falta clave",
     "Reprogramada",
+    "Reprogramada (falta confirmar hora)",
     "Completa",
     "QR hecho",
+    "Aprobada",
+    "Aprobada, pero no reconoce clave",
+    "No atendió",
+    "Tiene dudas",
+    "Falta clave y documentación",
+    "No le llegan los mensajes",
+    "Cortó",
+    "Autovinculación",
+    "Caída",
+    "Pendiente",
+    "Rehacer vídeo",
 ];
 const ARGENTINE_OBRAS_SOCIALES = [
-    'OSDE', 'Medifé', 'OSDEPYM', 'IOMA', 'OSSEG', 'OSDE 210',
-    'OSFATUN', 'OSDE GBA', 'OSECAC', 'OSPRERA', 'OMINT', 'OSSEGUR',
-    'OSPR', 'OSUTHGRA', 'OSBLYCA', 'UOM', 'OSPM', 'OSPECON', 'Elevar', 'OSCHOCA',
-    'OSPEP'
+    "OSDE",
+    "OSDEPYM",
+    "IOMA",
+    "OSSEG",
+    "OSDE 210",
+    "OSFATUN",
+    "OSDE GBA",
+    "OSECAC (126205)",
+    "OSPRERA",
+    "OMINT",
+    "OSSEGUR",
+    "OSPR",
+    "OSUTHGRA (108803)",
+    "OSBLYCA",
+    "UOM",
+    "OSPM",
+    "OSPECON (105408)",
+    "Elevar (114307)",
+    "OSCHOCA (105804)",
+    "OSPEP (113908)",
+    "OSPROTURA",
+    "OSPSIP (119708)",
+    "OSEIV (122401)",
+    "OSPIF (108100)",
+    "OSIPA (114208)",
+    "OSPESESGYPE (107206)",
+    "OSTCARA (126007)",
+    "OSPIT (121002)",
+    "OSMP (111209)",
+    "OSPECA (103709)",
+    "OSPIQYP (118705)",
+    "OSBLYCA (102904)",
+    "VIASANO (2501)",
+    "OSPCYD (103402)",
+    "OSUOMRA (112103)",
+    "OSAMOC (3405)",
+    "OSPAGA (101000)",
+    "OSPF (107404)",
+    "OSPIP (116006)"
 ];
-const OBRAS_VENDIDAS = ["Binimed", "Meplife", "Medicenter"];
+const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"];
 const TIPO_VENTA = ["Alta", "Cambio"];
 
 export default function AuditEditModal({ audit, onClose, onSave }) {
     const { user } = useAuth();
+    
+    // ✅ Guardar estado original para validar permisos de "Aprobada"
+    const wasInCargadaStatus = audit.status === "Cargada";
+
+    // Función para convertir UTC a hora local
+    const getLocalDateTime = (utcDateString) => {
+        if (!utcDateString) return { fecha: "", hora: "" };
+
+        const date = new Date(utcDateString);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+
+        return {
+            fecha: `${year}-${month}-${day}`,
+            hora: `${hours}:${minutes}`
+        };
+    };
+
+    const localSchedule = getLocalDateTime(audit.scheduledAt);
+
     const [form, setForm] = useState({
         nombre: audit.nombre || "",
         cuil: audit.cuil || "",
@@ -35,24 +106,31 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
         obraSocialVendida: audit.obraSocialVendida || "",
         status: audit.status || "",
         tipoVenta: audit.tipoVenta || "alta",
-        asesor: audit.asesor?.nombre || audit.asesor || "",
+        asesor: audit.asesor?._id || audit.asesor || "",
         grupo: audit.groupId?.nombre || audit.groupId?.name || audit.grupo || "",
+        grupoId: typeof audit.groupId === 'object' ? audit.groupId?._id : null,
+        numeroEquipo: audit.groupId?.nombre || audit.groupId?.name || audit.grupo || "",
         auditor: audit.auditor?._id || audit.auditor || "",
-        fecha: audit.scheduledAt ? audit.scheduledAt.split("T")[0] : "",
-        hora: audit.scheduledAt ? audit.scheduledAt.split("T")[1]?.slice(0, 5) : "",
+        administrador: audit.administrador?._id || audit.administrador || "", // ✅
+        fecha: localSchedule.fecha,
+        hora: localSchedule.hora,
         datosExtra: audit.datosExtra || "",
+        isRecuperada: audit.isRecuperada || false, // ✅ Campo recuperada
     });
 
     const [loading, setLoading] = useState(false);
     const [reprogramar, setReprogramar] = useState(false);
-    
-    // Guardar fecha y hora originales
+    const [asesores, setAsesores] = useState([]);
+    const [grupos, setGrupos] = useState([]);
+
+    // Guardar fecha y hora originales (en hora local)
     const originalSchedule = {
-        fecha: audit.scheduledAt ? audit.scheduledAt.split("T")[0] : "",
-        hora: audit.scheduledAt ? audit.scheduledAt.split("T")[1]?.slice(0, 5) : ""
+        fecha: localSchedule.fecha,
+        hora: localSchedule.hora
     };
 
     const [auditores, setAuditores] = useState([]);
+    const [administradores, setAdministradores] = useState([]); // ✅
     const [availableSlots, setAvailableSlots] = useState([]);
     const [loadingSlots, setLoadingSlots] = useState(false);
 
@@ -79,7 +157,7 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
         const start = new Date();
         start.setHours(9, 20, 0, 0);
         const end = new Date();
-        end.setHours(21, 0, 0, 0);
+        end.setHours(23, 0, 0, 0); // ✅ Extendido hasta las 23:00
         let cur = new Date(start);
         while (cur <= end) {
             const hh = String(cur.getHours()).padStart(2, "0");
@@ -94,30 +172,70 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
         const all = generateTimeOptions();
         const map = {};
         (availableSlots || []).forEach((s) => { map[s.time] = s.count; });
-        return all.map((t) => ({ time: t, disabled: (map[t] || 0) >= 4 }));
+        // Límite: 10 auditorías por turno (se bloquea al llegar a 10)
+        return all.map((t) => ({ time: t, disabled: (map[t] || 0) >= 10 }));
     }
     const timeOptions = getEnabledTimeOptions();
-    
+
     // Filtrar estados disponibles según el rol del usuario
     const getAvailableStatuses = () => {
         const userRole = user?.role?.toLowerCase();
-        // Solo admin y gerencia pueden ver/seleccionar "QR hecho"
-        if (userRole === 'admin' || userRole === 'gerencia') {
+
+        // ✅ Estados exclusivos para Admin y Gerencia
+        const adminOnlyStatuses = [
+            "Pendiente",
+            "QR hecho",
+            "AFIP",
+            "Baja laboral con nueva alta",
+            "Baja laboral sin nueva alta",
+            "Licencia",
+            "Padrón",
+            "En revisión",
+            "Remuneración no válida",
+            "Cargada",
+            "Aprobada",
+            "Aprobada, pero no reconoce clave"
+        ];
+
+        // ✅ Estados compartidos por Admin, Auditor, Supervisor (NO por Asesor)
+        const sharedStatuses = [
+            "Falta clave",
+            "Rechazada",
+            "Autovinculación",
+            "Caída"
+        ];
+
+        // Gerencia tiene acceso a TODOS los estados (rol principal)
+        if (userRole === 'gerencia') {
             return STATUS_OPTIONS;
         }
-        // Para otros roles, excluir "QR hecho"
-        return STATUS_OPTIONS.filter(status => status !== "QR hecho");
+
+        // Admin ve sus estados específicos + los compartidos
+        if (userRole === 'admin') {
+            return [...adminOnlyStatuses, ...sharedStatuses];
+        }
+
+        // Otros roles (auditor, supervisor, asesor) NO ven los estados de Admin pero SÍ ven los compartidos
+        return STATUS_OPTIONS.filter(status => !adminOnlyStatuses.includes(status) || sharedStatuses.includes(status));
     };
-    
+
     const availableStatuses = getAvailableStatuses();
 
     // Restaurar fecha y hora originales cuando se desactiva reprogramar
+    // ✅ Cuando se activa reprogramar, cambiar automáticamente el estado a "Reprogramada"
     useEffect(() => {
-        if (!reprogramar) {
+        if (reprogramar) {
+            setForm(prev => ({
+                ...prev,
+                status: "Reprogramada"
+            }));
+        } else {
             setForm(prev => ({
                 ...prev,
                 fecha: originalSchedule.fecha,
-                hora: originalSchedule.hora
+                hora: originalSchedule.hora,
+                // Si el estado actual es "Reprogramada", limpiarlo al desmarcar
+                status: prev.status === "Reprogramada" ? audit.status || "" : prev.status
             }));
         }
     }, [reprogramar]);
@@ -125,10 +243,12 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
     useEffect(() => {
         const fetchAuditores = async () => {
             try {
-                const { data } = await apiClient.get("/users");
-                // Filtrar solo usuarios con roles: admin, gerencia, auditor, supervisor
-                const filtered = data.filter(u => 
-                    ['admin', 'gerencia', 'auditor', 'supervisor'].includes(u.role?.toLowerCase())
+                // ✅ VOLVER A FILTRAR: Solo Gerencia, Auditor y Supervisor (sin Admin)
+                const { data } = await apiClient.get("/users?includeAllAuditors=true");
+                const filtered = data.filter(u =>
+                    u.role?.toLowerCase() === 'auditor' ||
+                    u.role?.toLowerCase() === 'gerencia' ||
+                    u.role?.toLowerCase() === 'supervisor'
                 );
                 setAuditores(filtered);
             } catch (err) {
@@ -136,25 +256,109 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                 toast.error("No se pudieron cargar los auditores");
             }
         };
+
+        // ✅ Nuevo: Cargar administradores (solo rol Admin)
+        const fetchAdministradores = async () => {
+            try {
+                const { data } = await apiClient.get("/users");
+                const filtered = data.filter(u => u.role?.toLowerCase() === 'admin');
+                setAdministradores(filtered);
+            } catch (err) {
+                console.error("Error al cargar administradores", err);
+                toast.error("No se pudieron cargar los administradores");
+            }
+        };
+
+        const fetchGrupos = async () => {
+            try {
+                const { data } = await apiClient.get("/groups");
+                setGrupos(data || []);
+            } catch (err) {
+                console.error("Error al cargar grupos", err);
+                toast.error("No se pudieron cargar los grupos");
+            }
+        };
+
         fetchAuditores();
+        fetchAdministradores(); // ✅
+        fetchGrupos();
     }, []);
+
+    useEffect(() => {
+        const fetchAsesores = async () => {
+            if (!form.numeroEquipo) return;
+            try {
+                const { data } = await apiClient.get("/users");
+                // ✅ Filtrar asesores Y auditores del grupo (algunos auditores también venden)
+                const filtered = data.filter(u =>
+                    (u.role?.toLowerCase() === 'asesor' || u.role?.toLowerCase() === 'auditor') &&
+                    u.numeroEquipo === form.numeroEquipo
+                );
+                setAsesores(filtered);
+            } catch (err) {
+                console.error("Error al cargar asesores", err);
+                toast.error("No se pudieron cargar los asesores");
+            }
+        };
+        fetchAsesores();
+    }, [form.numeroEquipo]);
 
     const validate = () => {
         if (!form.nombre.trim()) return "Nombre es requerido";
         if (!/^\d{11}$/.test(form.cuil)) return "CUIL debe tener exactamente 11 dígitos";
         if (form.telefono && !/^\d{10}$/.test(form.telefono.replace(/\D/g, '')))
             return "Teléfono debe tener 10 dígitos";
-        if (reprogramar && form.fecha && form.hora) {
+
+        // ✅ Validación específica para estado "Reprogramada"
+        if (form.status === "Reprogramada") {
+            // Debe tener el checkbox marcado
+            if (!reprogramar) {
+                return 'Debe marcar el check "Reprogramar turno" para poder seleccionar este estado';
+            }
+            // Verificar que se haya cambiado la hora
+            if (form.fecha === originalSchedule.fecha && form.hora === originalSchedule.hora) {
+                return "Para reprogramar debe cambiar al menos la hora del turno, o desmarque el check 'Reprogramar'";
+            }
+        }
+
+        // ✅ PRIVILEGIO ESPECIAL: Gerencia puede editar turnos de cualquier fecha sin restricciones
+        const isGerencia = user?.role?.toLowerCase() === 'gerencia';
+        
+        if (reprogramar && form.fecha && form.hora && !isGerencia) {
+            // Solo aplicar restricción de tiempo para roles que NO sean Gerencia
             const now = new Date();
             const selected = new Date(`${form.fecha}T${form.hora}:00`);
-            if (selected < now) return "No se puede asignar un turno en el pasado";
+            // ✅ Tolerancia de 20 minutos: permite reprogramar si no han pasado más de 20 min desde el turno
+            const twentyMinutesAgo = new Date(now.getTime() - 20 * 60 * 1000);
+            if (selected < twentyMinutesAgo) {
+                return "No se puede asignar un turno de hace más de 20 minutos";
+            }
         }
         return null;
     };
 
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setForm((p) => ({ ...p, [name]: value }));
+
+        // Validar si intentan seleccionar "Reprogramada" sin el checkbox
+        if (name === 'status' && value === 'Reprogramada' && !reprogramar) {
+            toast.error('Debe marcar el check "Reprogramar turno" para poder seleccionar este estado');
+            return; // No actualizar el estado
+        }
+
+        // Si cambia el grupo, actualizar numeroEquipo y resetear asesor
+        if (name === 'grupo') {
+            const grupoSeleccionado = grupos.find(g => (g.nombre || g.name) === value);
+            setForm((p) => ({
+                ...p,
+                grupo: value,
+                numeroEquipo: value, // El nombre del grupo es el numeroEquipo
+                grupoId: grupoSeleccionado?._id || "",
+                asesor: "" // Resetear asesor cuando cambia el grupo
+            }));
+        } else {
+            setForm((p) => ({ ...p, [name]: value }));
+        }
     };
 
     const handleSubmit = async (e) => {
@@ -169,70 +373,168 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                 nombre: form.nombre?.trim() || "",
                 cuil: form.cuil?.trim() || "",
                 telefono: form.telefono?.trim() || "",
-                status: form.status || "",
                 tipoVenta: form.tipoVenta?.toLowerCase() || "alta",
                 obraSocialAnterior: form.obraSocialAnterior || "",
                 obraSocialVendida: form.obraSocialVendida || "",
-                auditor: form.auditor || "",
                 scheduledAt: reprogramar && form.fecha && form.hora ? `${form.fecha}T${form.hora}:00` : audit.scheduledAt,
-                datosExtra: form.datosExtra?.trim() || ""
+                datosExtra: form.datosExtra?.trim() || "",
+                isRecuperada: form.isRecuperada || false // ✅ Campo recuperada
             };
 
+            // Solo incluir status si tiene un valor válido
+            if (form.status && form.status !== "Seleccione") {
+                payload.status = form.status;
+            }
+
+            // Manejar el campo auditor (permitir desasignar con "Seleccione")
+            if (form.auditor === "" || form.auditor === "Seleccione") {
+                payload.auditor = null; // Desasignar auditor explícitamente
+            } else if (form.auditor) {
+                payload.auditor = form.auditor; // Asignar/cambiar auditor
+            }
+            // Si no se especifica, no se modifica (mantiene valor actual)
+
+            // ✅ Manejar el campo administrador (misma lógica que auditor)
+            if (form.administrador === "" || form.administrador === "Seleccione") {
+                payload.administrador = null; // Desasignar administrador explícitamente
+            } else if (form.administrador) {
+                payload.administrador = form.administrador; // Asignar/cambiar administrador
+            }
+            // Si no se especifica, no se modifica (mantiene valor actual)
+
+            // Solo gerencia puede cambiar el asesor y el grupo
+            if (user?.role?.toLowerCase() === 'gerencia') {
+                if (form.asesor) {
+                    payload.asesor = form.asesor;
+                }
+                // Solo enviar groupId si es un ObjectId válido (24 caracteres hexadecimales)
+                if (form.grupoId && /^[0-9a-fA-F]{24}$/.test(form.grupoId)) {
+                    payload.groupId = form.grupoId;
+                }
+            }
+
             await apiClient.patch(`/audits/${audit._id}`, payload);
+
+            // 🎉 Animación de confetti si el estado cambió a "Completa"
+            if (form.status === "Completa" && audit.status !== "Completa") {
+                // Confetti explosión desde el centro
+                confetti({
+                    particleCount: 150,
+                    spread: 70,
+                    origin: { y: 0.6 }
+                });
+
+                // Confetti desde los lados
+                setTimeout(() => {
+                    confetti({
+                        particleCount: 100,
+                        angle: 60,
+                        spread: 55,
+                        origin: { x: 0 }
+                    });
+                }, 200);
+
+                setTimeout(() => {
+                    confetti({
+                        particleCount: 100,
+                        angle: 120,
+                        spread: 55,
+                        origin: { x: 1 }
+                    });
+                }, 400);
+            }
+
             toast.success("Auditoría actualizada");
             NotificationService.success("Una auditoría fue editada correctamente");
-            onSave();
+
+            // Esperar a que onSave complete antes de cerrar el modal
+            if (onSave) {
+                await onSave();
+            }
             onClose();
         } catch (err) {
-            console.error("Error al actualizar auditoría:", err.response?.data || err.message);
-            toast.error("No se pudo actualizar la auditoría");
+            console.error("Error al actualizar auditoría:", err);
+            console.error("Error response data:", err.response?.data);
+
+            // Intentar extraer el mensaje de error de diferentes ubicaciones
+            let errorMsg = "No se pudo actualizar la auditoría";
+
+            if (err.response?.data) {
+                const data = err.response.data;
+                // Intentar diferentes estructuras de error
+                if (data.message) {
+                    errorMsg = data.message;
+                } else if (data.error?.message) {
+                    errorMsg = data.error.message;
+                } else if (data.error && typeof data.error === 'string') {
+                    errorMsg = data.error;
+                } else if (typeof data === 'string') {
+                    errorMsg = data;
+                }
+            } else if (err.message) {
+                errorMsg = err.message;
+            }
+
+            toast.error(errorMsg);
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
-            <div className="bg-white rounded shadow-lg w-full max-w-lg max-h-[90vh] overflow-y-auto p-4">
-                <h2 className="text-lg font-semibold mb-4">Editar Auditoría</h2>
-                <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50 p-0 md:p-4">
+            <div className="modal-responsive bg-white md:rounded-lg shadow-lg w-full md:max-w-2xl max-h-screen md:max-h-[90vh] overflow-y-auto p-4 md:p-6">
+                <div className="flex justify-between items-center mb-4 sticky top-0 bg-white pb-2 border-b md:border-0">
+                    <h2 className="text-xl md:text-lg font-semibold">Editar Auditoría</h2>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="md:hidden text-gray-500 hover:text-gray-700 p-2 touch-manipulation"
+                        aria-label="Cerrar"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <form onSubmit={handleSubmit} className="space-y-4 md:space-y-3">
                     <div>
-                        <label className="block text-sm font-medium">Afiliado</label>
+                        <label className="block text-sm md:text-sm font-medium mb-1">Afiliado</label>
                         <input
                             name="nombre"
                             value={form.nombre}
                             onChange={handleChange}
-                            className="border rounded p-2 w-full"
+                            className="border rounded p-3 md:p-2 w-full text-base md:text-sm touch-manipulation"
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium">Teléfono</label>
+                        <label className="block text-sm md:text-sm font-medium mb-1">Teléfono</label>
                         <input
                             name="telefono"
                             value={form.telefono || ""}
                             onChange={handleChange}
-                            className="border rounded p-2 w-full"
+                            className="border rounded p-3 md:p-2 w-full text-base md:text-sm touch-manipulation"
+                            type="tel"
                         />
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium">CUIL</label>
+                        <label className="block text-sm md:text-sm font-medium mb-1">CUIL</label>
                         <input
                             name="cuil"
                             value={form.cuil}
                             onChange={handleChange}
-                            className="border rounded p-2 w-full"
+                            className="border rounded p-3 md:p-2 w-full text-base md:text-sm touch-manipulation"
+                            inputMode="numeric"
                         />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-2">
                         <div>
-                            <label className="block text-sm font-medium">Obra Social Anterior</label>
+                            <label className="block text-sm font-medium mb-1">Obra Social Anterior</label>
                             <select
                                 name="obraSocialAnterior"
                                 value={form.obraSocialAnterior}
                                 onChange={handleChange}
-                                className="border rounded p-2 w-full"
+                                className="border rounded p-3 md:p-2 w-full text-base md:text-sm touch-manipulation"
                             >
                                 <option value="">-- Seleccionar --</option>
                                 {ARGENTINE_OBRAS_SOCIALES.map((o) => (
@@ -241,12 +543,12 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium">Obra Social Vendida</label>
+                            <label className="block text-sm font-medium mb-1">Obra Social Vendida</label>
                             <select
                                 name="obraSocialVendida"
                                 value={form.obraSocialVendida}
                                 onChange={handleChange}
-                                className="border rounded p-2 w-full"
+                                className="border rounded p-3 md:p-2 w-full text-base md:text-sm touch-manipulation"
                             >
                                 {OBRAS_VENDIDAS.map((o) => (
                                     <option key={o} value={o}>{o}</option>
@@ -255,28 +557,46 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-2">
                         <div>
-                            <label className="block text-sm font-medium">Estado</label>
+                            <label className="block text-sm font-medium mb-1">Estado</label>
                             <select
                                 name="status"
                                 value={form.status}
                                 onChange={handleChange}
-                                className="border rounded p-2 w-full"
+                                className="border rounded p-3 md:p-2 w-full text-base md:text-sm touch-manipulation"
                             >
                                 <option value="">Seleccione</option>
-                                {availableStatuses.map((o) => (
-                                    <option key={o} value={o}>{o}</option>
-                                ))}
+                                {availableStatuses.map((o) => {
+                                    // ✅ Deshabilitar "Reprogramada" si no está marcado el checkbox
+                                    const isReprogramadaDisabled = o === "Reprogramada" && !reprogramar;
+                                    
+                                    // ✅ Deshabilitar "Aprobada" y "Aprobada, pero no reconoce clave" si NO estuvo en "Cargada"
+                                    const isAprobadaDisabled = (o === "Aprobada" || o === "Aprobada, pero no reconoce clave") && !wasInCargadaStatus;
+                                    
+                                    const isDisabled = isReprogramadaDisabled || isAprobadaDisabled;
+                                    
+                                    return (
+                                        <option
+                                            key={o}
+                                            value={o}
+                                            disabled={isDisabled}
+                                        >
+                                            {o}
+                                            {isReprogramadaDisabled ? " (active el check 'Reprogramar')" : ""}
+                                            {isAprobadaDisabled ? " (solo si estuvo en estado 'Cargada')" : ""}
+                                        </option>
+                                    );
+                                })}
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium">Tipo</label>
+                            <label className="block text-sm font-medium mb-1">Tipo</label>
                             <select
                                 name="tipoVenta"
                                 value={form.tipoVenta}
                                 onChange={handleChange}
-                                className="border rounded p-2 w-full"
+                                className="border rounded p-3 md:p-2 w-full text-base md:text-sm touch-manipulation"
                             >
                                 {TIPO_VENTA.map((t) => (
                                     <option key={t} value={t}>{t}</option>
@@ -285,40 +605,125 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-2">
                         <div>
-                            <label className="block text-sm font-medium">Asesor</label>
-                            <input
-                                name="asesor"
-                                value={form.asesor}
-                                readOnly
-                                className="border rounded p-2 w-full bg-gray-100 cursor-not-allowed"
-                            />
+                            <label className="block text-sm font-medium mb-1">Asesor</label>
+                            {user?.role?.toLowerCase() === 'gerencia' ? (
+                                <select
+                                    name="asesor"
+                                    value={form.asesor}
+                                    onChange={handleChange}
+                                    className="border rounded p-3 md:p-2 w-full text-base md:text-sm touch-manipulation"
+                                >
+                                    <option value="">Seleccione</option>
+                                    {asesores.map((u) => (
+                                        <option key={u._id} value={u._id}>
+                                            {u.nombre || u.email || u.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            ) : (
+                                <input
+                                    name="asesor"
+                                    value={audit.asesor?.nombre || audit.asesor || ""}
+                                    readOnly
+                                    className="border rounded p-3 md:p-2 w-full bg-gray-100 cursor-not-allowed text-base md:text-sm"
+                                />
+                            )}
                         </div>
                         <div>
-                            <label className="block text-sm font-medium">Grupo</label>
-                            <input
-                                name="grupo"
-                                value={form.grupo}
-                                readOnly
-                                className="border rounded p-2 w-full bg-gray-100 cursor-not-allowed"
-                            />
+                            <label className="block text-sm font-medium mb-1">Grupo</label>
+                            {user?.role?.toLowerCase() === 'gerencia' ? (
+                                <select
+                                    name="grupo"
+                                    value={form.grupo}
+                                    onChange={handleChange}
+                                    className="border rounded p-3 md:p-2 w-full text-base md:text-sm touch-manipulation"
+                                >
+                                    <option value="">Seleccione</option>
+                                    {grupos.map((g) => (
+                                        <option key={g._id} value={g.nombre || g.name}>
+                                            {g.nombre || g.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            ) : (
+                                <input
+                                    name="grupo"
+                                    value={form.grupo}
+                                    readOnly
+                                    className="border rounded p-3 md:p-2 w-full bg-gray-100 cursor-not-allowed text-base md:text-sm"
+                                />
+                            )}
                         </div>
+                        {/* ✅ Campo Auditor: Solo Gerencia/Auditor/Supervisor */}
                         <div>
                             <label className="block text-sm font-medium">Auditor</label>
-                            <select
-                                name="auditor"
-                                value={form.auditor}
-                                onChange={handleChange}
-                                className="border rounded p-2 w-full"
-                            >
-                                <option value="">Seleccione</option>
-                                {auditores.map((u) => (
-                                    <option key={u._id} value={u._id}>
-                                        {u.nombre || u.email || u.name}
-                                    </option>
-                                ))}
-                            </select>
+                            {(() => {
+                                const isGerencia = user?.role?.toLowerCase() === 'gerencia';
+                                const auditorAsignado = audit.auditor?._id || audit.auditor;
+                                const esElMismoAuditor = auditorAsignado && auditorAsignado === user?._id;
+                                const puedeModificar = !auditorAsignado || isGerencia || esElMismoAuditor;
+
+                                return (
+                                    <>
+                                        <select
+                                            name="auditor"
+                                            value={form.auditor}
+                                            onChange={handleChange}
+                                            className={`border rounded p-2 w-full ${!puedeModificar ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                                            disabled={!puedeModificar}
+                                        >
+                                            <option value="">Seleccione</option>
+                                            {auditores.map((u) => (
+                                                <option key={u._id} value={u._id}>
+                                                    {u.nombre || u.email || u.name} ({u.role})
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {!puedeModificar && (
+                                            <p className="text-xs text-red-600 mt-1">
+                                                🔒 Solo el auditor asignado o Gerencia pueden modificar este campo
+                                            </p>
+                                        )}
+                                    </>
+                                );
+                            })()}
+                        </div>
+
+                        {/* ✅ Campo Administrador: misma lógica que Auditor */}
+                        <div>
+                            <label className="block text-sm font-medium">Administrador</label>
+                            {(() => {
+                                const isGerencia = user?.role?.toLowerCase() === 'gerencia';
+                                const administradorAsignado = audit.administrador?._id || audit.administrador;
+                                const esElMismoAdministrador = administradorAsignado && administradorAsignado === user?._id;
+                                const puedeModificar = !administradorAsignado || isGerencia || esElMismoAdministrador;
+
+                                return (
+                                    <>
+                                        <select
+                                            name="administrador"
+                                            value={form.administrador}
+                                            onChange={handleChange}
+                                            className={`border rounded p-2 w-full ${!puedeModificar ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                                            disabled={!puedeModificar}
+                                        >
+                                            <option value="">Seleccione</option>
+                                            {administradores.map((u) => (
+                                                <option key={u._id} value={u._id}>
+                                                    {u.nombre || u.email || u.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {!puedeModificar && (
+                                            <p className="text-xs text-red-600 mt-1">
+                                                🔒 Solo el administrador asignado o Gerencia pueden modificar este campo
+                                            </p>
+                                        )}
+                                    </>
+                                );
+                            })()}
                         </div>
                     </div>
 
@@ -327,7 +732,7 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                             <label className="block text-sm font-medium">Fecha (día)</label>
                             <input
                                 type="date"
-                                min={new Date().toISOString().split("T")[0]}
+                                min={user?.role?.toLowerCase() === 'gerencia' ? '2020-01-01' : new Date().toISOString().split("T")[0]}
                                 value={form.fecha}
                                 onChange={(e) => setForm({ ...form, fecha: e.target.value })}
                                 className={`border rounded p-2 w-full ${!reprogramar ? 'bg-gray-100 cursor-not-allowed' : ''}`}
@@ -356,43 +761,67 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 p-2 bg-gray-50 rounded">
                         <input
                             id="chk-reprogramar"
                             type="checkbox"
                             checked={reprogramar}
                             onChange={(e) => setReprogramar(e.target.checked)}
-                            className="h-4 w-4"
+                            className="h-5 w-5 md:h-4 md:w-4 touch-manipulation"
                         />
-                        <label htmlFor="chk-reprogramar" className="text-sm">Reprogramar turno (habilita edición de fecha y hora)</label>
+                        <label htmlFor="chk-reprogramar" className="text-base md:text-sm cursor-pointer select-none">Reprogramar turno (habilita edición de fecha y hora)</label>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium">Datos extra</label>
+                        <label className="block text-sm font-medium mb-1">Datos extra</label>
                         <textarea
                             name="datosExtra"
                             value={form.datosExtra}
                             onChange={handleChange}
                             placeholder="Ejemplo: Afiliado con familiares, enfermedad preexistente, observaciones..."
-                            className="border rounded p-2 w-full min-h-[70px]"
+                            className="border rounded p-3 md:p-2 w-full min-h-[90px] md:min-h-[70px] text-base md:text-sm touch-manipulation"
                         />
                     </div>
 
-                    <div className="flex justify-end gap-2 pt-4">
+                    {/* Campo ¿Recuperada? - Solo Gerencia puede marcar */}
+                    <div className="flex items-center justify-between border-t pt-3 border-gray-200">
+                        <label className="text-sm font-medium text-gray-700">¿Recuperada?</label>
+                        <label className="flex items-center cursor-pointer gap-2">
+                            <input
+                                type="checkbox"
+                                checked={form.isRecuperada || false}
+                                disabled={user?.role?.toLowerCase() !== 'gerencia'}
+                                onChange={(e) => {
+                                    if (user?.role?.toLowerCase() === 'gerencia') {
+                                        setForm({ ...form, isRecuperada: e.target.checked });
+                                    }
+                                }}
+                                className={`w-5 h-5 rounded ${user?.role?.toLowerCase() === 'gerencia' ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
+                            />
+                            <span className={`font-medium text-sm ${form.isRecuperada ? 'text-green-600' : 'text-gray-400'}`}>
+                                {form.isRecuperada ? 'Sí' : 'No'}
+                            </span>
+                            {user?.role?.toLowerCase() !== 'gerencia' && (
+                                <span className="text-xs text-gray-500 italic">(solo Gerencia)</span>
+                            )}
+                        </label>
+                    </div>
+
+                    <div className="flex flex-col md:flex-row justify-end gap-3 md:gap-2 pt-4 sticky bottom-0 bg-white pb-2 border-t md:border-0">
                         <button
                             type="button"
                             onClick={onClose}
-                            className="px-3 py-2 rounded bg-gray-300 hover:bg-gray-400"
+                            className="w-full md:w-auto px-4 py-3 md:py-2 rounded bg-gray-300 hover:bg-gray-400 text-base md:text-sm font-medium touch-manipulation"
                             disabled={loading}
                         >
                             Cancelar
                         </button>
                         <button
                             type="submit"
-                            className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+                            className="w-full md:w-auto px-4 py-3 md:py-2 rounded bg-blue-600 text-white hover:bg-blue-700 text-base md:text-sm font-medium touch-manipulation"
                             disabled={loading}
                         >
-                            {loading ? "Guardando..." : "Guardar"}
+                            {loading ? "Guardando..." : "💾 Guardar"}
                         </button>
                     </div>
                 </form>

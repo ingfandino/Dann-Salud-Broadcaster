@@ -20,9 +20,11 @@ const reportRoutes = require("./reportRoutes");
 const auditRoutes = require("./auditRoutes");
 const metricsRoutes = require("./metricsRoutes");
 const recoveryRoutes = require("./recoveryRoutes");
+const liquidacionRoutes = require("./liquidacionRoutes");
 const internalMessageRoutes = require("./internalMessageRoutes");
 const affiliateRoutes = require("./affiliates");
 const bannedWordRoutes = require("./bannedWords");
+const employeeRoutes = require("./employees");
 
 // 📌 Rutas públicas
 router.use("/auth", authRoutes);
@@ -32,6 +34,30 @@ router.use(requireAuth);
 
 // 📌 Rutas protegidas
 router.use("/users", userRoutes);
+
+// Ruta directa para grupos (accesible desde /api/groups)
+router.get("/groups", requireAuth, async (req, res) => {
+    try {
+        const User = require("../models/User");
+        const grupos = await User.distinct("numeroEquipo", { 
+            deletedAt: null,
+            numeroEquipo: { $exists: true, $ne: null, $ne: "" }
+        });
+        
+        grupos.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+        
+        const gruposFormateados = grupos.map(g => ({
+            _id: g,
+            nombre: g,
+            name: g
+        }));
+        
+        res.json(gruposFormateados);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 router.use("/contacts", contactRoutes);
 router.use("/templates", templateRoutes);
 router.use("/autoresponses", autoresponseRoutes);
@@ -45,8 +71,10 @@ router.use("/reports", reportRoutes);
 router.use("/audits", auditRoutes);
 router.use("/metrics", metricsRoutes);
 router.use("/recovery", recoveryRoutes);
+router.use("/liquidacion", liquidacionRoutes);
 router.use("/internal-messages", internalMessageRoutes);
 router.use("/affiliates", affiliateRoutes);
 router.use("/banned-words", bannedWordRoutes);
+router.use("/employees", employeeRoutes);
 
 module.exports = router;

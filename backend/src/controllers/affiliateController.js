@@ -32,7 +32,7 @@ exports.uploadAffiliates = async (req, res) => {
         const filePath = req.file.path;
         const originalName = req.file.originalname;
         
-        logger.info(`📄 Procesando archivo de afiliados: ${originalName} (usuario: ${req.user.email})`);
+        logger.info(`📄 Procesando archivo de afiliados: ${originalName} (usuario: ${req.user.nombre || req.user.name || req.user.email})`);
 
         // Leer archivo Excel
         const workbook = XLSX.readFile(filePath);
@@ -418,13 +418,23 @@ exports.getStats = async (req, res) => {
         
         // ✅ Estadísticas de exportación
         const exported = await Affiliate.countDocuments({ active: true, exported: true });
-        const available = total - exported;
+        // Disponibles = cualquier cosa que NO sea exported: true (incluye false, null, undefined)
+        const available = await Affiliate.countDocuments({ active: true, exported: { $ne: true } });
         
+        // Top 10 obras sociales (para estadísticas generales)
         const obrasSociales = await Affiliate.aggregate([
             { $match: { active: true } },
             { $group: { _id: "$obraSocial", count: { $sum: 1 } } },
             { $sort: { count: -1 } },
             { $limit: 10 }
+        ]);
+
+        // ✅ TODAS las obras sociales con afiliados disponibles (para configuración)
+        // Incluye: exported: false, null, undefined (cualquier cosa que NO sea true)
+        const obrasSocialesDisponibles = await Affiliate.aggregate([
+            { $match: { active: true, exported: { $ne: true } } },
+            { $group: { _id: "$obraSocial", count: { $sum: 1 } } },
+            { $sort: { _id: 1 } } // Orden alfabético
         ]);
 
         const recentBatches = await Affiliate.aggregate([
@@ -444,6 +454,7 @@ exports.getStats = async (req, res) => {
             exported,
             available,
             obrasSociales: obrasSociales.map(os => ({ name: os._id, count: os.count })),
+            obrasSocialesDisponibles: obrasSocialesDisponibles.map(os => ({ name: os._id, count: os.count })),
             recentBatches
         });
 
@@ -456,15 +467,62 @@ exports.getStats = async (req, res) => {
 // ⚙️ Configurar exportación programada
 exports.configureExport = async (req, res) => {
     try {
-        const { affiliatesPerFile, scheduledTime, filters } = req.body;
+        const { 
+            sendType, 
+            affiliatesPerFile, 
+            obraSocialDistribution,
+            supervisorConfigs,
+            scheduledTime, 
+            filters 
+        } = req.body;
 
-        if (!affiliatesPerFile || !scheduledTime) {
-            return res.status(400).json({ error: "Faltan parámetros obligatorios" });
+        if (!scheduledTime) {
+            return res.status(400).json({ error: "Falta la hora programada" });
         }
 
         // Validar hora
         if (!/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(scheduledTime)) {
             return res.status(400).json({ error: "Formato de hora inválido (use HH:mm)" });
+        }
+
+        // Validar según tipo de envío
+        if (sendType === "masivo") {
+            if (!affiliatesPerFile) {
+                return res.status(400).json({ error: "Falta cantidad de afiliados por archivo" });
+            }
+            
+            // Validar distribución de obras sociales si existe
+            if (obraSocialDistribution && obraSocialDistribution.length > 0) {
+                const total = obraSocialDistribution.reduce((sum, d) => sum + d.cantidad, 0);
+                if (total !== affiliatesPerFile) {
+                    return res.status(400).json({ 
+                        error: `La suma de la distribución (${total}) debe coincidir con el total (${affiliatesPerFile})` 
+                    });
+                }
+            }
+        } else if (sendType === "avanzado") {
+            if (!supervisorConfigs || supervisorConfigs.length === 0) {
+                return res.status(400).json({ error: "Faltan configuraciones de supervisores" });
+            }
+            
+            // Validar cada configuración de supervisor
+            for (const supConfig of supervisorConfigs) {
+                if (!supConfig.supervisorId || !supConfig.affiliatesPerFile) {
+                    return res.status(400).json({ 
+                        error: "Cada supervisor debe tener ID y cantidad de afiliados" 
+                    });
+                }
+                
+                // Validar distribución si existe
+                if (supConfig.obraSocialDistribution && supConfig.obraSocialDistribution.length > 0) {
+                    const total = supConfig.obraSocialDistribution.reduce((sum, d) => sum + d.cantidad, 0);
+                    if (total !== supConfig.affiliatesPerFile) {
+                        return res.status(400).json({ 
+                            error: `La distribución del supervisor ${supConfig.supervisorId} no coincide con su total` 
+                        });
+                    }
+                }
+            }
         }
 
         // Desactivar configuración anterior
@@ -473,7 +531,10 @@ exports.configureExport = async (req, res) => {
         // Crear nueva configuración
         const config = new AffiliateExportConfig({
             configuredBy: req.user._id,
-            affiliatesPerFile: Number(affiliatesPerFile),
+            sendType: sendType || "masivo",
+            affiliatesPerFile: sendType === "masivo" ? Number(affiliatesPerFile) : undefined,
+            obraSocialDistribution: sendType === "masivo" ? (obraSocialDistribution || []) : undefined,
+            supervisorConfigs: sendType === "avanzado" ? supervisorConfigs : undefined,
             scheduledTime,
             filters: filters || {},
             active: true
@@ -481,7 +542,7 @@ exports.configureExport = async (req, res) => {
 
         await config.save();
 
-        logger.info(`⚙️ Configuración de exportación guardada: ${affiliatesPerFile} afiliados/archivo a las ${scheduledTime}`);
+        logger.info(`⚙️ Configuración guardada: ${sendType} - ${scheduledTime}`);
 
         res.json({
             success: true,
@@ -499,6 +560,7 @@ exports.getExportConfig = async (req, res) => {
     try {
         const config = await AffiliateExportConfig.findOne({ active: true })
             .populate("configuredBy", "nombre email")
+            .populate("supervisorConfigs.supervisorId", "nombre email numeroEquipo")
             .lean();
 
         res.json({ config });

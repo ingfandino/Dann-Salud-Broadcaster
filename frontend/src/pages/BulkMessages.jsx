@@ -59,6 +59,12 @@ export default function BulkMessages() {
 
     // estado de comprobación del vínculo del teléfono
     const [checkingLink, setCheckingLink] = useState(true);
+    
+    // ✅ Filtro de fecha para campañas
+    const [campaignDate, setCampaignDate] = useState(() => {
+        const today = new Date();
+        return today.toISOString().split('T')[0]; // YYYY-MM-DD
+    });
 
     // Desconectar dispositivo
     async function handleLogoutDevice() {
@@ -445,13 +451,14 @@ export default function BulkMessages() {
             if (form.templateId) {
                 const currentTemplate = templates.find(t => t._id === form.templateId);
                 
-                // Jerarquía: admin/gerencia > supervisor > revendedor > asesor
+                // Jerarquía: admin/gerencia > supervisor > revendedor > asesor/auditor
                 const roleHierarchy = {
                     admin: 4,
                     gerencia: 4,
                     supervisor: 3,
                     revendedor: 2,
-                    asesor: 1
+                    asesor: 1,
+                    auditor: 1
                 };
                 
                 const userRole = String(user?.role || "").toLowerCase();
@@ -669,6 +676,9 @@ export default function BulkMessages() {
                                     const by = t.createdBy?.nombre ? ` — ${t.createdBy.nombre}` : "";
                                     const team = t.createdBy?.numeroEquipo ? ` [${t.createdBy.numeroEquipo}]` : "";
                                     label += `${by}${team}`;
+                                } else if (role === "auditor" || role === "asesor" || role === "revendedor") {
+                                    // ✅ Mostrar creador para auditor/asesor/revendedor (ven plantillas de supervisores y gerencia)
+                                    if (t.createdBy?.nombre) label += ` — ${t.createdBy.nombre}`;
                                 }
                                 return (
                                     <option key={t._id} value={t._id}>
@@ -866,9 +876,20 @@ export default function BulkMessages() {
                     </div>
                 )}
 
-                {/* Tabla de Jobs con métricas mejoradas - SOLO CAMPAÑAS DEL DÍA */}
+                {/* Tabla de Jobs con métricas mejoradas */}
                 <div className="mt-8">
-                    <h2 className="text-xl font-semibold mb-2">📋 Campañas creadas hoy</h2>
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-xl font-semibold">📋 Campañas creadas</h2>
+                        <div className="flex items-center gap-2">
+                            <label className="text-sm font-medium">📅 Fecha:</label>
+                            <input
+                                type="date"
+                                value={campaignDate}
+                                onChange={(e) => setCampaignDate(e.target.value)}
+                                className="border rounded p-2 text-sm"
+                            />
+                        </div>
+                    </div>
                     <div className="overflow-x-auto">
                         <table className="w-full border text-left">
                             <thead>
@@ -884,28 +905,27 @@ export default function BulkMessages() {
                             </thead>
                             <tbody>
                                 {(() => {
-                                    // Filtrar solo campañas del día actual
-                                    const today = new Date();
-                                    today.setHours(0, 0, 0, 0);
-                                    const tomorrow = new Date(today);
-                                    tomorrow.setDate(tomorrow.getDate() + 1);
+                                    // ✅ Filtrar campañas por fecha seleccionada
+                                    const selectedDate = new Date(campaignDate + 'T00:00:00');
+                                    const nextDay = new Date(selectedDate);
+                                    nextDay.setDate(nextDay.getDate() + 1);
                                     
-                                    const todayJobs = jobs.filter(job => {
+                                    const filteredJobs = jobs.filter(job => {
                                         const createdAt = new Date(job.createdAt);
-                                        return createdAt >= today && createdAt < tomorrow;
+                                        return createdAt >= selectedDate && createdAt < nextDay;
                                     });
                                     
-                                    if (todayJobs.length === 0) {
+                                    if (filteredJobs.length === 0) {
                                         return (
                                             <tr>
                                                 <td colSpan="7" className="p-4 text-center text-gray-500">
-                                                    No hay campañas creadas hoy
+                                                    No hay campañas para la fecha seleccionada
                                                 </td>
                                             </tr>
                                         );
                                     }
                                     
-                                    return todayJobs.map((job) => {
+                                    return filteredJobs.map((job) => {
                                     const progress = parseFloat(job.progress || 0);
                                     const stats = job.stats || { total: 0, sent: 0, failed: 0, pending: 0 };
                                     
@@ -913,7 +933,10 @@ export default function BulkMessages() {
                                     const statusColors = {
                                         pendiente: "bg-blue-100 text-blue-800",
                                         "en_progreso": "bg-green-100 text-green-800",
+                                        ejecutando: "bg-green-100 text-green-800",
                                         pausado: "bg-yellow-100 text-yellow-800",
+                                        descanso: "bg-orange-100 text-orange-800",
+                                        "en_descanso": "bg-orange-100 text-orange-800",
                                         completado: "bg-emerald-100 text-emerald-800",
                                         cancelado: "bg-red-100 text-red-800",
                                         fallido: "bg-red-100 text-red-800"

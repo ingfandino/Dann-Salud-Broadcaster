@@ -5,9 +5,23 @@ import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { BarChart2, MessageSquare, Users, LogOut, SquareUserRound, ClipboardList, Database, Shield } from "lucide-react";
+import { BarChart2, MessageSquare, Users, LogOut, SquareUserRound, ClipboardList, Database, Shield, UserCog } from "lucide-react";
 import { API_URL } from "../config.js";
 import { getWhatsappStatus } from "../services/api";
+
+// Helper para formatear nombres de roles
+const formatRoleName = (role) => {
+    const roleNames = {
+        'asesor': 'Asesor',
+        'supervisor': 'Supervisor',
+        'auditor': 'Auditor',
+        'admin': 'Admin',
+        'revendedor': 'Revendedor',
+        'gerencia': 'Gerencia',
+        'rrhh': 'RR.HH.'
+    };
+    return roleNames[role?.toLowerCase()] || (role ? role.charAt(0).toUpperCase() + role.slice(1) : '');
+};
 
 export default function Dashboard() {
     const { user, token, logout } = useAuth();
@@ -47,8 +61,11 @@ export default function Dashboard() {
             { to: "/bulk-messages", icon: <MessageSquare className="w-5 h-5" />, label: "Mensajería Masiva" },
             { to: "/affiliates", icon: <Database className="w-5 h-5" />, label: "Mis Exportaciones" },
             { to: "/audits", icon: <SquareUserRound className="w-5 h-5" />, label: "Auditorías" },
+            { to: "/recursos-humanos", icon: <UserCog className="w-5 h-5" />, label: "Recursos Humanos" },
         ],
         auditor: [
+            { to: "/reports", icon: <BarChart2 className="w-5 h-5" />, label: "Mis Reportes" },
+            { to: "/bulk-messages", icon: <MessageSquare className="w-5 h-5" />, label: "Mensajería Masiva" },
             { to: "/audits", icon: <SquareUserRound className="w-5 h-5" />, label: "Auditorías" },
         ],
         admin: [
@@ -60,7 +77,11 @@ export default function Dashboard() {
             { to: "/affiliates", icon: <Database className="w-5 h-5" />, label: "Base de Afiliados" },
             { to: "/banned-words", icon: <Shield className="w-5 h-5" />, label: "Palabras Prohibidas" },
             { to: "/audits", icon: <SquareUserRound className="w-5 h-5" />, label: "Auditorías" },
-            { to: "/admin/users", icon: <Users className="w-5 h-5" />, label: "Gestionar Usuarios" },
+            { to: "/recursos-humanos", icon: <UserCog className="w-5 h-5" />, label: "Recursos Humanos" },
+            { to: "/admin/users", icon: <Users className="w-5 h-5" />, label: "Gestionar Usuarios" }
+        ],
+        rrhh: [
+            { to: "/recursos-humanos", icon: <UserCog className="w-5 h-5" />, label: "Recursos Humanos" },
         ],
         revendedor: [
             { to: "/reports", icon: <BarChart2 className="w-5 h-5" />, label: "Reportes de mensajería" },
@@ -80,7 +101,7 @@ export default function Dashboard() {
                 initial={{ x: -200, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
                 transition={{ duration: 0.5 }}
-                className="w-64 bg-gradient-to-b from-white via-brand-blue/90 to-brand-purple/80 text-white flex flex-col justify-between shadow-xl backdrop-blur-md"
+                className="w-64 bg-gradient-to-b from-brand-blue/95 via-brand-blue/85 to-brand-purple/80 text-white flex flex-col justify-between shadow-xl backdrop-blur-md"
             >
                 {/* Logo + Usuario */}
                 <div className="p-6 flex flex-col items-center bg-white/30 rounded-xl shadow-md mx-4 mt-6">
@@ -92,7 +113,7 @@ export default function Dashboard() {
                     <h2 className="text-lg font-bold text-gray-900 text-center">
                         {user?.nombre}
                     </h2>
-                    <p className="text-sm text-gray-800 capitalize">{user?.role}</p>
+                    <p className="text-sm text-gray-800">{formatRoleName(user?.role)}</p>
                 </div>
 
                 {/* Menú */}

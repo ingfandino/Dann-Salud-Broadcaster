@@ -9,6 +9,20 @@ import logger from "../utils/logger";
 import { Edit, Trash2, Power, Eye, EyeOff, Key, RefreshCcw } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
+// Helper para formatear nombres de roles
+const formatRoleName = (role) => {
+    const roleNames = {
+        'asesor': 'Asesor',
+        'supervisor': 'Supervisor',
+        'auditor': 'Auditor',
+        'admin': 'Admin',
+        'revendedor': 'Revendedor',
+        'gerencia': 'Gerencia',
+        'rrhh': 'RR.HH.'
+    };
+    return roleNames[role?.toLowerCase()] || (role ? role.charAt(0).toUpperCase() + role.slice(1) : '');
+};
+
 export default function AdminUsers() {
     const { user: authUser } = useAuth();
     const [users, setUsers] = useState([]);
@@ -225,25 +239,29 @@ export default function AdminUsers() {
                 {users.length === 0 ? (
                     <p className="text-gray-600 text-center">No hay usuarios registrados.</p>
                 ) : (
-                    <table className="w-full border-collapse relative">
-                        <thead>
-                            <tr className="bg-gray-200">
-                                <th className="p-2 border">Nombre</th>
-                                <th className="p-2 border">Email</th>
-                                <th className="p-2 border">Rol</th>
-                                <th className="p-2 border">Grupo</th>
-                                <th className="p-2 border">Estado</th>
-                                <th className="p-2 border">Acciones</th>
-                            </tr>
-                        </thead>
+                    <div className="overflow-x-auto -mx-2 md:mx-0">
+                        <div className="md:hidden text-xs text-gray-500 mb-2 text-center">
+                            👈 Desliza para ver más columnas →
+                        </div>
+                        <table className="w-full border-collapse relative min-w-[600px]">
+                            <thead>
+                                <tr className="bg-gray-200">
+                                    <th className="p-1 md:p-2 border text-xs md:text-base">Nombre</th>
+                                    <th className="p-1 md:p-2 border text-xs md:text-base">Email</th>
+                                    <th className="p-1 md:p-2 border text-xs md:text-base">Rol</th>
+                                    <th className="p-1 md:p-2 border text-xs md:text-base">Grupo</th>
+                                    <th className="p-1 md:p-2 border text-xs md:text-base">Estado</th>
+                                    <th className="p-1 md:p-2 border text-xs md:text-base">Acciones</th>
+                                </tr>
+                            </thead>
                         <tbody>
                             {users.map((u) => (
-                                <tr key={u._id} className="text-center relative">
-                                    <td className="p-2 border">{u.nombre}</td>
-                                    <td className="p-2 border">{u.email}</td>
+                                <tr key={u._id} className="text-center relative text-xs md:text-base">
+                                    <td className="p-1 md:p-2 border">{u.nombre}</td>
+                                    <td className="p-1 md:p-2 border truncate max-w-[120px] md:max-w-none" title={u.email}>{u.email}</td>
 
                                     {/* Rol con popup (permitido para cualquier rol; el backend impide cambiar el propio) */}
-                                    <td className="p-2 border relative">
+                                    <td className="p-1 md:p-2 border relative">
                                         <div className="relative inline-block">
                                             <span
                                                 onClick={(e) => {
@@ -258,7 +276,7 @@ export default function AdminUsers() {
                                                 }}
                                                 className="cursor-pointer text-indigo-600 font-semibold hover:underline"
                                             >
-                                                {u.role.charAt(0).toUpperCase() + u.role.slice(1)}
+                                                {formatRoleName(u.role)}
                                             </span>
 
                                             <AnimatePresence>
@@ -274,7 +292,7 @@ export default function AdminUsers() {
                                                     >
                                                         <p className="text-sm text-gray-600 mb-2">Cambiar rol a:</p>
                                                         <div className="flex flex-col gap-1">
-                                                            {["asesor", "supervisor", "auditor", "admin", "revendedor", "gerencia"].map((r) => (
+                                                            {["asesor", "supervisor", "auditor", "admin", "revendedor", "gerencia", "rrhh"].map((r) => (
                                                                 <button
                                                                     key={r}
                                                                     onClick={() =>
@@ -292,7 +310,7 @@ export default function AdminUsers() {
                                                                         : "bg-gray-100 hover:bg-gray-200"
                                                                         } ${(u.role || '').toLowerCase() === "gerencia" ? "opacity-50 cursor-not-allowed" : ""}`}
                                                                 >
-                                                                    {r.charAt(0).toUpperCase() + r.slice(1)}
+                                                                    {formatRoleName(r)}
                                                                 </button>
                                                             ))}
                                                         </div>
@@ -374,49 +392,50 @@ export default function AdminUsers() {
                                     </td>
 
                                     {/* Grupo (solo número) */}
-                                    <td className="p-2 border">{u.numeroEquipo ?? "—"}</td>
+                                    <td className="p-1 md:p-2 border">{u.numeroEquipo ?? "—"}</td>
 
                                     {/* Estado */}
-                                    <td className="p-2 border">
+                                    <td className="p-1 md:p-2 border">
                                         <span className={`font-semibold ${u.active ? "text-green-600" : "text-red-600"}`}>
                                             {u.active ? "Activo" : "Inactivo"}
                                         </span>
                                     </td>
 
                                     {/* Acciones con íconos */}
-                                    <td className="p-2 border flex justify-center gap-2">
+                                    <td className="p-1 md:p-2 border flex justify-center gap-1 md:gap-2">
                                         <button
                                             onClick={() => toggleActive(u._id)}
                                             disabled={u._id === currentUserId}
-                                            className={`p-2 rounded text-white ${u.active
+                                            className={`p-1 md:p-2 rounded text-white ${u.active
                                                 ? "bg-red-500 hover:bg-red-600"
                                                 : "bg-green-500 hover:bg-green-600"
                                                 }`}
                                             title={u.active ? "Desactivar" : "Activar"}
                                         >
-                                            <Power size={18} />
+                                            <Power size={14} className="md:w-[18px] md:h-[18px]" />
                                         </button>
                                         <button
                                             onClick={() => setSelectedUser(u)}
                                             disabled={u._id === currentUserId}
-                                            className="p-2 rounded bg-yellow-500 hover:bg-yellow-600 text-white disabled:opacity-50"
+                                            className="p-1 md:p-2 rounded bg-yellow-500 hover:bg-yellow-600 text-white disabled:opacity-50"
                                             title="Editar"
                                         >
-                                            <Edit size={18} />
+                                            <Edit size={14} className="md:w-[18px] md:h-[18px]" />
                                         </button>
                                         <button
                                             onClick={() => confirmDelete(u._id)}
                                             disabled={(u._id === currentUserId) || (u.role || '').toLowerCase() === "gerencia" || ((u.role || '').toLowerCase() === "admin" && currentUserRole !== "gerencia")}
-                                            className="p-2 rounded bg-gray-500 hover:bg-gray-600 text-white disabled:opacity-50"
+                                            className="p-1 md:p-2 rounded bg-gray-500 hover:bg-gray-600 text-white disabled:opacity-50"
                                             title="Eliminar"
                                         >
-                                            <Trash2 size={18} />
+                                            <Trash2 size={14} className="md:w-[18px] md:h-[18px]" />
                                         </button>
                                     </td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
+                    </div>
                 )}
 
                 {/* Paginación */}

@@ -307,6 +307,21 @@ export default function InternalMessages({ onClose }) {
         }
     };
 
+    const deleteAllMessages = async () => {
+        if (!window.confirm("¿Estás seguro de que deseas eliminar TODOS los mensajes? Esta acción no se puede deshacer.")) return;
+        
+        try {
+            const res = await apiClient.delete("/internal-messages/");
+            setMessages([]);
+            setSelectedMessage(null);
+            toast.success(`🗑️ ${res.data.deletedCount} mensaje(s) eliminado(s)`);
+            loadMessages(); // Recargar para asegurarse
+        } catch (err) {
+            logger.error("Error eliminando todos los mensajes:", err);
+            toast.error("Error eliminando mensajes");
+        }
+    };
+
     const downloadAttachment = (messageId, attachmentId, filename) => {
         const url = `${apiClient.defaults.baseURL}/internal-messages/${messageId}/attachments/${attachmentId}`;
         const link = document.createElement("a");
@@ -346,6 +361,13 @@ export default function InternalMessages({ onClose }) {
                             className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2"
                         >
                             ✉️ Nuevo Mensaje
+                        </button>
+                        <button
+                            onClick={deleteAllMessages}
+                            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 flex items-center gap-2"
+                            title="Eliminar todos los mensajes"
+                        >
+                            🗑️ Borrar Todo
                         </button>
                         <button
                             onClick={onClose}
