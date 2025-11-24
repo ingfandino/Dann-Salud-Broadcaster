@@ -1,6 +1,6 @@
 // frontend/src/components/AuditEditModal.jsx
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import apiClient from "../services/api";
 import { toast } from "react-toastify";
 import NotificationService from "../services/NotificationService";
@@ -68,14 +68,15 @@ const ARGENTINE_OBRAS_SOCIALES = [
     "OSAMOC (3405)",
     "OSPAGA (101000)",
     "OSPF (107404)",
-    "OSPIP (116006)"
+    "OSPIP (116006)",
+    "OSPIC"
 ];
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"];
 const TIPO_VENTA = ["Alta", "Cambio"];
 
 export default function AuditEditModal({ audit, onClose, onSave }) {
     const { user } = useAuth();
-    
+
     // ✅ Guardar estado original para validar permisos de "Aprobada"
     const wasInCargadaStatus = audit.status === "Cargada";
 
@@ -98,6 +99,45 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
 
     const localSchedule = getLocalDateTime(audit.scheduledAt);
 
+    const normalizeTeamValue = (value) => {
+        if (value === undefined || value === null) return "";
+        return String(value).trim();
+    };
+
+    const deriveInitialNumeroEquipo = () => {
+        const candidates = [
+            audit?.asesor?.numeroEquipo,
+            audit?.numeroEquipo,
+            audit?.groupId?.numeroEquipo,
+            audit?.grupo,
+            audit?.groupId?.nombre,
+            audit?.groupId?.name,
+        ];
+        for (const candidate of candidates) {
+            const normalized = normalizeTeamValue(candidate);
+            if (normalized.length) return normalized;
+        }
+        return "";
+    };
+
+    const deriveInitialGrupoLabel = () => {
+        const candidates = [
+            audit?.groupId?.nombre,
+            audit?.groupId?.name,
+            audit?.grupo,
+            audit?.numeroEquipo
+        ];
+        for (const candidate of candidates) {
+            const normalized = normalizeTeamValue(candidate);
+            if (normalized.length) return normalized;
+        }
+        const fallback = deriveInitialNumeroEquipo();
+        return fallback;
+    };
+
+    const initialNumeroEquipo = deriveInitialNumeroEquipo();
+    const initialGrupoLabel = deriveInitialGrupoLabel();
+
     const [form, setForm] = useState({
         nombre: audit.nombre || "",
         cuil: audit.cuil || "",
@@ -107,9 +147,9 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
         status: audit.status || "",
         tipoVenta: audit.tipoVenta || "alta",
         asesor: audit.asesor?._id || audit.asesor || "",
-        grupo: audit.groupId?.nombre || audit.groupId?.name || audit.grupo || "",
+        grupo: initialGrupoLabel,
         grupoId: typeof audit.groupId === 'object' ? audit.groupId?._id : null,
-        numeroEquipo: audit.groupId?.nombre || audit.groupId?.name || audit.grupo || "",
+        numeroEquipo: initialNumeroEquipo,
         auditor: audit.auditor?._id || audit.auditor || "",
         administrador: audit.administrador?._id || audit.administrador || "", // ✅
         fecha: localSchedule.fecha,
@@ -134,6 +174,71 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
     const [availableSlots, setAvailableSlots] = useState([]);
     const [loadingSlots, setLoadingSlots] = useState(false);
 
+    const [datosExtraHistory, setDatosExtraHistory] = useState(audit.datosExtraHistory || []);
+    const [statusHistory, setStatusHistory] = useState(audit.statusHistory || []);
+
+    useEffect(() => {
+        setDatosExtraHistory(audit.datosExtraHistory || []);
+        setStatusHistory(audit.statusHistory || []);
+    }, [audit]);
+
+    const sortedDatosExtraHistory = useMemo(() => {
+        return [...(datosExtraHistory || [])]
+            .filter((entry) => entry && (entry.value || '').trim().length)
+            .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+    }, [datosExtraHistory]);
+
+    const sortedStatusHistory = useMemo(() => {
+        return [...(statusHistory || [])]
+            .filter((entry) => entry && (entry.value || '').trim().length)
+            .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+    }, [statusHistory]);
+
+    const currentUserRole = user?.role?.toLowerCase();
+
+    const targetNumeroEquipo = useMemo(() => {
+        // Priority: use the asesor's numeroEquipo first, then fallback to other sources
+        const asesorNumeroEquipo = normalizeTeamValue(audit?.asesor?.numeroEquipo);
+        if (asesorNumeroEquipo) return asesorNumeroEquipo;
+        
+        const candidates = [
+            form.numeroEquipo,
+            initialNumeroEquipo,
+            audit?.numeroEquipo,
+            audit?.groupId?.numeroEquipo,
+            audit?.grupo,
+            audit?.groupId?.nombre,
+        ];
+        for (const candidate of candidates) {
+            const normalized = normalizeTeamValue(candidate);
+            if (normalized.length) return normalized;
+        }
+        return "";
+    }, [
+        audit?.asesor?.numeroEquipo,
+        form.numeroEquipo,
+        initialNumeroEquipo,
+        audit?.numeroEquipo,
+        audit?.groupId?.numeroEquipo,
+        audit?.grupo,
+        audit?.groupId?.nombre,
+    ]);
+
+    const currentUserNumeroEquipo = normalizeTeamValue(user?.numeroEquipo);
+    const isSupervisorRole = currentUserRole === 'supervisor' || currentUserRole === 'supervisor_reventa';
+    const supervisorPuedeEditarAsesor = isSupervisorRole
+        && currentUserNumeroEquipo.length > 0
+        && targetNumeroEquipo.length > 0
+        && currentUserNumeroEquipo === targetNumeroEquipo;
+
+    const formatHistoryTimestamp = (value) => {
+        if (!value) return "-";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "-";
+        const formattedDate = date.toLocaleDateString("es-AR");
+        const formattedTime = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+        return `${formattedDate} ${formattedTime}`;
+    };
 
     useEffect(() => {
         if (form.fecha) fetchAvailableSlots(form.fecha);
@@ -245,11 +350,12 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
             try {
                 // ✅ VOLVER A FILTRAR: Solo Gerencia, Auditor y Supervisor (sin Admin)
                 const { data } = await apiClient.get("/users?includeAllAuditors=true");
-                const filtered = data.filter(u =>
-                    u.role?.toLowerCase() === 'auditor' ||
-                    u.role?.toLowerCase() === 'gerencia' ||
-                    u.role?.toLowerCase() === 'supervisor'
-                );
+                const filtered = data.filter(u => {
+                    const role = u.role?.toLowerCase();
+                    const isActive = u?.active !== false;
+                    const hasName = u.nombre && u.nombre.trim().length > 0;
+                    return isActive && hasName && (role === 'auditor' || role === 'gerencia' || role === 'supervisor');
+                });
                 setAuditores(filtered);
             } catch (err) {
                 console.error("Error al cargar auditores", err);
@@ -261,7 +367,12 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
         const fetchAdministradores = async () => {
             try {
                 const { data } = await apiClient.get("/users");
-                const filtered = data.filter(u => u.role?.toLowerCase() === 'admin');
+                const filtered = data.filter(u => {
+                    const role = u.role?.toLowerCase();
+                    const isActive = u?.active !== false;
+                    const hasName = u.nombre && u.nombre.trim().length > 0;
+                    return isActive && hasName && role === 'admin';
+                });
                 setAdministradores(filtered);
             } catch (err) {
                 console.error("Error al cargar administradores", err);
@@ -286,22 +397,61 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
 
     useEffect(() => {
         const fetchAsesores = async () => {
-            if (!form.numeroEquipo) return;
+            if (!targetNumeroEquipo) {
+                setAsesores([]);
+                return;
+            }
             try {
                 const { data } = await apiClient.get("/users");
                 // ✅ Filtrar asesores Y auditores del grupo (algunos auditores también venden)
-                const filtered = data.filter(u =>
-                    (u.role?.toLowerCase() === 'asesor' || u.role?.toLowerCase() === 'auditor') &&
-                    u.numeroEquipo === form.numeroEquipo
-                );
-                setAsesores(filtered);
+                let filtered = data.filter(u => {
+                    const role = u.role?.toLowerCase();
+                    const isActive = u?.active !== false;
+                    const hasName = u.nombre && u.nombre.trim().length > 0;
+                    if (!isActive || !hasName) return false;
+                    if (role !== 'asesor' && role !== 'auditor') return false;
+
+                    const userNumeroEquipo = normalizeTeamValue(
+                        u.numeroEquipo ??
+                        u.groupId?.numeroEquipo ??
+                        u.groupId?.nombre ??
+                        u.grupo ??
+                        u.supervisor?.numeroEquipo
+                    );
+
+                    if (!userNumeroEquipo.length) return false;
+                    return userNumeroEquipo === targetNumeroEquipo;
+                });
+
+                if (form.asesor) {
+                    const alreadyIncluded = filtered.some(u => u._id === form.asesor);
+                    if (!alreadyIncluded) {
+                        const assignedUser = data.find(u => u._id === form.asesor);
+                        if (assignedUser) {
+                            filtered = [...filtered, assignedUser];
+                        }
+                    }
+                }
+
+                const uniqueSorted = filtered
+                    .reduce((acc, user) => {
+                        if (!user || !user._id) return acc;
+                        if (acc.map.has(user._id)) return acc;
+                        acc.map.set(user._id, true);
+                        acc.items.push(user);
+                        return acc;
+                    }, { map: new Map(), items: [] })
+                    .items
+                    .sort((a, b) => (a.nombre || a.email || "").localeCompare(b.nombre || b.email || ""));
+
+                setAsesores(uniqueSorted);
             } catch (err) {
                 console.error("Error al cargar asesores", err);
                 toast.error("No se pudieron cargar los asesores");
             }
         };
         fetchAsesores();
-    }, [form.numeroEquipo]);
+    }, [targetNumeroEquipo, form.asesor]);
 
     const validate = () => {
         if (!form.nombre.trim()) return "Nombre es requerido";
@@ -323,7 +473,7 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
 
         // ✅ PRIVILEGIO ESPECIAL: Gerencia puede editar turnos de cualquier fecha sin restricciones
         const isGerencia = user?.role?.toLowerCase() === 'gerencia';
-        
+
         if (reprogramar && form.fecha && form.hora && !isGerencia) {
             // Solo aplicar restricción de tiempo para roles que NO sean Gerencia
             const now = new Date();
@@ -348,11 +498,20 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
 
         // Si cambia el grupo, actualizar numeroEquipo y resetear asesor
         if (name === 'grupo') {
-            const grupoSeleccionado = grupos.find(g => (g.nombre || g.name) === value);
+            const grupoSeleccionado = grupos.find(g => (g.nombre || g.name || g.numeroEquipo) === value);
+            const nuevoNumeroEquipo = (() => {
+                if (grupoSeleccionado?.numeroEquipo !== undefined && grupoSeleccionado?.numeroEquipo !== null) {
+                    return String(grupoSeleccionado.numeroEquipo).trim();
+                }
+                if (grupoSeleccionado?.nombre) return String(grupoSeleccionado.nombre).trim();
+                if (grupoSeleccionado?.name) return String(grupoSeleccionado.name).trim();
+                return String(value).trim();
+            })();
+
             setForm((p) => ({
                 ...p,
                 grupo: value,
-                numeroEquipo: value, // El nombre del grupo es el numeroEquipo
+                numeroEquipo: nuevoNumeroEquipo,
                 grupoId: grupoSeleccionado?._id || "",
                 asesor: "" // Resetear asesor cuando cambia el grupo
             }));
@@ -402,18 +561,18 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
             }
             // Si no se especifica, no se modifica (mantiene valor actual)
 
-            // Solo gerencia puede cambiar el asesor y el grupo
-            if (user?.role?.toLowerCase() === 'gerencia') {
+            // Gerencia y supervisores autorizados pueden ajustar el asesor
+            const puedeCambiarAsesor = currentUserRole === 'gerencia' || supervisorPuedeEditarAsesor;
+            if (puedeCambiarAsesor) {
                 if (form.asesor) {
                     payload.asesor = form.asesor;
                 }
-                // Solo enviar groupId si es un ObjectId válido (24 caracteres hexadecimales)
-                if (form.grupoId && /^[0-9a-fA-F]{24}$/.test(form.grupoId)) {
+                if (currentUserRole === 'gerencia' && form.grupoId && /^[0-9a-fA-F]{24}$/.test(form.grupoId)) {
                     payload.groupId = form.grupoId;
                 }
             }
 
-            await apiClient.patch(`/audits/${audit._id}`, payload);
+            const { data: updatedAudit } = await apiClient.patch(`/audits/${audit._id}`, payload);
 
             // 🎉 Animación de confetti si el estado cambió a "Completa"
             if (form.status === "Completa" && audit.status !== "Completa") {
@@ -446,6 +605,13 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
 
             toast.success("Auditoría actualizada");
             NotificationService.success("Una auditoría fue editada correctamente");
+
+            if (updatedAudit?.datosExtraHistory) {
+                setDatosExtraHistory(updatedAudit.datosExtraHistory);
+            }
+            if (updatedAudit?.statusHistory) {
+                setStatusHistory(updatedAudit.statusHistory);
+            }
 
             // Esperar a que onSave complete antes de cerrar el modal
             if (onSave) {
@@ -568,27 +734,55 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                             >
                                 <option value="">Seleccione</option>
                                 {availableStatuses.map((o) => {
-                                    // ✅ Deshabilitar "Reprogramada" si no está marcado el checkbox
+                                    // Deshabilitar "Reprogramada" si no está marcado el checkbox
                                     const isReprogramadaDisabled = o === "Reprogramada" && !reprogramar;
-                                    
-                                    // ✅ Deshabilitar "Aprobada" y "Aprobada, pero no reconoce clave" si NO estuvo en "Cargada"
-                                    const isAprobadaDisabled = (o === "Aprobada" || o === "Aprobada, pero no reconoce clave") && !wasInCargadaStatus;
-                                    
-                                    const isDisabled = isReprogramadaDisabled || isAprobadaDisabled;
-                                    
+
+                                    // Deshabilitar "Aprobada" y "Aprobada, pero no reconoce clave" si NO estuvo en "Cargada"
+                                    const isAprobadaDisabled = [
+                                        "Aprobada",
+                                        "Aprobada, pero no reconoce clave"
+                                    ].includes(o) && !wasInCargadaStatus;
+
+                                    const disabled = isReprogramadaDisabled || isAprobadaDisabled;
+
                                     return (
-                                        <option
-                                            key={o}
-                                            value={o}
-                                            disabled={isDisabled}
-                                        >
-                                            {o}
-                                            {isReprogramadaDisabled ? " (active el check 'Reprogramar')" : ""}
-                                            {isAprobadaDisabled ? " (solo si estuvo en estado 'Cargada')" : ""}
+                                        <option key={o} value={o} disabled={disabled}>
+                                            {o}{disabled ? " (bloqueado)" : ""}
                                         </option>
                                     );
                                 })}
                             </select>
+                            <div className="mt-3">
+                                <h4 className="text-sm font-semibold text-gray-700 mb-2">Historial de estado</h4>
+                                {sortedStatusHistory.length === 0 ? (
+                                    <p className="text-xs text-gray-500">Aún no hay registros previos.</p>
+                                ) : (
+                                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                                        <table className="w-full text-xs">
+                                            <thead className="bg-gray-100 text-gray-600 uppercase">
+                                                <tr>
+                                                    <th className="px-2 py-1 text-left">Fecha</th>
+                                                    <th className="px-2 py-1 text-left">Usuario</th>
+                                                    <th className="px-2 py-1 text-left">Estado</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {sortedStatusHistory.map((entry, idx) => {
+                                                    const user = entry.updatedBy || {};
+                                                    const userLabel = user.nombre || user.name || user.username || user.email || "Usuario";
+                                                    return (
+                                                        <tr key={`${entry._id || idx}-${entry.updatedAt || idx}`} className="border-t border-gray-200">
+                                                            <td className="px-2 py-1 align-top text-gray-600">{formatHistoryTimestamp(entry.updatedAt)}</td>
+                                                            <td className="px-2 py-1 align-top text-gray-700">{userLabel}</td>
+                                                            <td className="px-2 py-1 align-top text-gray-800 whitespace-pre-wrap">{entry.value || "-"}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                         <div>
                             <label className="block text-sm font-medium mb-1">Tipo</label>
@@ -608,7 +802,7 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-2">
                         <div>
                             <label className="block text-sm font-medium mb-1">Asesor</label>
-                            {user?.role?.toLowerCase() === 'gerencia' ? (
+                            {(currentUserRole === 'gerencia' || supervisorPuedeEditarAsesor) ? (
                                 <select
                                     name="asesor"
                                     value={form.asesor}
@@ -663,7 +857,7 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                                 const isGerencia = user?.role?.toLowerCase() === 'gerencia';
                                 const auditorAsignado = audit.auditor?._id || audit.auditor;
                                 const esElMismoAuditor = auditorAsignado && auditorAsignado === user?._id;
-                                const puedeModificar = !auditorAsignado || isGerencia || esElMismoAuditor;
+                                const puedeModificar = reprogramar || !auditorAsignado || isGerencia || esElMismoAuditor;
 
                                 return (
                                     <>
@@ -683,7 +877,12 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                                         </select>
                                         {!puedeModificar && (
                                             <p className="text-xs text-red-600 mt-1">
-                                                🔒 Solo el auditor asignado o Gerencia pueden modificar este campo
+                                                🔒 Solo el auditor asignado o Gerencia pueden modificar este campo.
+                                            </p>
+                                        )}
+                                        {reprogramar && auditorAsignado && !isGerencia && !esElMismoAuditor && (
+                                            <p className="text-xs text-blue-600 mt-1">
+                                                🔄 Reprogramar habilita la reasignación de auditor.
                                             </p>
                                         )}
                                     </>
@@ -781,6 +980,37 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                             placeholder="Ejemplo: Afiliado con familiares, enfermedad preexistente, observaciones..."
                             className="border rounded p-3 md:p-2 w-full min-h-[90px] md:min-h-[70px] text-base md:text-sm touch-manipulation"
                         />
+                        <div className="mt-3">
+                            <h4 className="text-sm font-semibold text-gray-700 mb-2">Historial de comentarios</h4>
+                            {sortedDatosExtraHistory.length === 0 ? (
+                                <p className="text-xs text-gray-500">Aún no hay registros previos.</p>
+                            ) : (
+                                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                                    <table className="w-full text-xs">
+                                        <thead className="bg-gray-100 text-gray-600 uppercase">
+                                            <tr>
+                                                <th className="px-2 py-1 text-left">Fecha</th>
+                                                <th className="px-2 py-1 text-left">Usuario</th>
+                                                <th className="px-2 py-1 text-left">Comentario</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {sortedDatosExtraHistory.map((entry, idx) => {
+                                                const user = entry.updatedBy || {};
+                                                const userLabel = user.nombre || user.name || user.username || user.email || "Usuario";
+                                                return (
+                                                    <tr key={`${entry._id || idx}-${entry.updatedAt || idx}`} className="border-t border-gray-200">
+                                                        <td className="px-2 py-1 align-top text-gray-600">{formatHistoryTimestamp(entry.updatedAt)}</td>
+                                                        <td className="px-2 py-1 align-top text-gray-700">{userLabel}</td>
+                                                        <td className="px-2 py-1 align-top text-gray-800 whitespace-pre-wrap">{entry.value || "-"}</td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     {/* Campo ¿Recuperada? - Solo Gerencia puede marcar */}

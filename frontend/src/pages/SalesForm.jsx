@@ -43,7 +43,8 @@ const ARGENTINE_OBRAS_SOCIALES = [
     "OSAMOC (3405)",
     "OSPAGA (101000)",
     "OSPF (107404)",
-    "OSPIP (116006)"
+    "OSPIP (116006)",
+    "OSPIC"
 ];
 
 export default function SalesForm({ currentUser }) {
@@ -121,8 +122,11 @@ export default function SalesForm({ currentUser }) {
             if (supervisorSeleccionado?.numeroEquipo) {
                 fetchValidadoresByEquipo(supervisorSeleccionado.numeroEquipo);
             }
+        } else if (!isGerenciaOrAuditor && !isSupervisor) {
+            // Para otros roles (asesor), cargar validadores del mismo equipo
+            fetchValidadores();
         }
-    }, [form.asesor, otroEquipo]);
+    }, [form.asesor, otroEquipo, isGerenciaOrAuditor, isSupervisor, form.supervisor]);
 
     useEffect(() => {
         // Cuando fecha cambie, traer turnos disponibles
@@ -135,7 +139,10 @@ export default function SalesForm({ currentUser }) {
             const res = await apiClient.get('/users');
             const list = Array.isArray(res.data) ? res.data : [];
             const supervisorList = list
-                .filter(u => (u.role === 'supervisor' || u.role === 'Supervisor') && u.nombre && u.nombre.trim().length > 0)
+                .filter(u => {
+                    const isActive = u?.active !== false;
+                    return isActive && (u.role === 'supervisor' || u.role === 'Supervisor') && u.nombre && u.nombre.trim().length > 0;
+                })
                 .sort((a, b) => a.nombre.localeCompare(b.nombre));
             setSupervisores(supervisorList);
         } catch (err) {
@@ -164,12 +171,13 @@ export default function SalesForm({ currentUser }) {
 
             const filtered = list
                 .filter(u => {
+                    const isActive = u?.active !== false;
                     const usuarioNumeroEquipo = u.numeroEquipo ? String(u.numeroEquipo) : null;
                     const esRolCorrecto = u.role === 'asesor' || u.role === 'Asesor' || u.role === 'auditor' || u.role === 'Auditor';
                     const mismoEquipo = usuarioNumeroEquipo === myNumeroEquipo;
                     const tieneNombre = u.nombre && u.nombre.trim().length > 0;
 
-                    return esRolCorrecto && mismoEquipo && tieneNombre;
+                    return isActive && esRolCorrecto && mismoEquipo && tieneNombre;
                 })
                 .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
@@ -198,12 +206,13 @@ export default function SalesForm({ currentUser }) {
 
             const filtered = list
                 .filter(u => {
+                    const isActive = u?.active !== false;
                     const usuarioNumeroEquipo = u.numeroEquipo ? String(u.numeroEquipo) : null;
                     const esRolCorrecto = u.role === 'asesor' || u.role === 'Asesor' || u.role === 'auditor' || u.role === 'Auditor';
                     const mismoEquipo = usuarioNumeroEquipo === equipoBuscado;
                     const tieneNombre = u.nombre && u.nombre.trim().length > 0;
 
-                    return esRolCorrecto && mismoEquipo && tieneNombre;
+                    return isActive && esRolCorrecto && mismoEquipo && tieneNombre;
                 })
                 .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
@@ -235,8 +244,10 @@ export default function SalesForm({ currentUser }) {
 
             const filtered = list
                 .filter(u => {
+                    const isActive = u?.active !== false;
                     const usuarioNumeroEquipo = u.numeroEquipo ? String(u.numeroEquipo) : null;
 
+                    if (!isActive) return false;
                     // Mismo numeroEquipo
                     if (usuarioNumeroEquipo !== myNumeroEquipo) return false;
                     // Debe tener nombre
@@ -267,8 +278,14 @@ export default function SalesForm({ currentUser }) {
 
             const filtered = list
                 .filter(u => {
+                    const isActive = u?.active !== false;
+                    const role = u.role?.toLowerCase();
+                    
+                    if (!isActive) return false;
                     // Debe tener nombre
                     if (!u.nombre || u.nombre.trim().length === 0) return false;
+                    // Filtrar por roles permitidos: asesor, supervisor, auditor, gerencia
+                    if (!['asesor', 'supervisor', 'auditor', 'gerencia'].includes(role)) return false;
                     // Excluir al asesor seleccionado
                     if (form.asesor && u._id === form.asesor) return false;
                     // Mostrar todos los demás
@@ -303,8 +320,10 @@ export default function SalesForm({ currentUser }) {
 
             const filtered = list
                 .filter(u => {
+                    const isActive = u?.active !== false;
                     const usuarioNumeroEquipo = u.numeroEquipo ? String(u.numeroEquipo) : null;
 
+                    if (!isActive) return false;
                     // Mismo numeroEquipo del supervisor seleccionado
                     if (usuarioNumeroEquipo !== equipoBuscado) return false;
                     // Debe tener nombre

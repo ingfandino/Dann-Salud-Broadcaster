@@ -52,27 +52,8 @@ exports.list = async (req, res) => {
             liquidacionMonth: currentMonth
         };
         
-        // ✅ Si es supervisor, filtrar por su numeroEquipo
-        const currentUser = req.user;
-        const isSupervisor = currentUser?.role === 'supervisor' || currentUser?.role === 'Supervisor';
-        
-        if (isSupervisor && currentUser?.numeroEquipo) {
-            // Primero obtener los asesores del equipo del supervisor
-            const asesoresDelEquipo = await User.find({
-                numeroEquipo: currentUser.numeroEquipo,
-                active: true
-            }).select('_id').lean();
-            
-            const asesoresIds = asesoresDelEquipo.map(a => a._id);
-            
-            // Filtrar auditorías solo de esos asesores
-            filter.asesor = { $in: asesoresIds };
-            
-            logger.info(`👤 Supervisor ${currentUser.email} viendo Liquidación de su equipo ${currentUser.numeroEquipo}`);
-        }
-        
-        // ✅ Traer todas las auditorías marcadas para liquidación del mes actual
-        const audits = await Audit.find(filter)
+        // Traer todas las auditorías marcadas para liquidación del mes actual
+        let audits = await Audit.find(filter)
             .populate({
                 path: 'asesor',
                 select: 'nombre name email numeroEquipo role'
@@ -88,20 +69,56 @@ exports.list = async (req, res) => {
             .populate('groupId', 'nombre name')
             .sort({ createdAt: -1 }) // Más recientes primero
             .lean();
-        
-        // ✅ Buscar supervisores dinámicamente por numeroEquipo
-        for (let audit of audits) {
-            if (audit.asesor?.numeroEquipo) {
-                const supervisor = await User.findOne({
-                    numeroEquipo: audit.asesor.numeroEquipo,
-                    role: 'supervisor',
-                    active: true
-                }).select('nombre name email numeroEquipo').lean();
-                
-                if (supervisor) {
-                    audit.asesor.supervisor = supervisor;
-                }
+
+        const currentUser = req.user;
+        const isSupervisor = currentUser?.role === 'supervisor' || currentUser?.role === 'Supervisor';
+
+        if (isSupervisor && currentUser?.numeroEquipo) {
+            const targetNumeroEquipo = String(currentUser.numeroEquipo || '').trim().toLowerCase();
+
+            audits = audits.filter((audit) => {
+                const numeroEquipoAsesor = String(audit.asesor?.numeroEquipo || '').trim().toLowerCase();
+                return numeroEquipoAsesor && numeroEquipoAsesor === targetNumeroEquipo;
+            });
+
+            if (!audits.length) {
+                logger.warn(
+                    ` Supervisor ${currentUser.email} (${currentUser.numeroEquipo}) sin auditorías en Liquidación tras filtrar por equipo`
+                );
+            } else {
+                logger.info(
+                    ` Supervisor ${currentUser.email} viendo ${audits.length} auditorías de Liquidación de su equipo ${currentUser.numeroEquipo}`
+                );
             }
+        }
+
+        // Buscar supervisores dinámicamente por numeroEquipo
+        const equipos = [...new Set(
+            audits
+                .map((audit) => audit.asesor?.numeroEquipo)
+                .filter(Boolean)
+        )];
+
+        if (equipos.length > 0) {
+            const supervisores = await User.find({
+                numeroEquipo: { $in: equipos },
+                role: { $in: ['supervisor', 'Supervisor'] },
+                active: true
+            })
+                .select('nombre name email numeroEquipo')
+                .lean();
+
+            const supervisorPorEquipo = supervisores.reduce((acc, supervisor) => {
+                acc[supervisor.numeroEquipo] = supervisor;
+                return acc;
+            }, {});
+
+            audits.forEach((audit) => {
+                const equipo = audit.asesor?.numeroEquipo;
+                if (equipo && supervisorPorEquipo[equipo]) {
+                    audit.asesor.supervisor = supervisorPorEquipo[equipo];
+                }
+            });
         }
         
         console.log('💰 Liquidación List - Total audits:', audits.length);

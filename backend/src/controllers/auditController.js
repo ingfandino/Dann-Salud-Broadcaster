@@ -103,10 +103,29 @@ exports.createAudit = async (req, res) => {
         datosExtra: req.body.datosExtra || ""
     });
 
+    if (typeof req.body.datosExtra === 'string' && req.body.datosExtra.trim().length) {
+        audit.datosExtraHistory.push({
+            value: req.body.datosExtra,
+            updatedBy: req.user._id,
+            updatedAt: new Date()
+        });
+    }
+
+    const initialStatus = (audit.status || '').trim();
+    if (initialStatus) {
+        audit.statusHistory.push({
+            value: initialStatus,
+            updatedBy: req.user._id,
+            updatedAt: new Date()
+        });
+    }
+
     await audit.save();
     
     // Poblar datos para notificación
     await audit.populate('createdBy', 'nombre email role numeroEquipo');
+    await audit.populate('datosExtraHistory.updatedBy', 'nombre name username email role');
+    await audit.populate('statusHistory.updatedBy', 'nombre name username email role');
     
     try { emitNewAudit(audit); } catch (e) { logger.error("socket emit error", e); }
     
@@ -192,13 +211,31 @@ exports.getAuditsByDate = async (req, res) => {
         if (telefono && (date || dateFrom || dateTo)) filter.telefono = { $regex: telefono, $options: "i" };
         if (obraAnterior) filter.obraSocialAnterior = { $regex: obraAnterior, $options: "i" };
         if (obraVendida) filter.obraSocialVendida = { $regex: obraVendida, $options: "i" };
-        if (estado) filter.status = { $regex: estado, $options: "i" };
+        if (estado) {
+            const estadosRaw = estado
+                .split(',')
+                .map((value) => value.trim())
+                .filter(Boolean);
+
+            if (estadosRaw.length) {
+                const includeSinEstado = estadosRaw.some((value) => value.toLowerCase() === 'sin estado');
+                const normalizedStatuses = estadosRaw.filter((value) => value.toLowerCase() !== 'sin estado');
+                const statusFilterValues = includeSinEstado
+                    ? [...normalizedStatuses, '', null]
+                    : normalizedStatuses;
+                const uniqueStatuses = [...new Set(statusFilterValues)];
+
+                if (uniqueStatuses.length) {
+                    filter.status = { $in: uniqueStatuses };
+                }
+            }
+        }
         if (tipo) filter.tipoVenta = { $regex: tipo, $options: "i" };
 
         // Visibilidad por rol
         const expRole = (req.user?.role || '').toLowerCase();
         if (expRole === 'supervisor') {
-            // ✅ CAMBIO: Supervisores ahora ven TODAS las auditorías
+            // Supervisores ahora ven TODAS las auditorías
             // El frontend ocultará teléfonos de otros grupos
             // No aplicamos ningún filtro adicional para supervisores
         } else if (expRole === 'asesor') {
@@ -221,34 +258,48 @@ exports.getAuditsByDate = async (req, res) => {
             .populate('auditor', 'nombre name email')
             .populate('administrador', 'nombre name email') // ✅
             .populate('groupId', 'nombre name')
+            .populate('datosExtraHistory.updatedBy', 'nombre name username email role')
+            .populate('statusHistory.updatedBy', 'nombre name username email role')
             .sort({ scheduledAt: 1 })
             .lean();
 
         // Filtrado adicional (asesor / auditor / grupo) - strings parciales (no siempre llegan ids)
         if (asesor) {
-            const q = (asesor || "").toLowerCase();
-            audits = audits.filter(a => {
-                const as = a.asesor;
-                if (!as) return false;
-                return (
-                    (as.email && as.email.toLowerCase().includes(q)) ||
-                    (as.nombre && as.nombre.toLowerCase().includes(q)) ||
-                    (as.name && as.name.toLowerCase().includes(q))
-                );
-            });
+            const queries = String(asesor)
+                .split(",")
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean);
+
+            if (queries.length) {
+                audits = audits.filter(a => {
+                    const as = a.asesor;
+                    if (!as) return false;
+                    const candidates = [as.email, as.nombre, as.name]
+                        .map((value) => (value || "").toLowerCase())
+                        .filter(Boolean);
+                    if (!candidates.length) return false;
+                    return queries.some(q => candidates.some(candidate => candidate.includes(q)));
+                });
+            }
         }
 
         if (auditor) {
-            const q = (auditor || "").toLowerCase();
-            audits = audits.filter(a => {
-                const au = a.auditor;
-                if (!au) return false;
-                return (
-                    (au.email && au.email.toLowerCase().includes(q)) ||
-                    (au.nombre && au.nombre.toLowerCase().includes(q)) ||
-                    (au.name && au.name.toLowerCase().includes(q))
-                );
-            });
+            const queries = String(auditor)
+                .split(",")
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean);
+
+            if (queries.length) {
+                audits = audits.filter(a => {
+                    const au = a.auditor;
+                    if (!au) return false;
+                    const candidates = [au.email, au.nombre, au.name]
+                        .map((value) => (value || "").toLowerCase())
+                        .filter(Boolean);
+                    if (!candidates.length) return false;
+                    return queries.some(q => candidates.some(candidate => candidate.includes(q)));
+                });
+            }
         }
 
         // Enriquecer supervisor/grupo cuando falte, usando numeroEquipo
@@ -296,42 +347,63 @@ exports.getAuditsByDate = async (req, res) => {
 
         // Aplicar filtros de grupo y supervisor DESPUÉS del enriquecimiento
         if (grupo) {
-            const q = (grupo || "").toLowerCase();
-            audits = audits.filter(a => {
-                const g = a.groupId;
-                if (!g) return false;
-                return (
-                    (g.nombre && g.nombre.toLowerCase().includes(q)) ||
-                    (g.name && g.name.toLowerCase().includes(q))
-                );
-            });
+            const groupFilters = String(grupo)
+                .split(",")
+                .map((g) => g.trim().toLowerCase())
+                .filter(Boolean);
+
+            if (groupFilters.length) {
+                audits = audits.filter(a => {
+                    const g = a.groupId;
+                    if (!g) return false;
+                    const nombres = [g.nombre, g.name]
+                        .map((value) => (value || "").toLowerCase())
+                        .filter(Boolean);
+                    if (!nombres.length) return false;
+                    return groupFilters.some(filterValue =>
+                        nombres.some(nombre => nombre.includes(filterValue))
+                    );
+                });
+            }
         }
 
         if (supervisor) {
-            const q = (supervisor || "").toLowerCase();
-            audits = audits.filter(a => {
-                const as = a.asesor;
-                if (!as || !as.supervisor) return false;
-                const sup = as.supervisor;
-                return (
-                    (sup.email && sup.email.toLowerCase().includes(q)) ||
-                    (sup.nombre && sup.nombre.toLowerCase().includes(q)) ||
-                    (sup.name && sup.name.toLowerCase().includes(q))
-                );
-            });
+            const queries = String(supervisor)
+                .split(",")
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean);
+
+            if (queries.length) {
+                audits = audits.filter(a => {
+                    const as = a.asesor;
+                    if (!as || !as.supervisor) return false;
+                    const sup = as.supervisor;
+                    const candidates = [sup.email, sup.nombre, sup.name]
+                        .map((value) => (value || "").toLowerCase())
+                        .filter(Boolean);
+                    if (!candidates.length) return false;
+                    return queries.some(q => candidates.some(candidate => candidate.includes(q)));
+                });
+            }
         }
 
         if (administrador) {
-            const q = (administrador || "").toLowerCase();
-            audits = audits.filter(a => {
-                const admin = a.administrador;
-                if (!admin) return false;
-                return (
-                    (admin.email && admin.email.toLowerCase().includes(q)) ||
-                    (admin.nombre && admin.nombre.toLowerCase().includes(q)) ||
-                    (admin.name && admin.name.toLowerCase().includes(q))
-                );
-            });
+            const queries = String(administrador)
+                .split(",")
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean);
+
+            if (queries.length) {
+                audits = audits.filter(a => {
+                    const admin = a.administrador;
+                    if (!admin) return false;
+                    const candidates = [admin.email, admin.nombre, admin.name]
+                        .map((value) => (value || "").toLowerCase())
+                        .filter(Boolean);
+                    if (!candidates.length) return false;
+                    return queries.some(q => candidates.some(candidate => candidate.includes(q)));
+                });
+            }
         }
 
         res.json(audits);
@@ -508,139 +580,201 @@ exports.updateAudit = async (req, res) => {
         if (!oldAudit) {
             return res.status(404).json({ message: 'Auditoría no encontrada' });
         }
-    
-    const oldStatus = oldAudit.status;
 
-    // Si se está cambiando el estado, resetear flag de notificación de seguimiento
-    if (updates.status && updates.status !== oldStatus) {
-        updates.statusUpdatedAt = new Date();
-        updates.followUpNotificationSent = false;
-        
-        // ✅ ACTUALIZAR FECHA CUANDO CAMBIA A "QR hecho"
-        if (updates.status === 'QR hecho') {
-            updates.scheduledAt = new Date();
-            logger.info(`Auditoría ${id} cambió a QR hecho. Fecha actualizada a: ${updates.scheduledAt}`);
-        }
-        
-        // ✅ ACTUALIZAR FECHA CUANDO UN ADMIN CAMBIA EL ESTADO (cualquier cambio de estado)
-        const userRole = req.user?.role?.toLowerCase();
-        if (userRole === 'admin') {
-            updates.scheduledAt = new Date();
-            logger.info(`updateAudit: Admin cambió estado de auditoría ${id} a "${updates.status}". Fecha actualizada a: ${updates.scheduledAt}`);
-        }
-        
-        // ✅ Marcar para Recuperación SOLO si es uno de los 4 estados específicos
-        const recoveryStates = [
-            "Falta clave", 
-            "Falta documentación",
-            "Falta clave y documentación",
-            "Pendiente"
-        ];
-        
-        // ✅ NO mover inmediatamente a recuperación
-        // El cron de las 23:01 hrs verificará qué auditorías tienen estos estados y las moverá
-        if (recoveryStates.includes(updates.status)) {
-            // Solo actualizar el timestamp del estado, el cron se encargará del resto
-            logger.info(`Auditoría ${id} cambió a estado de recuperación: ${updates.status}. Se procesará a las 23:01`);
-        } else {
-            updates.recoveryEligibleAt = null;
-            // ✅ NO desmarcar isRecovery - una vez en recuperación, permanece hasta soft-delete mensual
-        }
-    }
+        const oldStatus = oldAudit.status;
 
-    // No sobreescribir auditor automáticamente. Solo cambiar si viene en el payload.
+        // Si se está cambiando el estado, resetear flag de notificación de seguimiento
+        let statusHistoryEntry = null;
+        if (typeof updates.status === 'string' && updates.status !== oldStatus) {
+            updates.statusUpdatedAt = new Date();
+            updates.followUpNotificationSent = false;
 
-    const audit = await Audit.findByIdAndUpdate(
-        id,
-        updates,
-        { new: true }
-    )
-        .populate({
-            path: 'asesor',
-            select: 'nombre name email numeroEquipo supervisor',
-            populate: {
-                path: 'supervisor',
-                select: 'nombre name email numeroEquipo'
+            // 
+            if (updates.status === 'QR hecho') {
+                updates.scheduledAt = new Date();
+                logger.info(`Auditoría ${id} cambió a QR hecho. Fecha actualizada a: ${updates.scheduledAt}`);
             }
-        })
-        .populate('validador', 'nombre name email')
-        .populate('auditor', 'nombre name email')
-        .populate('administrador', 'nombre name email')
-        .populate('createdBy', 'nombre name email numeroEquipo')
-        .populate('groupId', 'nombre name');
 
-    if (!audit) {
-        return res.status(404).json({ message: 'Auditoría no encontrada' });
-    }
-
-    try {
-        emitAuditUpdate(audit._id, audit);
-    } catch (e) {
-        logger.error("emitAuditUpdate error", e);
-    }
-    
-    // 🔔 Notificaciones según cambio de estado
-    const newStatus = audit.status;
-    
-    // Notificar cuando pasa a "Completa"
-    if (oldStatus !== "Completa" && newStatus === "Completa") {
-        try {
-            // ✅ Si la auditoría está en Recuperación, notificar a admins específicamente
-            if (audit.isRecovery) {
-                await notifyRecoveryAuditCompleted({
-                    audit: {
-                        ...audit.toObject(),
-                        fechaTurno: audit.scheduledAt,
-                        obraSocial: audit.obraSocialVendida
-                    }
-                });
-            } else {
-                // Notificación estándar para auditorías no recuperadas
-                await notifyAuditCompleted({
-                    audit: {
-                        ...audit.toObject(),
-                        fechaTurno: audit.scheduledAt,
-                        obraSocial: audit.obraSocialVendida
-                    }
-                });
+            // 
+            const userRole = req.user?.role?.toLowerCase();
+            if (userRole === 'admin') {
+                updates.scheduledAt = new Date();
+                logger.info(`updateAudit: Admin cambió estado de auditoría ${id} a "${updates.status}". Fecha actualizada a: ${updates.scheduledAt}`);
             }
-        } catch (e) {
-            logger.error("Error enviando notificación de auditoría completa:", e);
-        }
-    }
-    
-    // Notificar cuando pasa a "QR hecho" (case-insensitive)
-    const oldStatusLower = (oldStatus || "").toLowerCase();
-    const newStatusLower = (newStatus || "").toLowerCase();
-    
-    if (oldStatusLower !== "qr hecho" && newStatusLower === "qr hecho") {
-        try {
-            // ✅ Si la auditoría está en Recuperación, marcar isRecuperada: true
-            // Verificar ANTES del cambio de estado (usando el objeto audit original)
-            const auditBeforeUpdate = await Audit.findById(audit._id).select('isRecovery recoveryDeletedAt').lean();
+
+            // 
+            const recoveryStates = [
+                "Falta clave", 
+                "Falta documentación",
+                "Falta clave y documentación",
+                "Pendiente"
+            ];
             
-            if (auditBeforeUpdate && (auditBeforeUpdate.isRecovery || auditBeforeUpdate.recoveryDeletedAt)) {
-                await Audit.findByIdAndUpdate(
-                    audit._id,
-                    { $set: { isRecuperada: true } },
-                    { new: true }
-                );
-                logger.info(`✅ Auditoría ${audit._id} (${audit.nombre}) en Recuperación marcada como recuperada (QR hecho)`);
+            // ✅ NO mover inmediatamente a recuperación
+            // El cron de las 23:01 hrs verificará qué auditorías tienen estos estados y las moverá
+            if (recoveryStates.includes(updates.status)) {
+                // Solo actualizar el timestamp del estado, el cron se encargará del resto
+                logger.info(`Auditoría ${id} cambió a estado de recuperación: ${updates.status}. Se procesará a las 23:01`);
             } else {
-                logger.info(`ℹ️ Auditoría ${audit._id} (${audit.nombre}) cambió a QR hecho pero NO está en Recuperación`);
+                updates.recoveryEligibleAt = null;
+                // ✅ NO desmarcar isRecovery - una vez en recuperación, permanece hasta soft-delete mensual
             }
-            
-            await notifyAuditQRDone({
-                audit: {
-                    ...audit.toObject(),
-                    fechaTurno: audit.scheduledAt,
-                    obraSocial: audit.obraSocialVendida
+
+            statusHistoryEntry = {
+                value: updates.status,
+                updatedBy: req.user._id,
+                updatedAt: new Date()
+            };
+        }
+
+        if ('datosExtraHistory' in updates) {
+            delete updates.datosExtraHistory;
+        }
+
+        let historyEntry = null;
+        if (typeof updates.datosExtra === 'string') {
+            const trimmed = updates.datosExtra.trim();
+            const previous = (oldAudit.datosExtra || '').trim();
+            if (trimmed !== previous) {
+                updates.datosExtra = trimmed;
+                historyEntry = {
+                    value: trimmed,
+                    updatedBy: req.user._id,
+                    updatedAt: new Date()
+                };
+            } else {
+                updates.datosExtra = previous;
+            }
+        }
+
+        const updateDoc = {};
+        if (Object.keys(updates).length) {
+            updateDoc.$set = updates;
+        }
+        if (historyEntry || statusHistoryEntry) {
+            updateDoc.$push = {};
+            if (historyEntry) {
+                updateDoc.$push.datosExtraHistory = historyEntry;
+            }
+            if (statusHistoryEntry) {
+                updateDoc.$push.statusHistory = statusHistoryEntry;
+            }
+        }
+
+        if (!Object.keys(updateDoc).length) {
+            await oldAudit.populate({
+                path: 'asesor',
+                select: 'nombre name email numeroEquipo supervisor',
+                populate: {
+                    path: 'supervisor',
+                    select: 'nombre name email numeroEquipo'
                 }
             });
-        } catch (e) {
-            logger.error("Error enviando notificación de QR hecho:", e);
+            await oldAudit.populate('validador', 'nombre name email');
+            await oldAudit.populate('auditor', 'nombre name email');
+            await oldAudit.populate('administrador', 'nombre name email');
+            await oldAudit.populate('createdBy', 'nombre name email numeroEquipo');
+            await oldAudit.populate('groupId', 'nombre name');
+            await oldAudit.populate('datosExtraHistory.updatedBy', 'nombre name username email role');
+            await oldAudit.populate('statusHistory.updatedBy', 'nombre name username email role');
+            return res.json(oldAudit);
         }
-    }
+
+        // No sobreescribir auditor automáticamente. Solo cambiar si viene en el payload.
+
+        const audit = await Audit.findByIdAndUpdate(
+            id,
+            updateDoc,
+            { new: true }
+        )
+            .populate({
+                path: 'asesor',
+                select: 'nombre name email numeroEquipo supervisor',
+                populate: {
+                    path: 'supervisor',
+                    select: 'nombre name email numeroEquipo'
+                }
+            })
+            .populate('validador', 'nombre name email')
+            .populate('auditor', 'nombre name email')
+            .populate('administrador', 'nombre name email') // ✅
+            .populate('createdBy', 'nombre name email numeroEquipo')
+            .populate('groupId', 'nombre name')
+            .populate('datosExtraHistory.updatedBy', 'nombre name username email role')
+            .populate('statusHistory.updatedBy', 'nombre name username email role');
+
+        if (!audit) {
+            return res.status(404).json({ message: 'Auditoría no encontrada' });
+        }
+
+        try {
+            emitAuditUpdate(audit._id, audit);
+        } catch (e) {
+            logger.error("emitAuditUpdate error", e);
+        }
+        
+        // 🔔 Notificaciones según cambio de estado
+        const newStatus = audit.status;
+        
+        // Notificar cuando pasa a "Completa"
+        if (oldStatus !== "Completa" && newStatus === "Completa") {
+            try {
+                // ✅ Si la auditoría está en Recuperación, notificar a admins específicamente
+                if (audit.isRecovery) {
+                    await notifyRecoveryAuditCompleted({
+                        audit: {
+                            ...audit.toObject(),
+                            fechaTurno: audit.scheduledAt,
+                            obraSocial: audit.obraSocialVendida
+                        }
+                    });
+                } else {
+                    // Notificación estándar para auditorías no recuperadas
+                    await notifyAuditCompleted({
+                        audit: {
+                            ...audit.toObject(),
+                            fechaTurno: audit.scheduledAt,
+                            obraSocial: audit.obraSocialVendida
+                        }
+                    });
+                }
+            } catch (e) {
+                logger.error("Error enviando notificación de auditoría completa:", e);
+            }
+        }
+        
+        // Notificar cuando pasa a "QR hecho" (case-insensitive)
+        const oldStatusLower = (oldStatus || "").toLowerCase();
+        const newStatusLower = (newStatus || "").toLowerCase();
+        
+        if (oldStatusLower !== "qr hecho" && newStatusLower === "qr hecho") {
+            try {
+                // ✅ Si la auditoría está en Recuperación, marcar isRecuperada: true
+                // Verificar ANTES del cambio de estado (usando el objeto audit original)
+                const auditBeforeUpdate = await Audit.findById(audit._id).select('isRecovery recoveryDeletedAt').lean();
+                
+                if (auditBeforeUpdate && (auditBeforeUpdate.isRecovery || auditBeforeUpdate.recoveryDeletedAt)) {
+                    await Audit.findByIdAndUpdate(
+                        audit._id,
+                        { $set: { isRecuperada: true } },
+                        { new: true }
+                    );
+                    logger.info(`✅ Auditoría ${audit._id} (${audit.nombre}) en Recuperación marcada como recuperada (QR hecho)`);
+                } else {
+                    logger.info(`ℹ️ Auditoría ${audit._id} (${audit.nombre}) cambió a QR hecho pero NO está en Recuperación`);
+                }
+                
+                await notifyAuditQRDone({
+                    audit: {
+                        ...audit.toObject(),
+                        fechaTurno: audit.scheduledAt,
+                        obraSocial: audit.obraSocialVendida
+                    }
+                });
+            } catch (e) {
+                logger.error("Error enviando notificación de QR hecho:", e);
+            }
+        }
 
         res.json(audit);
     } catch (err) {
@@ -878,7 +1012,7 @@ exports.exportByDate = async (req, res) => {
         if (cuil) filter.cuil = { $regex: cuil, $options: "i" };
         if (obraAnterior) filter.obraSocialAnterior = { $regex: obraAnterior, $options: "i" };
         if (obraVendida) filter.obraSocialVendida = { $regex: obraVendida, $options: "i" };
-        if (estado) filter.status = { $regex: estado, $options: "i" };
+        if (estado) filter.status = { $in: estado.split(',').map((s) => s.trim()).filter(Boolean) };
         if (tipo) filter.tipoVenta = { $regex: tipo, $options: "i" };
 
         let audits = await Audit.find(filter)
@@ -890,45 +1024,107 @@ exports.exportByDate = async (req, res) => {
             .populate('auditor', 'nombre name email')
             .populate('administrador', 'nombre name email') // ✅
             .populate('groupId', 'nombre name')
+            .populate('datosExtraHistory.updatedBy', 'nombre name email role')
+            .sort({ scheduledAt: 1 })
             .lean();
 
         // filtros post-populate (asesor/auditor/grupo) como en getAuditsByDate
         if (asesor) {
-            const q = (asesor || "").toLowerCase();
-            audits = audits.filter(a => {
-                const as = a.asesor;
-                if (!as) return false;
-                return (
-                    (as.email && as.email.toLowerCase().includes(q)) ||
-                    (as.nombre && as.nombre.toLowerCase().includes(q)) ||
-                    (as.name && as.name.toLowerCase().includes(q))
-                );
-            });
+            const queries = String(asesor)
+                .split(",")
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean);
+
+            if (queries.length) {
+                audits = audits.filter(a => {
+                    const as = a.asesor;
+                    if (!as) return false;
+                    const candidates = [as.email, as.nombre, as.name]
+                        .map((value) => (value || "").toLowerCase())
+                        .filter(Boolean);
+                    if (!candidates.length) return false;
+                    return queries.some(q => candidates.some(candidate => candidate.includes(q)));
+                });
+            }
         }
 
         if (auditor) {
-            const q = (auditor || "").toLowerCase();
-            audits = audits.filter(a => {
-                const au = a.auditor;
-                if (!au) return false;
-                return (
-                    (au.email && au.email.toLowerCase().includes(q)) ||
-                    (au.nombre && au.nombre.toLowerCase().includes(q)) ||
-                    (au.name && au.name.toLowerCase().includes(q))
-                );
-            });
+            const queries = String(auditor)
+                .split(",")
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean);
+
+            if (queries.length) {
+                audits = audits.filter(a => {
+                    const au = a.auditor;
+                    if (!au) return false;
+                    const candidates = [au.email, au.nombre, au.name]
+                        .map((value) => (value || "").toLowerCase())
+                        .filter(Boolean);
+                    if (!candidates.length) return false;
+                    return queries.some(q => candidates.some(candidate => candidate.includes(q)));
+                });
+            }
         }
 
         if (grupo) {
-            const q = (grupo || "").toLowerCase();
-            audits = audits.filter(a => {
-                const g = a.groupId;
-                if (!g) return false;
-                return (
-                    (g.nombre && g.nombre.toLowerCase().includes(q)) ||
-                    (g.name && g.name.toLowerCase().includes(q))
-                );
-            });
+            const groupFilters = String(grupo)
+                .split(",")
+                .map((g) => g.trim().toLowerCase())
+                .filter(Boolean);
+
+            if (groupFilters.length) {
+                audits = audits.filter(a => {
+                    const g = a.groupId;
+                    if (!g) return false;
+                    const nombres = [g.nombre, g.name]
+                        .map((value) => (value || "").toLowerCase())
+                        .filter(Boolean);
+                    if (!nombres.length) return false;
+                    return groupFilters.some(filterValue =>
+                        nombres.some(nombre => nombre.includes(filterValue))
+                    );
+                });
+            }
+        }
+
+        if (supervisor) {
+            const queries = String(supervisor)
+                .split(",")
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean);
+
+            if (queries.length) {
+                audits = audits.filter(a => {
+                    const as = a.asesor;
+                    if (!as || !as.supervisor) return false;
+                    const sup = as.supervisor;
+                    const candidates = [sup.email, sup.nombre, sup.name]
+                        .map((value) => (value || "").toLowerCase())
+                        .filter(Boolean);
+                    if (!candidates.length) return false;
+                    return queries.some(q => candidates.some(candidate => candidate.includes(q)));
+                });
+            }
+        }
+
+        if (administrador) {
+            const queries = String(administrador)
+                .split(",")
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean);
+
+            if (queries.length) {
+                audits = audits.filter(a => {
+                    const admin = a.administrador;
+                    if (!admin) return false;
+                    const candidates = [admin.email, admin.nombre, admin.name]
+                        .map((value) => (value || "").toLowerCase())
+                        .filter(Boolean);
+                    if (!candidates.length) return false;
+                    return queries.some(q => candidates.some(candidate => candidate.includes(q)));
+                });
+            }
         }
 
         // Normalizar / aplanar datos para CSV (evitamos [Object])

@@ -1,6 +1,6 @@
 // frontend/src/pages/FollowUp.jsx
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import apiClient from "../services/api";
 import { toast } from "react-toastify";
 import AuditEditModal from "../components/AuditEditModal";
@@ -48,10 +48,12 @@ const ARGENTINE_OBRAS_SOCIALES = [
     "OSAMOC (3405)",
     "OSPAGA (101000)",
     "OSPF (107404)",
-    "OSPIP (116006)"
+    "OSPIP (116006)",
+    "OSPIC"
 ];
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"];
 const STATUS_OPTIONS = [
+    "Sin estado",
     "Mensaje enviado", "En videollamada", "Rechazada",
     "Falta documentación", "Falta clave", "Reprogramada",
     "Reprogramada (falta confirmar hora)", "Completa", "QR hecho", "Aprobada",
@@ -65,15 +67,22 @@ const TIPO_VENTA = ["Alta", "Cambio"];
 export default function FollowUp() {
     const { currentUser } = useAuth();
 
-    const toTitleCase = (s) => {
-        if (!s || typeof s !== "string") return s || "";
-        return s
+    const toTitleCase = (str) => {
+        if (!str) return '';
+        return str
             .toLowerCase()
-            .replace(/\s+/g, " ")
-            .trim()
-            .split(" ")
-            .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-            .join(" ");
+            .split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
+    };
+
+    const formatDateTime = (value) => {
+        if (!value) return "-";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "-";
+        const formattedDate = date.toLocaleDateString("es-AR");
+        const formattedTime = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+        return `${formattedDate} ${formattedTime}`;
     };
 
     // Estados para modal de Turnos Disponibles
@@ -102,41 +111,43 @@ export default function FollowUp() {
         if (!nombre) return 'bg-gray-100 text-gray-700';
 
         const nombreLower = nombre.toLowerCase();
-        
+
         // ✅ COLORES PASTEL ESPECÍFICOS POR SUPERVISOR (tenues pero diferenciables)
-        
-        // ROJO PASTEL - 5 supervisores
+
+        // ROJO PASTEL - 4 supervisores
         if (nombreLower.includes('nahuel') && nombreLower.includes('sanchez')) return 'bg-red-100 text-red-800';
-        if (nombreLower.includes('abigail') && nombreLower.includes('vera')) return 'bg-red-100 text-red-800';
         if (nombreLower.includes('nahia') && nombreLower.includes('avellaneda')) return 'bg-red-100 text-red-800';
         if (nombreLower.includes('santiago') && nombreLower.includes('goldsztein')) return 'bg-red-100 text-red-800';
         if (nombreLower.includes('facundo') && nombreLower.includes('tevez')) return 'bg-red-100 text-red-800';
-        
+
+        // Fucsia PASTEL - Abigail Vera
+        if (nombreLower.includes('abigail') && nombreLower.includes('vera')) return 'bg-fuchsia-100 text-fuchsia-800';
+
         // AZUL PASTEL - Mateo Viera
         if (nombreLower.includes('mateo') && nombreLower.includes('viera')) return 'bg-blue-100 text-blue-800';
-        
+
         // MORADO PASTEL - Belen Salaverry
         if (nombreLower.includes('belen') && nombreLower.includes('salaverry')) return 'bg-purple-100 text-purple-800';
-        
+
         // ROSA PASTEL - Analia Suarez
         if (nombreLower.includes('analia') && nombreLower.includes('suarez')) return 'bg-pink-100 text-pink-800';
-        
+
         // VERDE PASTO PASTEL - Erika Cardozo
         if (nombreLower.includes('erika') && nombreLower.includes('cardozo')) return 'bg-green-100 text-green-800';
-        
+
         // AMARILLO PASTEL - Aryel Puiggros
         if (nombreLower.includes('aryel') && nombreLower.includes('puiggros')) return 'bg-yellow-100 text-yellow-800';
-        
+
         // VIOLETA PASTEL - Joaquín Valdez
         if (nombreLower.includes('joaquin') && nombreLower.includes('valdez')) return 'bg-violet-100 text-violet-800';
         if (nombreLower.includes('joquin') && nombreLower.includes('valdez')) return 'bg-violet-100 text-violet-800'; // Por si hay typo
-        
+
         // GRIS PASTEL - Luciano Carugno
         if (nombreLower.includes('luciano') && nombreLower.includes('carugno')) return 'bg-gray-200 text-gray-800';
-        
+
         // CAFÉ PASTEL - Alejandro Mejail
         if (nombreLower.includes('alejandro') && nombreLower.includes('mejail')) return 'bg-amber-100 text-amber-800';
-        
+
         // NARANJA PASTEL - Gaston Sarmiento
         if (nombreLower.includes('gaston') && nombreLower.includes('sarmiento')) return 'bg-orange-100 text-orange-800';
 
@@ -147,7 +158,6 @@ export default function FollowUp() {
             'bg-cyan-100 text-cyan-800',
             'bg-rose-100 text-rose-800',
             'bg-emerald-100 text-emerald-800',
-            'bg-fuchsia-100 text-fuchsia-800',
             'bg-indigo-100 text-indigo-800',
         ];
 
@@ -185,7 +195,6 @@ export default function FollowUp() {
         estado: "",
         tipo: "",
         asesor: "",
-        grupo: "",
         datos: "",
         auditor: "",
         supervisor: "",
@@ -206,31 +215,92 @@ export default function FollowUp() {
     const [selectedAudit, setSelectedAudit] = useState(null);
     const [detailsAudit, setDetailsAudit] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [selectedGroups, setSelectedGroups] = useState([]);
+    const [selectedEstados, setSelectedEstados] = useState([]);
+    const [selectedAsesores, setSelectedAsesores] = useState([]);
+    const [selectedAuditores, setSelectedAuditores] = useState([]);
+    const [selectedSupervisores, setSelectedSupervisores] = useState([]);
+    const [selectedAdministradores, setSelectedAdministradores] = useState([]);
+
+    const [isGroupDropdownOpen, setIsGroupDropdownOpen] = useState(false);
+    const [isEstadoDropdownOpen, setIsEstadoDropdownOpen] = useState(false);
+    const [isAsesorDropdownOpen, setIsAsesorDropdownOpen] = useState(false);
+    const [isAuditorDropdownOpen, setIsAuditorDropdownOpen] = useState(false);
+    const [isSupervisorDropdownOpen, setIsSupervisorDropdownOpen] = useState(false);
+    const [isAdministradorDropdownOpen, setIsAdministradorDropdownOpen] = useState(false);
+
+    const groupFilterRef = useRef(null);
+    const estadoFilterRef = useRef(null);
+    const asesorFilterRef = useRef(null);
+    const auditorFilterRef = useRef(null);
+    const supervisorFilterRef = useRef(null);
+    const administradorFilterRef = useRef(null);
+
+    const toggleSelection = (value, setFn) => {
+        const normalized = (value || "").trim();
+        if (!normalized) return;
+        setFn((prev) => {
+            if (prev.includes(normalized)) {
+                return prev.filter((item) => item !== normalized);
+            }
+            return [...prev, normalized];
+        });
+    };
+
+    const formatMultiLabel = (selected, placeholder, pluralWord) => {
+        if (selected.length === 0) return placeholder;
+        if (selected.length === 1) return selected[0];
+        return `${selected.length} ${pluralWord}`;
+    };
 
     // ✅ Función para obtener la fecha actual de Argentina considerando día laboral hasta 23:01
     const getCurrentArgentinaDate = () => {
         // Obtener hora actual en Argentina (UTC-3)
         const now = new Date();
         const argentinaTime = new Date(now.toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
-        
+
         const hours = argentinaTime.getHours();
         const minutes = argentinaTime.getMinutes();
-        
+
         // Si son las 23:01 o después, avanzar al día siguiente
         if (hours === 23 && minutes >= 1 || hours > 23) {
             argentinaTime.setDate(argentinaTime.getDate() + 1);
         }
-        
+
         // Formatear como YYYY-MM-DD
         const year = argentinaTime.getFullYear();
         const month = String(argentinaTime.getMonth() + 1).padStart(2, '0');
         const day = String(argentinaTime.getDate()).padStart(2, '0');
-        
+
         return `${year}-${month}-${day}`;
     };
 
     const buildParams = () => {
         const params = { ...filters };
+
+        if (selectedEstados.length > 0) {
+            params.estado = selectedEstados.map((e) => e.trim()).filter(Boolean).join(",");
+        }
+
+        if (selectedAsesores.length > 0) {
+            params.asesor = selectedAsesores.map((a) => a.trim()).filter(Boolean).join(",");
+        }
+
+        if (selectedAuditores.length > 0) {
+            params.auditor = selectedAuditores.map((a) => a.trim()).filter(Boolean).join(",");
+        }
+
+        if (selectedSupervisores.length > 0) {
+            params.supervisor = selectedSupervisores.map((s) => s.trim()).filter(Boolean).join(",");
+        }
+
+        if (selectedAdministradores.length > 0) {
+            params.administrador = selectedAdministradores.map((a) => a.trim()).filter(Boolean).join(",");
+        }
+
+        if (selectedGroups.length > 0) {
+            params.grupo = selectedGroups.map((g) => g.trim()).filter(Boolean).join(",");
+        }
 
         if (dateFrom && dateTo) {
             params.dateFrom = dateFrom;
@@ -253,8 +323,20 @@ export default function FollowUp() {
             setLoading(true);
             const params = buildParams();
             const { data } = await apiClient.get("/audits", { params });
-            // data viene ya como array (getAuditsByDate devuelve []), si no festejamos
-            setAudits(Array.isArray(data) ? data : []);
+            const auditsArray = Array.isArray(data) ? data : [];
+
+            const hasExplicitStatusFilter = (selectedEstados && selectedEstados.length > 0)
+                || (typeof filters.estado === "string" && filters.estado.trim().length > 0);
+            const statusesToHide = ["cargada", "aprobada"];
+
+            const normalizedFilteredAudits = hasExplicitStatusFilter
+                ? auditsArray
+                : auditsArray.filter((audit) => {
+                    const status = (audit.status || "").toLowerCase();
+                    return !statusesToHide.includes(status);
+                });
+
+            setAudits(normalizedFilteredAudits);
         } catch (err) {
             console.error(err);
             toast.error("Error al cargar auditorías");
@@ -273,7 +355,10 @@ export default function FollowUp() {
             });
             const asesoresData = Array.isArray(asesoresRes.data) ? asesoresRes.data : [];
             const asesoresFiltered = asesoresData
-                .filter(u => (u.role === 'asesor' || u.role === 'Asesor') && u.nombre)
+                .filter(u => {
+                    const isActive = u?.active !== false;
+                    return isActive && (u.role === 'asesor' || u.role === 'Asesor') && u.nombre;
+                })
                 .sort((a, b) => a.nombre.localeCompare(b.nombre));
             setAsesoresList(asesoresFiltered);
 
@@ -284,7 +369,11 @@ export default function FollowUp() {
             const auditoresData = Array.isArray(auditoresRes.data) ? auditoresRes.data : [];
             // ✅ Filtrar solo Gerencia, Auditor y Supervisor (sin Admin)
             const auditoresFiltered = auditoresData
-                .filter(u => (u.role === 'auditor' || u.role === 'Auditor' || u.role === 'gerencia' || u.role === 'Gerencia' || u.role === 'supervisor' || u.role === 'Supervisor') && u.nombre)
+                .filter(u => {
+                    const isActive = u?.active !== false;
+                    const role = u?.role;
+                    return isActive && (role === 'auditor' || role === 'Auditor' || role === 'gerencia' || role === 'Gerencia' || role === 'supervisor' || role === 'Supervisor') && u.nombre;
+                })
                 .sort((a, b) => a.nombre.localeCompare(b.nombre));
             setAuditoresList(auditoresFiltered);
 
@@ -304,7 +393,10 @@ export default function FollowUp() {
                 const supervisoresRes = await apiClient.get('/users');
                 const supervisoresData = Array.isArray(supervisoresRes.data) ? supervisoresRes.data : [];
                 const supervisoresFiltered = supervisoresData
-                    .filter(u => (u.role === 'supervisor' || u.role === 'Supervisor') && u.nombre)
+                    .filter(u => {
+                        const isActive = u?.active !== false;
+                        return isActive && (u.role === 'supervisor' || u.role === 'Supervisor') && u.nombre;
+                    })
                     .sort((a, b) => a.nombre.localeCompare(b.nombre));
                 setSupervisoresList(supervisoresFiltered);
             }
@@ -313,7 +405,10 @@ export default function FollowUp() {
             const administradoresRes = await apiClient.get('/users');
             const administradoresData = Array.isArray(administradoresRes.data) ? administradoresRes.data : [];
             const administradoresFiltered = administradoresData
-                .filter(u => (u.role === 'admin' || u.role === 'Admin') && u.nombre)
+                .filter(u => {
+                    const isActive = u?.active !== false;
+                    return isActive && (u.role === 'admin' || u.role === 'Admin') && u.nombre;
+                })
                 .sort((a, b) => a.nombre.localeCompare(b.nombre));
             setAdministradoresList(administradoresFiltered);
         } catch (err) {
@@ -363,7 +458,64 @@ export default function FollowUp() {
     useEffect(() => {
         fetchAudits();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filters, dateFrom, dateTo]);
+    }, [
+        filters,
+        selectedGroups,
+        selectedEstados,
+        selectedAsesores,
+        selectedAuditores,
+        selectedSupervisores,
+        selectedAdministradores,
+        dateFrom,
+        dateTo
+    ]);
+
+    useEffect(() => {
+        const refsToTrack = [
+            { ref: groupFilterRef, setOpen: setIsGroupDropdownOpen },
+            { ref: estadoFilterRef, setOpen: setIsEstadoDropdownOpen },
+            { ref: asesorFilterRef, setOpen: setIsAsesorDropdownOpen },
+            { ref: auditorFilterRef, setOpen: setIsAuditorDropdownOpen },
+            { ref: supervisorFilterRef, setOpen: setIsSupervisorDropdownOpen },
+            { ref: administradorFilterRef, setOpen: setIsAdministradorDropdownOpen },
+        ];
+
+        const handleClickOutside = (event) => {
+            refsToTrack.forEach(({ ref, setOpen }) => {
+                if (ref.current && !ref.current.contains(event.target)) {
+                    setOpen(false);
+                }
+            });
+        };
+
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+        };
+    }, []);
+
+    const toggleGroupSelection = (groupName) => toggleSelection(groupName, setSelectedGroups);
+    const toggleEstadoSelection = (estado) => toggleSelection(estado, setSelectedEstados);
+    const toggleAsesorSelection = (asesor) => toggleSelection(asesor, setSelectedAsesores);
+    const toggleAuditorSelection = (auditor) => toggleSelection(auditor, setSelectedAuditores);
+    const toggleSupervisorSelection = (supervisor) => toggleSelection(supervisor, setSelectedSupervisores);
+    const toggleAdministradorSelection = (administrador) => toggleSelection(administrador, setSelectedAdministradores);
+
+    const clearGroupSelection = () => {
+        setSelectedGroups([]);
+    };
+    const clearEstadoSelection = () => setSelectedEstados([]);
+    const clearAsesorSelection = () => setSelectedAsesores([]);
+    const clearAuditorSelection = () => setSelectedAuditores([]);
+    const clearSupervisorSelection = () => setSelectedSupervisores([]);
+    const clearAdministradorSelection = () => setSelectedAdministradores([]);
+
+    const groupButtonLabel = () => formatMultiLabel(selectedGroups, "Grupo", "grupos");
+    const estadoButtonLabel = () => formatMultiLabel(selectedEstados, "Estado", "estados");
+    const asesorButtonLabel = () => formatMultiLabel(selectedAsesores, "Asesor", "asesores");
+    const auditorButtonLabel = () => formatMultiLabel(selectedAuditores, "Auditor", "auditores");
+    const supervisorButtonLabel = () => formatMultiLabel(selectedSupervisores, "Supervisor", "supervisores");
+    const administradorButtonLabel = () => formatMultiLabel(selectedAdministradores, "Administrador", "administradores");
 
     const handleFilterChange = (field, value) => {
         setFilters((prev) => ({ ...prev, [field]: value }));
@@ -378,7 +530,6 @@ export default function FollowUp() {
             estado: "",
             tipo: "",
             asesor: "",
-            grupo: "",
             datos: "",
             auditor: "",
             supervisor: "",
@@ -387,6 +538,12 @@ export default function FollowUp() {
         // Resetea rango → fuerza al buildParams a usar "date = hoy"
         setDateFrom("");
         setDateTo("");
+        setSelectedGroups([]);
+        setSelectedEstados([]);
+        setSelectedAsesores([]);
+        setSelectedAuditores([]);
+        setSelectedSupervisores([]);
+        setSelectedAdministradores([]);
     };
 
     const handleExportXLSX = () => {
@@ -600,16 +757,51 @@ export default function FollowUp() {
                             <option key={o} value={o}>{o}</option>
                         ))}
                     </select>
-                    <select
-                        value={filters.estado}
-                        onChange={(e) => handleFilterChange("estado", e.target.value)}
-                        className="flex-1 min-w-[100px] md:min-w-[140px] p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm"
-                    >
-                        <option value="">Estado</option>
-                        {STATUS_OPTIONS.map((s) => (
-                            <option key={s} value={s}>{s}</option>
-                        ))}
-                    </select>
+                    <div className="relative flex-1 min-w-[120px] md:min-w-[160px]" ref={estadoFilterRef}>
+                        <button
+                            type="button"
+                            onClick={() => setIsEstadoDropdownOpen(prev => !prev)}
+                            className="w-full flex items-center justify-between gap-1 p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm bg-white hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        >
+                            <span className="truncate text-left">{estadoButtonLabel()}</span>
+                            <ChevronDown size={14} className={`transition-transform ${isEstadoDropdownOpen ? "rotate-180" : ""}`} />
+                        </button>
+
+                        {isEstadoDropdownOpen && (
+                            <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                                <div className="flex items-center justify-between px-2 py-1 border-b border-gray-100">
+                                    <span className="text-[11px] font-semibold text-gray-600">Seleccionar estados</span>
+                                    {selectedEstados.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={clearEstadoSelection}
+                                            className="text-[11px] text-blue-600 hover:text-blue-800"
+                                        >
+                                            Limpiar
+                                        </button>
+                                    )}
+                                </div>
+                                <ul className="py-1">
+                                    {STATUS_OPTIONS.map((status) => {
+                                        const isChecked = selectedEstados.includes(status.trim());
+                                        return (
+                                            <li key={status}>
+                                                <label className="flex items-center gap-2 px-3 py-1 text-[11px] md:text-xs text-gray-700 hover:bg-blue-50 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="accent-blue-600"
+                                                        checked={isChecked}
+                                                        onChange={() => toggleEstadoSelection(status)}
+                                                    />
+                                                    <span className="truncate">{status}</span>
+                                                </label>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </div>
+                        )}
+                    </div>
                     <select
                         value={filters.tipo}
                         onChange={(e) => handleFilterChange("tipo", e.target.value)}
@@ -620,58 +812,258 @@ export default function FollowUp() {
                             <option key={t} value={t}>{t}</option>
                         ))}
                     </select>
-                    <select
-                        value={filters.asesor}
-                        onChange={(e) => handleFilterChange("asesor", e.target.value)}
-                        className="flex-1 min-w-[100px] md:min-w-[140px] p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm"
-                    >
-                        <option value="">-- Asesor --</option>
-                        {asesoresList.map(a => (
-                            <option key={a._id} value={a.nombre}>{a.nombre}</option>
-                        ))}
-                    </select>
-                    <select
-                        value={filters.grupo}
-                        onChange={(e) => handleFilterChange("grupo", e.target.value)}
-                        className="flex-1 min-w-[100px] md:min-w-[140px] p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm"
-                    >
-                        <option value="">-- Grupo --</option>
-                        {gruposList.map(g => (
-                            <option key={g._id} value={g.nombre}>{g.nombre}</option>
-                        ))}
-                    </select>
-                    <select
-                        value={filters.auditor}
-                        onChange={(e) => handleFilterChange("auditor", e.target.value)}
-                        className="flex-1 min-w-[100px] md:min-w-[140px] p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm"
-                    >
-                        <option value="">-- Auditor --</option>
-                        {auditoresList.map(a => (
-                            <option key={a._id} value={a.nombre}>{a.nombre}</option>
-                        ))}
-                    </select>
-                    {(isAuditor || isGerencia || isAdmin) && (
-                        <select
-                            value={filters.supervisor}
-                            onChange={(e) => handleFilterChange("supervisor", e.target.value)}
-                            className="flex-1 min-w-[100px] md:min-w-[140px] p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm"
+                    <div className="relative flex-1 min-w-[120px] md:min-w-[160px]" ref={asesorFilterRef}>
+                        <button
+                            type="button"
+                            onClick={() => setIsAsesorDropdownOpen(prev => !prev)}
+                            className="w-full flex items-center justify-between gap-1 p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm bg-white hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-200"
                         >
-                            <option value="">-- Supervisor --</option>
-                            {supervisoresList.map(s => (
-                                <option key={s._id} value={s.nombre}>{s.nombre}</option>
-                            ))}
-                        </select>
+                            <span className="truncate text-left">{asesorButtonLabel()}</span>
+                            <ChevronDown size={14} className={`transition-transform ${isAsesorDropdownOpen ? "rotate-180" : ""}`} />
+                        </button>
+
+                        {isAsesorDropdownOpen && (
+                            <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                                <div className="flex items-center justify-between px-2 py-1 border-b border-gray-100">
+                                    <span className="text-[11px] font-semibold text-gray-600">Seleccionar asesores</span>
+                                    {selectedAsesores.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={clearAsesorSelection}
+                                            className="text-[11px] text-blue-600 hover:text-blue-800"
+                                        >
+                                            Limpiar
+                                        </button>
+                                    )}
+                                </div>
+                                {asesoresList.length === 0 ? (
+                                    <div className="px-3 py-2 text-[11px] text-gray-500">No hay asesores disponibles</div>
+                                ) : (
+                                    <ul className="py-1">
+                                        {asesoresList.map((a) => {
+                                            const label = (a?.nombre || a?.name || a?.email || "Sin nombre").trim();
+                                            const isChecked = selectedAsesores.includes(label);
+                                            return (
+                                                <li key={a._id || label}>
+                                                    <label className="flex items-center gap-2 px-3 py-1 text-[11px] md:text-xs text-gray-700 hover:bg-blue-50 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="accent-blue-600"
+                                                            checked={isChecked}
+                                                            onChange={() => toggleAsesorSelection(label)}
+                                                        />
+                                                        <span className="truncate">{label}</span>
+                                                    </label>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    <div className="relative flex-1 min-w-[120px] md:min-w-[160px]" ref={groupFilterRef}>
+                        <button
+                            type="button"
+                            onClick={() => setIsGroupDropdownOpen(prev => !prev)}
+                            className="w-full flex items-center justify-between gap-1 p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm bg-white hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        >
+                            <span className="truncate text-left">{groupButtonLabel()}</span>
+                            <ChevronDown size={14} className={`transition-transform ${isGroupDropdownOpen ? "rotate-180" : ""}`} />
+                        </button>
+
+                        {isGroupDropdownOpen && (
+                            <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                                <div className="flex items-center justify-between px-2 py-1 border-b border-gray-100">
+                                    <span className="text-[11px] font-semibold text-gray-600">Seleccionar grupos</span>
+                                    {selectedGroups.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => clearGroupSelection()}
+                                            className="text-[11px] text-blue-600 hover:text-blue-800"
+                                        >
+                                            Limpiar
+                                        </button>
+                                    )}
+                                </div>
+                                {gruposList.length === 0 ? (
+                                    <div className="px-3 py-2 text-[11px] text-gray-500">No hay grupos disponibles</div>
+                                ) : (
+                                    <ul className="py-1">
+                                        {gruposList.map((g) => {
+                                            const nombreGrupo = g?.nombre || g?.numeroEquipo || "Sin nombre";
+                                            const isChecked = selectedGroups.includes(nombreGrupo.trim());
+                                            return (
+                                                <li key={g._id || nombreGrupo}>
+                                                    <label className="flex items-center gap-2 px-3 py-1 text-[11px] md:text-xs text-gray-700 hover:bg-blue-50 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="accent-blue-600"
+                                                            checked={isChecked}
+                                                            onChange={() => toggleGroupSelection(nombreGrupo)}
+                                                        />
+                                                        <span className="truncate">{nombreGrupo}</span>
+                                                    </label>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    <div className="relative flex-1 min-w-[120px] md:min-w-[160px]" ref={auditorFilterRef}>
+                        <button
+                            type="button"
+                            onClick={() => setIsAuditorDropdownOpen(prev => !prev)}
+                            className="w-full flex items-center justify-between gap-1 p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm bg-white hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        >
+                            <span className="truncate text-left">{auditorButtonLabel()}</span>
+                            <ChevronDown size={14} className={`transition-transform ${isAuditorDropdownOpen ? "rotate-180" : ""}`} />
+                        </button>
+
+                        {isAuditorDropdownOpen && (
+                            <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                                <div className="flex items-center justify-between px-2 py-1 border-b border-gray-100">
+                                    <span className="text-[11px] font-semibold text-gray-600">Seleccionar auditores</span>
+                                    {selectedAuditores.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={clearAuditorSelection}
+                                            className="text-[11px] text-blue-600 hover:text-blue-800"
+                                        >
+                                            Limpiar
+                                        </button>
+                                    )}
+                                </div>
+                                {auditoresList.length === 0 ? (
+                                    <div className="px-3 py-2 text-[11px] text-gray-500">No hay auditores disponibles</div>
+                                ) : (
+                                    <ul className="py-1">
+                                        {auditoresList.map((a) => {
+                                            const label = (a?.nombre || a?.name || a?.email || "Sin nombre").trim();
+                                            const isChecked = selectedAuditores.includes(label);
+                                            return (
+                                                <li key={a._id || label}>
+                                                    <label className="flex items-center gap-2 px-3 py-1 text-[11px] md:text-xs text-gray-700 hover:bg-blue-50 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="accent-blue-600"
+                                                            checked={isChecked}
+                                                            onChange={() => toggleAuditorSelection(label)}
+                                                        />
+                                                        <span className="truncate">{label}</span>
+                                                    </label>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    {(isAuditor || isGerencia || isAdmin) && (
+                        <div className="relative flex-1 min-w-[120px] md:min-w-[160px]" ref={supervisorFilterRef}>
+                            <button
+                                type="button"
+                                onClick={() => setIsSupervisorDropdownOpen(prev => !prev)}
+                                className="w-full flex items-center justify-between gap-1 p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm bg-white hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            >
+                                <span className="truncate text-left">{supervisorButtonLabel()}</span>
+                                <ChevronDown size={14} className={`transition-transform ${isSupervisorDropdownOpen ? "rotate-180" : ""}`} />
+                            </button>
+
+                            {isSupervisorDropdownOpen && (
+                                <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                                    <div className="flex items-center justify-between px-2 py-1 border-b border-gray-100">
+                                        <span className="text-[11px] font-semibold text-gray-600">Seleccionar supervisores</span>
+                                        {selectedSupervisores.length > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={clearSupervisorSelection}
+                                                className="text-[11px] text-blue-600 hover:text-blue-800"
+                                            >
+                                                Limpiar
+                                            </button>
+                                        )}
+                                    </div>
+                                    {supervisoresList.length === 0 ? (
+                                        <div className="px-3 py-2 text-[11px] text-gray-500">No hay supervisores disponibles</div>
+                                    ) : (
+                                        <ul className="py-1">
+                                            {supervisoresList.map((s) => {
+                                                const label = (s?.nombre || s?.name || s?.email || "Sin nombre").trim();
+                                                const isChecked = selectedSupervisores.includes(label);
+                                                return (
+                                                    <li key={s._id || label}>
+                                                        <label className="flex items-center gap-2 px-3 py-1 text-[11px] md:text-xs text-gray-700 hover:bg-blue-50 cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="accent-blue-600"
+                                                                checked={isChecked}
+                                                                onChange={() => toggleSupervisorSelection(label)}
+                                                            />
+                                                            <span className="truncate">{label}</span>
+                                                        </label>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                     )}
-                    <select
-                        value={filters.administrador}
-                        onChange={(e) => handleFilterChange("administrador", e.target.value)}
-                        className="flex-1 min-w-[100px] md:min-w-[140px] p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm"
-                    >
-                        <option value="">-- Administrador --</option>
-                        {administradoresList.map(a => (
-                            <option key={a._id} value={a.nombre}>{a.nombre}</option>
-                        ))}
-                    </select>
+                    <div className="relative flex-1 min-w-[120px] md:min-w-[160px]" ref={administradorFilterRef}>
+                        <button
+                            type="button"
+                            onClick={() => setIsAdministradorDropdownOpen(prev => !prev)}
+                            className="w-full flex items-center justify-between gap-1 p-1.5 md:p-2 border border-gray-200 rounded-lg text-xs md:text-sm bg-white hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        >
+                            <span className="truncate text-left">{administradorButtonLabel()}</span>
+                            <ChevronDown size={14} className={`transition-transform ${isAdministradorDropdownOpen ? "rotate-180" : ""}`} />
+                        </button>
+
+                        {isAdministradorDropdownOpen && (
+                            <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                                <div className="flex items-center justify-between px-2 py-1 border-b border-gray-100">
+                                    <span className="text-[11px] font-semibold text-gray-600">Seleccionar administradores</span>
+                                    {selectedAdministradores.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={clearAdministradorSelection}
+                                            className="text-[11px] text-blue-600 hover:text-blue-800"
+                                        >
+                                            Limpiar
+                                        </button>
+                                    )}
+                                </div>
+                                {administradoresList.length === 0 ? (
+                                    <div className="px-3 py-2 text-[11px] text-gray-500">No hay administradores disponibles</div>
+                                ) : (
+                                    <ul className="py-1">
+                                        {administradoresList.map((a) => {
+                                            const label = (a?.nombre || a?.name || a?.email || "Sin nombre").trim();
+                                            const isChecked = selectedAdministradores.includes(label);
+                                            return (
+                                                <li key={a._id || label}>
+                                                    <label className="flex items-center gap-2 px-3 py-1 text-[11px] md:text-xs text-gray-700 hover:bg-blue-50 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="accent-blue-600"
+                                                            checked={isChecked}
+                                                            onChange={() => toggleAdministradorSelection(label)}
+                                                        />
+                                                        <span className="truncate">{label}</span>
+                                                    </label>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
+                    </div>
 
                     {/* Fecha (botón calendario) */}
                     <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 w-full md:w-auto md:min-w-[320px]">
@@ -766,11 +1158,11 @@ export default function FollowUp() {
                 // Calcular contador de estados
                 const estadosCount = {};
                 let recuperadasCount = 0;
-                
+
                 audits.forEach(audit => {
                     const estado = audit.status || 'Sin estado';
                     estadosCount[estado] = (estadosCount[estado] || 0) + 1;
-                    
+
                     // ✅ Contar auditorías recuperadas (isRecuperada: true)
                     if (audit.isRecuperada) {
                         recuperadasCount++;
@@ -825,8 +1217,8 @@ export default function FollowUp() {
                                 <th className="px-1 py-1.5 text-[9px] md:text-xs">Sup.</th>
                                 <th className="px-1 py-1.5 text-[9px] md:text-xs">Aud.</th>
                                 <th className="hidden lg:table-cell px-1 py-1.5 text-xs">Admin.</th>
-                                <th className="hidden md:table-cell px-1 py-1.5 text-xs">¿Recup.?</th>
-                                <th className="hidden md:table-cell px-1 py-1.5 text-xs">Recup.</th>
+                                <th className="hidden md:table-cell px-1 py-1.5 text-xs">¿Recuperada?</th>
+                                <th className="hidden md:table-cell px-1 py-1.5 text-xs">Migrada</th>
                                 <th className="px-1 py-1.5 text-[9px] md:text-xs">📝</th>
                             </tr>
                         </thead>
@@ -935,7 +1327,7 @@ export default function FollowUp() {
                                                     const asesor = audit.asesor;
                                                     const nombreAsesor = asesor?.nombre || asesor?.name || asesor?.email;
                                                     if (!nombreAsesor) return '-';
-                                                    
+
                                                     // ✅ Mostrar asesor en negro
                                                     return (
                                                         <span className="text-gray-900">
@@ -1043,7 +1435,8 @@ export default function FollowUp() {
                             <div className="flex justify-between"><span className="text-gray-500">Supervisor:</span><span className="font-medium">{detailsAudit.asesor?.supervisor?.nombre ? toTitleCase(detailsAudit.asesor?.supervisor?.nombre) : (detailsAudit.asesor?.supervisor?.name ? toTitleCase(detailsAudit.asesor?.supervisor?.name) : (detailsAudit.asesor?.supervisor?.email || "-"))}</span></div>
                             <div className="flex justify-between"><span className="text-gray-500">Grupo:</span><span className="font-medium">{detailsAudit.groupId?.nombre ? toTitleCase(detailsAudit.groupId?.nombre) : (detailsAudit.groupId?.name ? toTitleCase(detailsAudit.groupId?.name) : "-")}</span></div>
                             <div className="flex justify-between"><span className="text-gray-500">Tipo:</span><span className="font-medium">{detailsAudit.tipoVenta ? toTitleCase(detailsAudit.tipoVenta) : "-"}</span></div>
-                            
+                            <div className="flex justify-between"><span className="text-gray-500">Fecha de creación:</span><span className="font-medium">{formatDateTime(detailsAudit.createdAt)}</span></div>
+
                             {/* Campo ¿Recuperada? - Solo Gerencia puede marcar */}
                             <div className="flex items-center justify-between border-t pt-2">
                                 <span className="text-gray-500">¿Recuperada?</span>
@@ -1074,7 +1467,7 @@ export default function FollowUp() {
                                     </span>
                                 </label>
                             </div>
-                            
+
                             <div>
                                 <div className="text-gray-500 mb-1">Datos extra:</div>
                                 <div className="bg-gray-50 rounded p-2 min-h-[48px] whitespace-pre-wrap">{detailsAudit.datosExtra || "—"}</div>

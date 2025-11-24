@@ -4,8 +4,13 @@ import React, { useEffect, useState, useMemo } from "react";
 import apiClient from "../services/api";
 import { toast } from "react-toastify";
 import * as XLSX from "xlsx";
+import { useAuth } from "../context/AuthContext";
 
 export default function LiquidacionList() {
+    const { user } = useAuth();
+    const role = (user?.role || "").toLowerCase();
+    const isSupervisor = role === "supervisor";
+    const supervisorNumeroEquipo = user?.numeroEquipo || null;
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(false);
     
@@ -49,11 +54,29 @@ export default function LiquidacionList() {
         try {
             const { data } = await apiClient.get("/users");
             const usuarios = Array.isArray(data) ? data : [];
-            
-            setAsesores(usuarios.filter(u => u.role === 'asesor').sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')));
-            setSupervisores(usuarios.filter(u => u.role === 'supervisor').sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')));
-            setAuditores(usuarios.filter(u => u.role === 'auditor').sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')));
-            setAdministradores(usuarios.filter(u => u.role === 'admin').sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')));
+
+            const asesoresFiltrados = usuarios
+                .filter((u) => (u.role || "").toLowerCase() === "asesor")
+                .filter((u) => !isSupervisor || !supervisorNumeroEquipo || u.numeroEquipo === supervisorNumeroEquipo)
+                .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+
+            const supervisoresFiltrados = usuarios
+                .filter((u) => (u.role || "").toLowerCase() === "supervisor")
+                .filter((u) => !isSupervisor || u._id === user?._id)
+                .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+
+            const auditoresFiltrados = usuarios
+                .filter((u) => (u.role || "").toLowerCase() === "auditor")
+                .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+
+            const administradoresFiltrados = usuarios
+                .filter((u) => (u.role || "").toLowerCase() === "admin")
+                .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+
+            setAsesores(asesoresFiltrados);
+            setSupervisores(supervisoresFiltrados);
+            setAuditores(auditoresFiltrados);
+            setAdministradores(administradoresFiltrados);
         } catch (e) {
             console.error('Error cargando opciones de filtros:', e);
         }

@@ -39,6 +39,26 @@ const AuditSchema = new Schema({
     },
 
     datosExtra: { type: String, default: "" },
+    datosExtraHistory: {
+        type: [
+            {
+                value: { type: String, default: "" },
+                updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+                updatedAt: { type: Date, default: Date.now }
+            }
+        ],
+        default: []
+    },
+    statusHistory: {
+        type: [
+            {
+                value: { type: String, default: "" },
+                updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+                updatedAt: { type: Date, default: Date.now }
+            }
+        ],
+        default: []
+    },
     isComplete: { type: Boolean, default: false },
 
     createdAt: { type: Date, default: Date.now }
