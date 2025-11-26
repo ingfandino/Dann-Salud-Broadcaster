@@ -17,6 +17,7 @@ const {
     notifyAuditQRDone,
     notifyRecoveryAuditCompleted
 } = require("../services/notificationService");
+const { escapeRegex } = require("../utils/stringUtils");
 
 /**
  * Parsea un string tipo 'YYYY-MM-DDTHH:mm' a Date local
@@ -55,7 +56,7 @@ exports.createAudit = async (req, res) => {
 
     // ✅ PRIVILEGIO ESPECIAL: Gerencia puede crear ventas de cualquier fecha
     const isGerencia = req.user?.role?.toLowerCase() === 'gerencia';
-    
+
     if (!isGerencia) {
         // Solo validar fecha para roles que NO sean Gerencia
         const today = new Date();
@@ -70,8 +71,8 @@ exports.createAudit = async (req, res) => {
     if (cuil && cuil.trim()) {
         const existing = await Audit.findOne({ cuil: cuil.trim() });
         if (existing && existing.status !== 'Rechazada') {
-            return res.status(400).json({ 
-                message: 'Ya existe una auditoría con ese CUIL. El CUIL solo puede reutilizarse si la auditoría anterior fue rechazada.' 
+            return res.status(400).json({
+                message: 'Ya existe una auditoría con ese CUIL. El CUIL solo puede reutilizarse si la auditoría anterior fue rechazada.'
             });
         }
     }
@@ -85,6 +86,15 @@ exports.createAudit = async (req, res) => {
     });
     if (count >= 10) { // ✅ Aumentado a 10 vacantes por turno
         return res.status(400).json({ message: 'Turno completo' });
+    }
+
+    // 🛡️ Doble verificación para mitigar condición de carrera
+    // (Idealmente usaríamos transacciones, pero esto reduce la ventana de riesgo)
+    const doubleCheck = await Audit.countDocuments({
+        scheduledAt: { $gte: slotStart, $lt: slotEnd }
+    });
+    if (doubleCheck >= 10) {
+        return res.status(400).json({ message: 'Turno completo (verificación final)' });
     }
 
     const audit = new Audit({
@@ -121,17 +131,17 @@ exports.createAudit = async (req, res) => {
     }
 
     await audit.save();
-    
+
     // Poblar datos para notificación
     await audit.populate('createdBy', 'nombre email role numeroEquipo');
     await audit.populate('datosExtraHistory.updatedBy', 'nombre name username email role');
     await audit.populate('statusHistory.updatedBy', 'nombre name username email role');
-    
+
     try { emitNewAudit(audit); } catch (e) { logger.error("socket emit error", e); }
-    
+
     // 🔔 Notificar a auditores sobre nueva auditoría
     try {
-        await notifyAuditCreated({ 
+        await notifyAuditCreated({
             audit: {
                 ...audit.toObject(),
                 fechaTurno: audit.scheduledAt,
@@ -141,7 +151,7 @@ exports.createAudit = async (req, res) => {
     } catch (e) {
         logger.error("Error enviando notificación de auditoría creada:", e);
     }
-    
+
     return res.status(201).json(audit);
 };
 
@@ -181,13 +191,13 @@ exports.getAuditsByDate = async (req, res) => {
             if (cuil && telefono) {
                 // Buscar registros que coincidan en CUIL O teléfono
                 filter.$or = [
-                    { cuil: { $regex: `^${cuil}$`, $options: "i" } },
-                    { telefono: { $regex: `^${telefono}$`, $options: "i" } }
+                    { cuil: { $regex: `^${escapeRegex(cuil)}$`, $options: "i" } },
+                    { telefono: { $regex: `^${escapeRegex(telefono)}$`, $options: "i" } }
                 ];
             } else if (cuil) {
-                filter.cuil = { $regex: `^${cuil}$`, $options: "i" };
+                filter.cuil = { $regex: `^${escapeRegex(cuil)}$`, $options: "i" };
             } else if (telefono) {
-                filter.telefono = { $regex: `^${telefono}$`, $options: "i" };
+                filter.telefono = { $regex: `^${escapeRegex(telefono)}$`, $options: "i" };
             }
         } else {
             // Filtro de fecha normal para listados
@@ -205,12 +215,12 @@ exports.getAuditsByDate = async (req, res) => {
             }
         }
 
-        if (afiliado) filter.nombre = { $regex: afiliado, $options: "i" };
+        if (afiliado) filter.nombre = { $regex: escapeRegex(afiliado), $options: "i" };
         // ✅ CUIL y teléfono ya manejados arriba para validación de duplicados
-        if (cuil && (date || dateFrom || dateTo)) filter.cuil = { $regex: cuil, $options: "i" };
-        if (telefono && (date || dateFrom || dateTo)) filter.telefono = { $regex: telefono, $options: "i" };
-        if (obraAnterior) filter.obraSocialAnterior = { $regex: obraAnterior, $options: "i" };
-        if (obraVendida) filter.obraSocialVendida = { $regex: obraVendida, $options: "i" };
+        if (cuil && (date || dateFrom || dateTo)) filter.cuil = { $regex: escapeRegex(cuil), $options: "i" };
+        if (telefono && (date || dateFrom || dateTo)) filter.telefono = { $regex: escapeRegex(telefono), $options: "i" };
+        if (obraAnterior) filter.obraSocialAnterior = { $regex: escapeRegex(obraAnterior), $options: "i" };
+        if (obraVendida) filter.obraSocialVendida = { $regex: escapeRegex(obraVendida), $options: "i" };
         if (estado) {
             const estadosRaw = estado
                 .split(',')
@@ -230,7 +240,7 @@ exports.getAuditsByDate = async (req, res) => {
                 }
             }
         }
-        if (tipo) filter.tipoVenta = { $regex: tipo, $options: "i" };
+        if (tipo) filter.tipoVenta = { $regex: escapeRegex(tipo), $options: "i" };
 
         // Visibilidad por rol
         const expRole = (req.user?.role || '').toLowerCase();
@@ -246,7 +256,7 @@ exports.getAuditsByDate = async (req, res) => {
         // Se mostrarán TODAS las auditorías para evitar que "desaparezcan"
         // El frontend mostrará un indicador visual para las que están en recuperación
 
-        
+
 
         let audits = await Audit.find(filter)
             .populate({
@@ -322,7 +332,7 @@ exports.getAuditsByDate = async (req, res) => {
                             a.asesor = as = found;
                         }
                     }
-                } catch {}
+                } catch { }
             }
 
             const grupo = as && as.numeroEquipo;
@@ -423,30 +433,30 @@ exports.getAvailableSlots = async (req, res) => {
     // Parsear fecha recibida como YYYY-MM-DD y crear rango en UTC
     // El frontend envía fecha en formato local, necesitamos buscar en todo el día
     const [year, month, day] = date.split('-').map(Number);
-    
+
     // Crear inicio del día en Argentina (UTC-3)
     const startOfDay = new Date(Date.UTC(year, month - 1, day, 3, 0, 0)); // 00:00 ARG = 03:00 UTC
     const endOfDay = new Date(Date.UTC(year, month - 1, day + 1, 2, 59, 59)); // 23:59 ARG = 02:59 UTC siguiente día
 
     const slots = [];
-    
+
     // Generar slots de 09:20 a 23:00 (hora local Argentina) ✅ Extendido hasta 23:00
     for (let hour = 9; hour <= 23; hour++) {
         const minutes = hour === 9 ? [20, 40] : hour === 23 ? [0] : [0, 20, 40];
-        
+
         for (const minute of minutes) {
             if (hour === 23 && minute > 0) continue; // No generar después de 23:00
-            
+
             // Crear slot en hora local de Argentina
             const slotStartLocal = new Date(year, month - 1, day, hour, minute, 0);
             const slotEndLocal = new Date(slotStartLocal);
             slotEndLocal.setMinutes(slotEndLocal.getMinutes() + 20);
-            
+
             // Contar auditorías que caen en este slot
             const count = await Audit.countDocuments({
-                scheduledAt: { 
-                    $gte: slotStartLocal, 
-                    $lt: slotEndLocal 
+                scheduledAt: {
+                    $gte: slotStartLocal,
+                    $lt: slotEndLocal
                 }
             });
 
@@ -468,7 +478,7 @@ exports.getSalesStats = async (req, res) => {
     if (!date) return res.status(400).json({ message: 'date required' });
 
     const [year, month, day] = date.split('-').map(Number);
-    
+
     // Crear rango de fecha (todo el día)
     const startOfDay = new Date(year, month - 1, day, 0, 0, 0);
     const endOfDay = new Date(year, month - 1, day, 23, 59, 59);
@@ -515,23 +525,23 @@ exports.updateStatus = async (req, res) => {
 
     const now = new Date();
     const update = { status, statusUpdatedAt: now };
-    
+
     // ✅ ACTUALIZAR FECHA CUANDO CAMBIA A "QR hecho"
     if (status === 'QR hecho') {
         update.scheduledAt = now;
         logger.info(`updateStatus: Auditoría ${id} cambió a QR hecho. Fecha actualizada a: ${update.scheduledAt}`);
     }
-    
+
     // ✅ ACTUALIZAR FECHA CUANDO UN ADMIN CAMBIA EL ESTADO (cualquier cambio de estado)
     const userRole = req.user?.role?.toLowerCase();
     if (userRole === 'admin') {
         update.scheduledAt = now;
         logger.info(`updateStatus: Admin cambió estado de auditoría ${id} a "${status}". Fecha actualizada a: ${update.scheduledAt}`);
     }
-    
+
     const recoveryStates = [
-        "Falta clave", 
-        "Rechazada", 
+        "Falta clave",
+        "Rechazada",
         "Falta documentación",
         "No atendió",
         "Tiene dudas",
@@ -539,7 +549,7 @@ exports.updateStatus = async (req, res) => {
         "No le llegan los mensajes",
         "Cortó"
     ];
-    
+
     if (recoveryStates.includes(status)) {
         update.recoveryEligibleAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
         // Resetear flag de notificación para que pueda enviar nueva notificación después de 12h
@@ -604,12 +614,12 @@ exports.updateAudit = async (req, res) => {
 
             // 
             const recoveryStates = [
-                "Falta clave", 
+                "Falta clave",
                 "Falta documentación",
                 "Falta clave y documentación",
                 "Pendiente"
             ];
-            
+
             // ✅ NO mover inmediatamente a recuperación
             // El cron de las 23:01 hrs verificará qué auditorías tienen estos estados y las moverá
             if (recoveryStates.includes(updates.status)) {
@@ -712,10 +722,10 @@ exports.updateAudit = async (req, res) => {
         } catch (e) {
             logger.error("emitAuditUpdate error", e);
         }
-        
+
         // 🔔 Notificaciones según cambio de estado
         const newStatus = audit.status;
-        
+
         // Notificar cuando pasa a "Completa"
         if (oldStatus !== "Completa" && newStatus === "Completa") {
             try {
@@ -742,17 +752,17 @@ exports.updateAudit = async (req, res) => {
                 logger.error("Error enviando notificación de auditoría completa:", e);
             }
         }
-        
+
         // Notificar cuando pasa a "QR hecho" (case-insensitive)
         const oldStatusLower = (oldStatus || "").toLowerCase();
         const newStatusLower = (newStatus || "").toLowerCase();
-        
+
         if (oldStatusLower !== "qr hecho" && newStatusLower === "qr hecho") {
             try {
                 // ✅ Si la auditoría está en Recuperación, marcar isRecuperada: true
                 // Verificar ANTES del cambio de estado (usando el objeto audit original)
                 const auditBeforeUpdate = await Audit.findById(audit._id).select('isRecovery recoveryDeletedAt').lean();
-                
+
                 if (auditBeforeUpdate && (auditBeforeUpdate.isRecovery || auditBeforeUpdate.recoveryDeletedAt)) {
                     await Audit.findByIdAndUpdate(
                         audit._id,
@@ -763,7 +773,7 @@ exports.updateAudit = async (req, res) => {
                 } else {
                     logger.info(`ℹ️ Auditoría ${audit._id} (${audit.nombre}) cambió a QR hecho pero NO está en Recuperación`);
                 }
-                
+
                 await notifyAuditQRDone({
                     audit: {
                         ...audit.toObject(),
@@ -779,22 +789,22 @@ exports.updateAudit = async (req, res) => {
         res.json(audit);
     } catch (err) {
         logger.error("Error actualizando auditoría:", err);
-        
+
         // Manejar errores de validación de Mongoose
         if (err.name === 'ValidationError') {
             const messages = Object.values(err.errors).map(e => e.message);
             return res.status(400).json({ message: messages.join(', ') });
         }
-        
+
         // Manejar errores de cast (ObjectId inválido)
         if (err.name === 'CastError') {
             return res.status(400).json({ message: `ID inválido para el campo ${err.path}` });
         }
-        
+
         // Error genérico
-        return res.status(500).json({ 
-            message: 'Error al actualizar auditoría', 
-            error: err.message 
+        return res.status(500).json({
+            message: 'Error al actualizar auditoría',
+            error: err.message
         });
     }
 };
@@ -872,14 +882,14 @@ exports.uploadMultimedia = async (req, res) => {
         const hasVideo = audit.multimedia.video;
         const hasImages = audit.multimedia.images && audit.multimedia.images.length >= 2; // DNI frente y dorso
         const isNowComplete = hasVideo && hasImages;
-        
+
         // Si se completó justo ahora, actualizar estado y notificar
         if (wasIncomplete && isNowComplete && audit.status !== "Completa") {
             audit.status = "Completa";
         }
-        
+
         await audit.save();
-        
+
         // Poblar para notificaciones
         await audit.populate('createdBy', 'nombre email role numeroEquipo');
         await audit.populate('auditor', 'nombre email');
@@ -890,7 +900,7 @@ exports.uploadMultimedia = async (req, res) => {
         } catch (e) {
             logger.error("socket emit error uploadMultimedia", e);
         }
-        
+
         // 🔔 Notificar a admins si se completó
         if (wasIncomplete && isNowComplete) {
             try {
@@ -944,7 +954,7 @@ exports.deleteAudit = async (req, res) => {
             return res.status(403).json({ message: 'No autorizado a eliminar este turno' });
         }
     }
-    
+
     // 🔔 Enviar notificación ANTES de eliminar
     try {
         await notifyAuditDeleted({

@@ -57,6 +57,12 @@ const sendJobSchema = new mongoose.Schema({
         type: Number,
         default: 0,
     },
+    // ✅ NUEVO: Timestamp de fin de descanso para auto-reanudación
+    restBreakUntil: {
+        type: Date,
+        default: null,
+        description: "Timestamp de cuándo termina el descanso entre lotes"
+    },
 }, { timestamps: true });
 
 // Índices para acelerar búsquedas y scheduler

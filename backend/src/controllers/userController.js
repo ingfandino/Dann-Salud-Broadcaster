@@ -73,9 +73,20 @@ async function getUsers(req, res) {
             queryFilter = { deletedAt: null };
             if (myGroup !== null) queryFilter.numeroEquipo = myGroup;
         } else if (role === "supervisor") {
-            // Por defecto: su equipo directo + él mismo
-            const teamIds = await getTeamUserIds(_id);
-            queryFilter = { _id: { $in: [...teamIds, _id] }, deletedAt: null };
+            // ✅ Supervisores: devolver todos los usuarios de su mismo numeroEquipo
+            // Esto permite que puedan ver y reasignar asesores dentro de su equipo
+            let myGroup = req.user.numeroEquipo;
+            if (!myGroup) {
+                const me = await User.findById(_id).select("numeroEquipo");
+                myGroup = me?.numeroEquipo || null;
+            }
+            queryFilter = { deletedAt: null };
+            if (myGroup !== null && myGroup !== undefined && myGroup !== "") {
+                queryFilter.numeroEquipo = myGroup;
+            } else {
+                // Si no tiene numeroEquipo, solo devolver su propio usuario
+                queryFilter._id = _id;
+            }
         } else if (role === "asesor") {
             queryFilter = { _id: _id, deletedAt: null };
         } else {
@@ -221,7 +232,7 @@ async function getUsersAdmin(req, res) {
                 { email: { $regex: search, $options: "i" } }
             ];
         }
-        
+
         // Filtro por grupo
         if (grupo) {
             query.numeroEquipo = grupo;
@@ -303,7 +314,7 @@ async function getAvailableGroups(req, res) {
             return res.status(403).json({ error: "Acceso denegado" });
         }
 
-        const grupos = await User.distinct("numeroEquipo", { 
+        const grupos = await User.distinct("numeroEquipo", {
             deletedAt: null,
             numeroEquipo: { $exists: true, $ne: null, $ne: "" }
         });

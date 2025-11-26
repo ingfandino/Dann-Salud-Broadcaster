@@ -69,7 +69,8 @@ const ARGENTINE_OBRAS_SOCIALES = [
     "OSPAGA (101000)",
     "OSPF (107404)",
     "OSPIP (116006)",
-    "OSPIC"
+    "OSPIC",
+    "OSG (109202)"
 ];
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"];
 const TIPO_VENTA = ["Alta", "Cambio"];
@@ -197,39 +198,44 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
     const currentUserRole = user?.role?.toLowerCase();
 
     const targetNumeroEquipo = useMemo(() => {
-        // Priority: use the asesor's numeroEquipo first, then fallback to other sources
-        const asesorNumeroEquipo = normalizeTeamValue(audit?.asesor?.numeroEquipo);
-        if (asesorNumeroEquipo) return asesorNumeroEquipo;
-        
+        // ✅ CORRECCIÓN: Priorizar form.numeroEquipo (valor actualizado) sobre audit original
+        // Esto permite que el dropdown de Asesor se actualice cuando se cambia el Grupo
         const candidates = [
-            form.numeroEquipo,
+            form.numeroEquipo,  // ✅ PRIMERO: valor actualizado del formulario
+            audit?.asesor?.numeroEquipo,  // Valor original del asesor
             initialNumeroEquipo,
             audit?.numeroEquipo,
-            audit?.groupId?.numeroEquipo,
             audit?.grupo,
-            audit?.groupId?.nombre,
         ];
+        console.log('🔍 [DEBUG] targetNumeroEquipo candidates:', candidates);
         for (const candidate of candidates) {
             const normalized = normalizeTeamValue(candidate);
-            if (normalized.length) return normalized;
+            if (normalized.length) {
+                console.log('🔍 [DEBUG] targetNumeroEquipo selected:', normalized);
+                return normalized;
+            }
         }
+        console.log('🔍 [DEBUG] targetNumeroEquipo: EMPTY');
         return "";
     }, [
+        form.numeroEquipo,  // ✅ Dependencia principal
         audit?.asesor?.numeroEquipo,
-        form.numeroEquipo,
         initialNumeroEquipo,
         audit?.numeroEquipo,
-        audit?.groupId?.numeroEquipo,
-        audit?.grupo,
-        audit?.groupId?.nombre,
+        audit?.grupo
     ]);
-
     const currentUserNumeroEquipo = normalizeTeamValue(user?.numeroEquipo);
     const isSupervisorRole = currentUserRole === 'supervisor' || currentUserRole === 'supervisor_reventa';
     const supervisorPuedeEditarAsesor = isSupervisorRole
         && currentUserNumeroEquipo.length > 0
         && targetNumeroEquipo.length > 0
         && currentUserNumeroEquipo === targetNumeroEquipo;
+
+    console.log('🔍 [DEBUG] currentUserRole:', currentUserRole);
+    console.log('🔍 [DEBUG] currentUserNumeroEquipo:', currentUserNumeroEquipo);
+    console.log('🔍 [DEBUG] targetNumeroEquipo:', targetNumeroEquipo);
+    console.log('🔍 [DEBUG] isSupervisorRole:', isSupervisorRole);
+    console.log('🔍 [DEBUG] supervisorPuedeEditarAsesor:', supervisorPuedeEditarAsesor);
 
     const formatHistoryTimestamp = (value) => {
         if (!value) return "-";
@@ -395,61 +401,69 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
         fetchGrupos();
     }, []);
 
-    useEffect(() => {
-        const fetchAsesores = async () => {
-            if (!targetNumeroEquipo) {
-                setAsesores([]);
-                return;
-            }
-            try {
-                const { data } = await apiClient.get("/users");
-                // ✅ Filtrar asesores Y auditores del grupo (algunos auditores también venden)
-                let filtered = data.filter(u => {
-                    const role = u.role?.toLowerCase();
-                    const isActive = u?.active !== false;
-                    const hasName = u.nombre && u.nombre.trim().length > 0;
-                    if (!isActive || !hasName) return false;
-                    if (role !== 'asesor' && role !== 'auditor') return false;
+    // ✅ CORRECCIÓN: Extraer fetchAsesores para poder llamarlo desde handleChange
+    const fetchAsesores = async (overrideNumeroEquipo = null) => {
+        const numeroEquipoToUse = overrideNumeroEquipo || targetNumeroEquipo;
+        console.log('🔍 [DEBUG] fetchAsesores called with numeroEquipo:', numeroEquipoToUse);
+        if (!numeroEquipoToUse) {
+            console.log('🔍 [DEBUG] numeroEquipo is empty, clearing asesores');
+            setAsesores([]);
+            return;
+        }
+        try {
+            const { data } = await apiClient.get("/users");
+            console.log('🔍 [DEBUG] Total users fetched:', data.length);
 
-                    const userNumeroEquipo = normalizeTeamValue(
-                        u.numeroEquipo ??
-                        u.groupId?.numeroEquipo ??
-                        u.groupId?.nombre ??
-                        u.grupo ??
-                        u.supervisor?.numeroEquipo
-                    );
+            // ✅ Filtrar asesores, auditores Y supervisores del grupo
+            let filtered = data.filter(u => {
+                const role = u.role?.toLowerCase();
+                const isActive = u?.active !== false;
+                const hasName = u.nombre && u.nombre.trim().length > 0;
+                if (!isActive || !hasName) return false;
+                // ✅ Incluir asesor, auditor Y supervisor
+                if (role !== 'asesor' && role !== 'auditor' && role !== 'supervisor') return false;
 
-                    if (!userNumeroEquipo.length) return false;
-                    return userNumeroEquipo === targetNumeroEquipo;
-                });
+                // ✅ Usar numeroEquipo directamente del usuario
+                const userNumeroEquipo = normalizeTeamValue(u.numeroEquipo);
+                console.log(`🔍 [DEBUG] User ${u.nombre} (${role}): numeroEquipo="${userNumeroEquipo}" vs target="${numeroEquipoToUse}"`);
 
-                if (form.asesor) {
-                    const alreadyIncluded = filtered.some(u => u._id === form.asesor);
-                    if (!alreadyIncluded) {
-                        const assignedUser = data.find(u => u._id === form.asesor);
-                        if (assignedUser) {
-                            filtered = [...filtered, assignedUser];
-                        }
+                if (!userNumeroEquipo.length) return false;
+                return userNumeroEquipo === numeroEquipoToUse;
+            });
+
+            console.log('🔍 [DEBUG] Filtered asesores/auditores:', filtered.length, filtered.map(u => u.nombre));
+
+            if (form.asesor) {
+                const alreadyIncluded = filtered.some(u => u._id === form.asesor);
+                if (!alreadyIncluded) {
+                    const assignedUser = data.find(u => u._id === form.asesor);
+                    if (assignedUser) {
+                        console.log('🔍 [DEBUG] Adding currently assigned asesor:', assignedUser.nombre);
+                        filtered = [...filtered, assignedUser];
                     }
                 }
-
-                const uniqueSorted = filtered
-                    .reduce((acc, user) => {
-                        if (!user || !user._id) return acc;
-                        if (acc.map.has(user._id)) return acc;
-                        acc.map.set(user._id, true);
-                        acc.items.push(user);
-                        return acc;
-                    }, { map: new Map(), items: [] })
-                    .items
-                    .sort((a, b) => (a.nombre || a.email || "").localeCompare(b.nombre || b.email || ""));
-
-                setAsesores(uniqueSorted);
-            } catch (err) {
-                console.error("Error al cargar asesores", err);
-                toast.error("No se pudieron cargar los asesores");
             }
-        };
+
+            const uniqueSorted = filtered
+                .reduce((acc, user) => {
+                    if (!user || !user._id) return acc;
+                    if (acc.map.has(user._id)) return acc;
+                    acc.map.set(user._id, true);
+                    acc.items.push(user);
+                    return acc;
+                }, { map: new Map(), items: [] })
+                .items
+                .sort((a, b) => (a.nombre || a.email || "").localeCompare(b.nombre || b.email || ""));
+
+            console.log('🔍 [DEBUG] Final asesores list:', uniqueSorted.length, uniqueSorted.map(u => u.nombre));
+            setAsesores(uniqueSorted);
+        } catch (err) {
+            console.error("Error al cargar asesores", err);
+            toast.error("No se pudieron cargar los asesores");
+        }
+    };
+
+    useEffect(() => {
         fetchAsesores();
     }, [targetNumeroEquipo, form.asesor]);
 
@@ -515,6 +529,10 @@ export default function AuditEditModal({ audit, onClose, onSave }) {
                 grupoId: grupoSeleccionado?._id || "",
                 asesor: "" // Resetear asesor cuando cambia el grupo
             }));
+
+            // ✅ CORRECCIÓN: Llamar fetchAsesores inmediatamente con el nuevo numeroEquipo
+            console.log('🔍 [DEBUG] Grupo changed, fetching asesores for:', nuevoNumeroEquipo);
+            fetchAsesores(nuevoNumeroEquipo);
         } else {
             setForm((p) => ({ ...p, [name]: value }));
         }

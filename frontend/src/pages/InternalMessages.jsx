@@ -14,7 +14,7 @@ export default function InternalMessages({ onClose }) {
     const [selectedMessage, setSelectedMessage] = useState(null);
     const [loading, setLoading] = useState(false);
     const [composing, setComposing] = useState(false);
-    
+
     // Estado del compositor
     const [composeForm, setComposeForm] = useState({
         to: [], // Array de IDs de destinatarios
@@ -25,14 +25,14 @@ export default function InternalMessages({ onClose }) {
         replyTo: null,
         isForward: false
     });
-    
+
     const [recipients, setRecipients] = useState([]);
     const [selectedRecipients, setSelectedRecipients] = useState([]); // Array de objetos {_id, nombre}
     const [selectedRoles, setSelectedRoles] = useState([]); // Array de roles seleccionados
     const [recipientSearch, setRecipientSearch] = useState("");
     const [recipientMode, setRecipientMode] = useState("users"); // "users" o "roles"
     const fileInputRef = useRef(null);
-    
+
     // Roles disponibles en el sistema
     const availableRoles = [
         { value: "admin", label: "Administradores", icon: "👑" },
@@ -59,10 +59,10 @@ export default function InternalMessages({ onClose }) {
         try {
             setLoading(true);
             let endpoint = "/internal-messages/inbox";
-            
+
             if (activeTab === "sent") endpoint = "/internal-messages/sent";
             if (activeTab === "starred") endpoint = "/internal-messages/starred";
-            
+
             const res = await apiClient.get(endpoint);
             setMessages(res.data.messages || []);
         } catch (err) {
@@ -88,7 +88,7 @@ export default function InternalMessages({ onClose }) {
         try {
             const res = await apiClient.get(`/internal-messages/${message._id}`);
             setSelectedMessage(res.data);
-            
+
             // Actualizar mensaje en la lista si fue marcado como leído
             if (!message.read && res.data.read) {
                 setMessages(prev =>
@@ -103,7 +103,7 @@ export default function InternalMessages({ onClose }) {
 
     const handleSendMessage = async (e) => {
         e.preventDefault();
-        
+
         // Validar que haya al menos un destinatario (usuarios o roles)
         const hasRecipients = composeForm.to.length > 0 || composeForm.roles.length > 0;
         if (!hasRecipients || !composeForm.content) {
@@ -113,7 +113,7 @@ export default function InternalMessages({ onClose }) {
 
         try {
             const formData = new FormData();
-            
+
             // Enviar por ROLES o por USUARIOS
             if (composeForm.roles.length > 0) {
                 composeForm.roles.forEach(role => {
@@ -124,18 +124,18 @@ export default function InternalMessages({ onClose }) {
                     formData.append("to[]", recipientId);
                 });
             }
-            
+
             formData.append("subject", composeForm.subject);
             formData.append("content", composeForm.content);
-            
+
             if (composeForm.replyTo) {
                 formData.append("replyTo", composeForm.replyTo);
             }
-            
+
             if (composeForm.isForward) {
                 formData.append("isForward", "true");
             }
-            
+
             // Agregar archivos adjuntos
             composeForm.attachments.forEach(file => {
                 formData.append("attachments", file);
@@ -147,7 +147,7 @@ export default function InternalMessages({ onClose }) {
 
             const actionType = composeForm.isForward ? "reenviado" : (composeForm.replyTo ? "respondido" : "enviado");
             toast.success(`✅ Mensaje ${actionType} a ${res.data.sentCount} destinatario(s)`);
-            
+
             resetComposer();
             setActiveTab("sent");
             loadMessages();
@@ -171,68 +171,68 @@ export default function InternalMessages({ onClose }) {
             attachments: prev.attachments.filter((_, i) => i !== index)
         }));
     };
-    
+
     const addRecipient = (recipient) => {
         // Evitar duplicados
         if (composeForm.to.includes(recipient._id)) {
             toast.warning("Este destinatario ya está agregado");
             return;
         }
-        
+
         setComposeForm(prev => ({
             ...prev,
             to: [...prev.to, recipient._id]
         }));
-        
+
         setSelectedRecipients(prev => [
             ...prev,
             { _id: recipient._id, nombre: recipient.nombre, email: recipient.email }
         ]);
-        
+
         setRecipientSearch("");
         setRecipients([]);
     };
-    
+
     const removeRecipient = (recipientId) => {
         setComposeForm(prev => ({
             ...prev,
             to: prev.to.filter(id => id !== recipientId)
         }));
-        
+
         setSelectedRecipients(prev => prev.filter(r => r._id !== recipientId));
     };
-    
+
     const addRole = (role) => {
         if (composeForm.roles.includes(role)) {
             toast.warning("Este rol ya está agregado");
             return;
         }
-        
+
         setComposeForm(prev => ({
             ...prev,
             roles: [...prev.roles, role]
         }));
-        
+
         const roleInfo = availableRoles.find(r => r.value === role);
         setSelectedRoles(prev => [...prev, roleInfo]);
     };
-    
+
     const removeRole = (role) => {
         setComposeForm(prev => ({
             ...prev,
             roles: prev.roles.filter(r => r !== role)
         }));
-        
+
         setSelectedRoles(prev => prev.filter(r => r.value !== role));
     };
-    
+
     const resetComposer = () => {
         setComposing(false);
-        setComposeForm({ 
-            to: [], 
+        setComposeForm({
+            to: [],
             roles: [],
-            subject: "", 
-            content: "", 
+            subject: "",
+            content: "",
             attachments: [],
             replyTo: null,
             isForward: false
@@ -242,7 +242,7 @@ export default function InternalMessages({ onClose }) {
         setRecipientSearch("");
         setRecipientMode("users");
     };
-    
+
     const handleReply = (message) => {
         setComposing(true);
         setComposeForm({
@@ -261,7 +261,7 @@ export default function InternalMessages({ onClose }) {
         }]);
         setRecipientMode("users");
     };
-    
+
     const handleForward = (message) => {
         setComposing(true);
         setComposeForm({
@@ -293,7 +293,7 @@ export default function InternalMessages({ onClose }) {
 
     const deleteMessage = async (messageId) => {
         if (!window.confirm("¿Eliminar este mensaje?")) return;
-        
+
         try {
             await apiClient.delete(`/internal-messages/${messageId}`);
             setMessages(prev => prev.filter(m => m._id !== messageId));
@@ -309,7 +309,7 @@ export default function InternalMessages({ onClose }) {
 
     const deleteAllMessages = async () => {
         if (!window.confirm("¿Estás seguro de que deseas eliminar TODOS los mensajes? Esta acción no se puede deshacer.")) return;
-        
+
         try {
             const res = await apiClient.delete("/internal-messages/");
             setMessages([]);
@@ -334,7 +334,7 @@ export default function InternalMessages({ onClose }) {
         const date = new Date(dateStr);
         const now = new Date();
         const diff = now - date;
-        
+
         if (diff < 60000) return "Hace un momento";
         if (diff < 3600000) return `Hace ${Math.floor(diff / 60000)} min`;
         if (diff < 86400000) return date.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
@@ -383,25 +383,22 @@ export default function InternalMessages({ onClose }) {
                     <div className="w-48 border-r p-4 flex flex-col gap-2">
                         <button
                             onClick={() => setActiveTab("inbox")}
-                            className={`px-4 py-2 rounded text-left ${
-                                activeTab === "inbox" ? "bg-blue-100 text-blue-700" : "hover:bg-gray-100"
-                            }`}
+                            className={`px-4 py-2 rounded text-left ${activeTab === "inbox" ? "bg-blue-100 text-blue-700" : "hover:bg-gray-100"
+                                }`}
                         >
                             📬 Recibidos
                         </button>
                         <button
                             onClick={() => setActiveTab("sent")}
-                            className={`px-4 py-2 rounded text-left ${
-                                activeTab === "sent" ? "bg-blue-100 text-blue-700" : "hover:bg-gray-100"
-                            }`}
+                            className={`px-4 py-2 rounded text-left ${activeTab === "sent" ? "bg-blue-100 text-blue-700" : "hover:bg-gray-100"
+                                }`}
                         >
                             📤 Enviados
                         </button>
                         <button
                             onClick={() => setActiveTab("starred")}
-                            className={`px-4 py-2 rounded text-left ${
-                                activeTab === "starred" ? "bg-blue-100 text-blue-700" : "hover:bg-gray-100"
-                            }`}
+                            className={`px-4 py-2 rounded text-left ${activeTab === "starred" ? "bg-blue-100 text-blue-700" : "hover:bg-gray-100"
+                                }`}
                         >
                             ⭐ Destacados
                         </button>
@@ -420,9 +417,8 @@ export default function InternalMessages({ onClose }) {
                                 <div
                                     key={msg._id}
                                     onClick={() => handleSelectMessage(msg)}
-                                    className={`p-4 border-b cursor-pointer hover:bg-gray-50 ${
-                                        !msg.read && activeTab === "inbox" ? "bg-blue-50" : ""
-                                    } ${selectedMessage?._id === msg._id ? "bg-blue-100" : ""}`}
+                                    className={`p-4 border-b cursor-pointer hover:bg-gray-50 ${!msg.read && activeTab === "inbox" ? "bg-blue-50" : ""
+                                        } ${selectedMessage?._id === msg._id ? "bg-blue-100" : ""}`}
                                 >
                                     <div className="flex items-start justify-between mb-1">
                                         <span className={`font-semibold text-sm ${!msg.read ? "font-bold" : ""}`}>
@@ -483,7 +479,7 @@ export default function InternalMessages({ onClose }) {
                                 <div className="prose max-w-none mb-4">
                                     <p className="whitespace-pre-wrap">{selectedMessage.content}</p>
                                 </div>
-                                
+
                                 {/* Botones de acción */}
                                 <div className="flex gap-2 mb-4 pb-4 border-b">
                                     <button
@@ -542,38 +538,36 @@ export default function InternalMessages({ onClose }) {
                             exit={{ scale: 0.9 }}
                         >
                             <h3 className="text-xl font-bold mb-4">✉️ Nuevo Mensaje</h3>
-                            
+
                             <form onSubmit={handleSendMessage}>
                                 {/* Destinatarios - Tabs */}
                                 <div className="mb-4">
                                     <label className="block text-sm font-semibold mb-2">Para:</label>
-                                    
+
                                     {/* Tabs */}
                                     <div className="flex gap-2 mb-3">
                                         <button
                                             type="button"
                                             onClick={() => setRecipientMode("users")}
-                                            className={`px-4 py-2 rounded ${
-                                                recipientMode === "users"
+                                            className={`px-4 py-2 rounded ${recipientMode === "users"
                                                     ? "bg-blue-600 text-white"
                                                     : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                                            }`}
+                                                }`}
                                         >
                                             👥 Usuarios
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => setRecipientMode("roles")}
-                                            className={`px-4 py-2 rounded ${
-                                                recipientMode === "roles"
+                                            className={`px-4 py-2 rounded ${recipientMode === "roles"
                                                     ? "bg-blue-600 text-white"
                                                     : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                                            }`}
+                                                }`}
                                         >
                                             🏷️ Roles/Grupos
                                         </button>
                                     </div>
-                                    
+
                                     {/* Modo: Usuarios */}
                                     {recipientMode === "users" && (
                                         <div>
@@ -597,7 +591,7 @@ export default function InternalMessages({ onClose }) {
                                                     ))}
                                                 </div>
                                             )}
-                                            
+
                                             <input
                                                 type="text"
                                                 value={recipientSearch}
@@ -623,7 +617,7 @@ export default function InternalMessages({ onClose }) {
                                             )}
                                         </div>
                                     )}
-                                    
+
                                     {/* Modo: Roles */}
                                     {recipientMode === "roles" && (
                                         <div>
@@ -647,11 +641,11 @@ export default function InternalMessages({ onClose }) {
                                                     ))}
                                                 </div>
                                             )}
-                                            
+
                                             <p className="text-sm text-gray-600 mb-2">
                                                 Selecciona uno o más roles. El mensaje se enviará a todos los usuarios activos con esos roles.
                                             </p>
-                                            
+
                                             <div className="grid grid-cols-2 gap-2">
                                                 {availableRoles.map((role) => (
                                                     <button
@@ -659,11 +653,10 @@ export default function InternalMessages({ onClose }) {
                                                         type="button"
                                                         onClick={() => addRole(role.value)}
                                                         disabled={composeForm.roles.includes(role.value)}
-                                                        className={`p-3 rounded border-2 text-left ${
-                                                            composeForm.roles.includes(role.value)
+                                                        className={`p-3 rounded border-2 text-left ${composeForm.roles.includes(role.value)
                                                                 ? "border-purple-500 bg-purple-50 text-purple-700"
                                                                 : "border-gray-200 hover:border-purple-300 hover:bg-gray-50"
-                                                        }`}
+                                                            }`}
                                                     >
                                                         <div className="font-semibold">
                                                             {role.icon} {role.label}
@@ -743,8 +736,9 @@ export default function InternalMessages({ onClose }) {
                                         type="button"
                                         onClick={() => {
                                             setComposing(false);
-                                            setComposeForm({ to: [], subject: "", content: "", attachments: [] });
+                                            setComposeForm({ to: [], roles: [], subject: "", content: "", attachments: [], replyTo: null, isForward: false });
                                             setSelectedRecipients([]);
+                                            setSelectedRoles([]);
                                             setRecipientSearch("");
                                         }}
                                         className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"

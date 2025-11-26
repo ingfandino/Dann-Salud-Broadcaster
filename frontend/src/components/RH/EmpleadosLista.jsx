@@ -7,22 +7,22 @@ import { toast } from 'react-toastify';
 import { useAuth } from '../../context/AuthContext';
 import EmpleadoEditModal from './EmpleadoEditModal';
 
-export default function EmpleadosLista({ onEmployeeChange }) {
+export default function EmpleadosLista({ onEmployeeChange, showOnlyActive = false, showOnlyInactive = false }) {
     const { user } = useAuth();
     const isSupervisor = user?.role?.toLowerCase() === 'supervisor';
     const isGerenciaOrRRHH = user?.role?.toLowerCase() === 'gerencia' || user?.role?.toLowerCase() === 'rrhh';
-    
+
     // Función para verificar si puede editar/borrar un empleado específico
     const canEditDeleteEmployee = (empleado) => {
         // Gerencia y RR.HH. pueden editar/borrar cualquier empleado
         if (isGerenciaOrRRHH) return true;
-        
+
         // Supervisor solo puede editar/borrar empleados de su mismo equipo
         if (isSupervisor) {
             const employeeEquipo = empleado.userId?.numeroEquipo || empleado.numeroEquipo;
             return user.numeroEquipo && user.numeroEquipo === employeeEquipo;
         }
-        
+
         return false;
     };
     const [empleados, setEmpleados] = useState([]);
@@ -78,15 +78,24 @@ export default function EmpleadosLista({ onEmployeeChange }) {
 
     // Filtrar empleados
     const equipos = [...new Set(empleados.map(e => e.numeroEquipo).filter(Boolean))].sort();
-    
+
     const filteredEmpleados = empleados.filter(empleado => {
         const matchSearch = empleado.nombreCompleto?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           empleado.userId?.nombre?.toLowerCase().includes(searchTerm.toLowerCase());
+            empleado.userId?.nombre?.toLowerCase().includes(searchTerm.toLowerCase());
         const matchEquipo = !filterEquipo || empleado.numeroEquipo === filterEquipo;
-        const matchActivo = filterActivo === 'todos' || 
-                           (filterActivo === 'activos' && empleado.activo) ||
-                           (filterActivo === 'inactivos' && !empleado.activo);
-        
+
+        // Si se especifica showOnlyActive o showOnlyInactive, usar eso en lugar del filtro
+        let matchActivo;
+        if (showOnlyActive) {
+            matchActivo = empleado.activo === true;
+        } else if (showOnlyInactive) {
+            matchActivo = empleado.activo === false;
+        } else {
+            matchActivo = filterActivo === 'todos' ||
+                (filterActivo === 'activos' && empleado.activo) ||
+                (filterActivo === 'inactivos' && !empleado.activo);
+        }
+
         return matchSearch && matchEquipo && matchActivo;
     });
 
@@ -151,11 +160,21 @@ export default function EmpleadosLista({ onEmployeeChange }) {
                             <div>
                                 <p className="text-sm font-semibold text-blue-800">Permisos de Supervisor</p>
                                 <p className="text-sm text-blue-700 mt-1">
-                                    Puedes ver todo el personal, crear nuevos empleados desde "Nuevo Empleado", 
+                                    Puedes ver todo el personal, crear nuevos empleados desde "Nuevo Empleado",
                                     y editar/eliminar solo los empleados de tu equipo ({user.numeroEquipo ? `Equipo ${user.numeroEquipo}` : 'sin equipo asignado'}).
                                 </p>
                             </div>
                         </div>
+                    </div>
+                )}
+
+                {/* Mensaje informativo sobre el tipo de personal mostrado */}
+                {(showOnlyActive || showOnlyInactive) && (
+                    <div className="mb-4 p-3 bg-gray-50 border-l-4 border-gray-400 rounded-r-lg">
+                        <p className="text-sm text-gray-700">
+                            {showOnlyActive && '✅ Mostrando solo personal activo'}
+                            {showOnlyInactive && '❌ Mostrando solo personal inactivo'}
+                        </p>
                     </div>
                 )}
 
@@ -171,7 +190,7 @@ export default function EmpleadosLista({ onEmployeeChange }) {
                             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
                     </div>
-                    
+
                     <select
                         value={filterEquipo}
                         onChange={(e) => setFilterEquipo(e.target.value)}
@@ -183,15 +202,18 @@ export default function EmpleadosLista({ onEmployeeChange }) {
                         ))}
                     </select>
 
-                    <select
-                        value={filterActivo}
-                        onChange={(e) => setFilterActivo(e.target.value)}
-                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    >
-                        <option value="todos">Todos</option>
-                        <option value="activos">Activos</option>
-                        <option value="inactivos">Inactivos</option>
-                    </select>
+                    {/* Solo mostrar filtro activo/inactivo si no se está usando showOnlyActive o showOnlyInactive */}
+                    {!showOnlyActive && !showOnlyInactive && (
+                        <select
+                            value={filterActivo}
+                            onChange={(e) => setFilterActivo(e.target.value)}
+                            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="todos">Todos</option>
+                            <option value="activos">Activos</option>
+                            <option value="inactivos">Inactivos</option>
+                        </select>
+                    )}
                 </div>
 
                 {/* Lista de empleados agrupados por equipo */}
@@ -206,7 +228,7 @@ export default function EmpleadosLista({ onEmployeeChange }) {
                                 <Filter size={20} />
                                 Equipo {equipo}
                             </h3>
-                            
+
                             <div className="overflow-x-auto">
                                 <table className="w-full border-collapse bg-white rounded-lg overflow-hidden shadow-sm">
                                     <thead className="bg-gray-50">
@@ -231,13 +253,13 @@ export default function EmpleadosLista({ onEmployeeChange }) {
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3 text-sm text-gray-600">
-                                                    {empleado.fechaEntrevista 
+                                                    {empleado.fechaEntrevista
                                                         ? new Date(empleado.fechaEntrevista).toLocaleDateString('es-AR')
                                                         : '-'
                                                     }
                                                 </td>
                                                 <td className="px-4 py-3 text-sm text-gray-600">
-                                                    {empleado.fechaIngreso 
+                                                    {empleado.fechaIngreso
                                                         ? new Date(empleado.fechaIngreso).toLocaleDateString('es-AR')
                                                         : '-'
                                                     }
@@ -273,11 +295,10 @@ export default function EmpleadosLista({ onEmployeeChange }) {
                                                         <button
                                                             onClick={() => handleEdit(empleado)}
                                                             disabled={!canEditDeleteEmployee(empleado)}
-                                                            className={`p-1 ${
-                                                                canEditDeleteEmployee(empleado)
-                                                                    ? 'text-blue-600 hover:text-blue-800 cursor-pointer' 
+                                                            className={`p-1 ${canEditDeleteEmployee(empleado)
+                                                                    ? 'text-blue-600 hover:text-blue-800 cursor-pointer'
                                                                     : 'text-gray-400 cursor-not-allowed opacity-50'
-                                                            }`}
+                                                                }`}
                                                             title={canEditDeleteEmployee(empleado) ? "Editar" : "Sin permisos (solo tu equipo)"}
                                                         >
                                                             <Edit size={18} />
@@ -286,11 +307,10 @@ export default function EmpleadosLista({ onEmployeeChange }) {
                                                             <button
                                                                 onClick={() => handleDelete(empleado._id)}
                                                                 disabled={!canEditDeleteEmployee(empleado)}
-                                                                className={`p-1 ${
-                                                                    canEditDeleteEmployee(empleado)
-                                                                        ? 'text-red-600 hover:text-red-800 cursor-pointer' 
+                                                                className={`p-1 ${canEditDeleteEmployee(empleado)
+                                                                        ? 'text-red-600 hover:text-red-800 cursor-pointer'
                                                                         : 'text-gray-400 cursor-not-allowed opacity-50'
-                                                                }`}
+                                                                    }`}
                                                                 title={canEditDeleteEmployee(empleado) ? "Desactivar" : "Sin permisos (solo tu equipo)"}
                                                             >
                                                                 <Trash2 size={18} />

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Users, UserPlus, BarChart3, UserCheck, UserCog, TrendingUp, Briefcase } from 'lucide-react';
+import { Users, UserPlus, BarChart3, UserCheck, UserCog, TrendingUp, Briefcase, UserX } from 'lucide-react';
 import { toast } from 'react-toastify';
 import apiClient from '../services/api';
 import EmpleadosLista from '../components/RH/EmpleadosLista';
@@ -18,6 +18,7 @@ export default function RecursosHumanos() {
 
     const tabs = [
         { id: 'lista', label: 'Personal', icon: Users },
+        { id: 'inactivos', label: 'Personal Inactivo', icon: UserX },
         { id: 'formulario', label: 'Nuevo Empleado', icon: UserPlus },
         { id: 'estadisticas', label: 'Estadísticas', icon: BarChart3 }
     ];
@@ -31,11 +32,12 @@ export default function RecursosHumanos() {
             setLoading(true);
             const res = await apiClient.get('/employees');
             const employees = res.data || [];
-            
+
             const totalEmpleados = employees.length;
             const activos = employees.filter(e => e.activo).length;
+            const inactivos = employees.filter(e => !e.activo).length;
             const conContrato = employees.filter(e => e.firmoContrato).length;
-            
+
             // Contar por cargo
             const cargos = {};
             employees.forEach(e => {
@@ -47,6 +49,7 @@ export default function RecursosHumanos() {
             setStats({
                 totalEmpleados,
                 activos,
+                inactivos,
                 conContrato,
                 cargos
             });
@@ -62,7 +65,7 @@ export default function RecursosHumanos() {
     };
 
     return (
-        <motion.div 
+        <motion.div
             className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-100 p-4 md:p-8"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -101,8 +104,8 @@ export default function RecursosHumanos() {
 
                 {/* Stats Cards */}
                 {stats && (
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                        <motion.div 
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+                        <motion.div
                             className="bg-white p-4 rounded-lg shadow-lg border-l-4 border-blue-500"
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -117,7 +120,7 @@ export default function RecursosHumanos() {
                             </div>
                         </motion.div>
 
-                        <motion.div 
+                        <motion.div
                             className="bg-white p-4 rounded-lg shadow-lg border-l-4 border-green-500"
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -132,7 +135,22 @@ export default function RecursosHumanos() {
                             </div>
                         </motion.div>
 
-                        <motion.div 
+                        <motion.div
+                            className="bg-white p-4 rounded-lg shadow-lg border-l-4 border-red-500"
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.25 }}
+                        >
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-gray-600 text-sm font-medium">Inactivos</p>
+                                    <p className="text-3xl font-bold text-red-600">{stats.inactivos}</p>
+                                </div>
+                                <UserX className="w-10 h-10 text-red-500" />
+                            </div>
+                        </motion.div>
+
+                        <motion.div
                             className="bg-white p-4 rounded-lg shadow-lg border-l-4 border-purple-500"
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -147,7 +165,7 @@ export default function RecursosHumanos() {
                             </div>
                         </motion.div>
 
-                        <motion.div 
+                        <motion.div
                             className="bg-white p-4 rounded-lg shadow-lg border-l-4 border-orange-500"
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -189,13 +207,14 @@ export default function RecursosHumanos() {
 
                 {/* Tab Content */}
                 <div className="bg-white rounded-lg shadow-lg p-4 md:p-6">
-                    {activeTab === 'lista' && <EmpleadosLista onEmployeeChange={handleEmployeeChange} />}
+                    {activeTab === 'lista' && <EmpleadosLista onEmployeeChange={handleEmployeeChange} showOnlyActive={true} />}
+                    {activeTab === 'inactivos' && <EmpleadosLista onEmployeeChange={handleEmployeeChange} showOnlyInactive={true} />}
                     {activeTab === 'formulario' && (
-                        <EmpleadosFormulario 
+                        <EmpleadosFormulario
                             onSuccess={() => {
                                 setActiveTab('lista');
                                 handleEmployeeChange();
-                            }} 
+                            }}
                         />
                     )}
                     {activeTab === 'estadisticas' && <EmpleadosEstadisticas />}

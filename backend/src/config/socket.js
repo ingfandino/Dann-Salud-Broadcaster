@@ -53,7 +53,7 @@ function initSocket(server, app = null, allowedOrigins = []) {
     }
 
     if (app) app.set("io", ioInstance);
-    
+
     // Exponer io globalmente para servicios de notificación
     global.io = ioInstance;
 
@@ -92,7 +92,7 @@ function initSocket(server, app = null, allowedOrigins = []) {
             addUser(userId); // Agrega usuario conectado
             try {
                 socket.join(`user_${userId}`); // Room individual por usuario
-            } catch {}
+            } catch { }
         }
 
         logger.info(` Socket conectado: ${socket.id} (user: ${userName}, rol: ${user.role || "?"})`);
@@ -240,6 +240,18 @@ function emitFollowUpUpdate(payload) {
     safeEmit("followups", "followup:update", payload);
 }
 
+// ✅ NUEVO: Notificar fallo definitivo de mensaje después de reintentos
+function emitMessageFailureAlert(userId, contactInfo, jobId) {
+    if (!userId) return;
+    safeEmit(`user_${userId}`, "message:failure_alert", {
+        contact: contactInfo,
+        jobId: jobId,
+        message: `Mensaje a ${contactInfo.nombre || contactInfo.telefono} falló después de 20 intentos`,
+        timestamp: new Date()
+    });
+    logger.warn(`⚠️ Alerta de fallo enviada a usuario ${userId} para contacto ${contactInfo.telefono}`);
+}
+
 module.exports = {
     initSocket,
     getIO,
@@ -250,4 +262,5 @@ module.exports = {
     emitNewAudit,
     emitAuditUpdate,
     emitFollowUpUpdate,
+    emitMessageFailureAlert,  // ✅ Exportar nueva función
 };

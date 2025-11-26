@@ -49,7 +49,8 @@ const ARGENTINE_OBRAS_SOCIALES = [
     "OSPAGA (101000)",
     "OSPF (107404)",
     "OSPIP (116006)",
-    "OSPIC"
+    "OSPIC",
+    "OSG (109202)"
 ];
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"];
 const STATUS_OPTIONS = [

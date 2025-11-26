@@ -18,6 +18,7 @@ import apiClient from "../services/api";
 import logger from "../utils/logger";
 import { fetchAutoresponses, createAutoresponse, updateAutoresponse, deleteAutoresponse } from "../services/autoresponseService";
 import socket, { subscribeToJobs } from "../services/socket";
+import DOMPurify from "dompurify";
 
 export default function BulkMessages() {
     const [jobs, setJobs] = useState([]);
@@ -59,7 +60,7 @@ export default function BulkMessages() {
 
     // estado de comprobación del vínculo del teléfono
     const [checkingLink, setCheckingLink] = useState(true);
-    
+
     // ✅ Filtro de fecha para campañas
     const [campaignDate, setCampaignDate] = useState(() => {
         const today = new Date();
@@ -151,7 +152,7 @@ export default function BulkMessages() {
                     if (updatedJobs.deleted) {
                         return prevJobs.filter(j => j._id !== updatedJobs._id);
                     }
-                    
+
                     // Actualizar el job existente
                     const index = prevJobs.findIndex(j => j._id === updatedJobs._id);
                     if (index !== -1) {
@@ -176,11 +177,11 @@ export default function BulkMessages() {
             try {
                 const list = await fetchAutoresponses();
                 if (mounted) setAutoResponses(list);
-            } catch {}
+            } catch { }
             try {
                 const res = await apiClient.get("/autoresponses/settings/env");
                 if (mounted && res?.data?.windowMinutes) setWindowMinutes(res.data.windowMinutes);
-            } catch {}
+            } catch { }
         };
         if (showAutoResp) load();
         return () => { mounted = false; };
@@ -324,7 +325,7 @@ export default function BulkMessages() {
                 try {
                     const hdr = await apiClient.get("/contacts/headers");
                     setImportHeaders(hdr.data?.headers || []);
-                } catch {}
+                } catch { }
             }
         } catch (err) {
             toast.error(err?.response?.data?.error || "Error importando contactos");
@@ -450,7 +451,7 @@ export default function BulkMessages() {
             // ✅ MEJORA: Verificar jerarquía antes de actualizar plantilla existente
             if (form.templateId) {
                 const currentTemplate = templates.find(t => t._id === form.templateId);
-                
+
                 // Jerarquía: admin/gerencia > supervisor > revendedor > asesor/auditor
                 const roleHierarchy = {
                     admin: 4,
@@ -460,22 +461,22 @@ export default function BulkMessages() {
                     asesor: 1,
                     auditor: 1
                 };
-                
+
                 const userRole = String(user?.role || "").toLowerCase();
                 const ownerRole = String(currentTemplate?.createdBy?.role || "").toLowerCase();
                 const userLevel = roleHierarchy[userRole] || 0;
                 const ownerLevel = roleHierarchy[ownerRole] || 0;
-                
+
                 // Si el usuario tiene menor jerarquía que el creador, crear nueva plantilla
                 if (userLevel < ownerLevel) {
                     logger.info(`Usuario ${user.nombre} (${userRole}) creando copia de plantilla de ${currentTemplate?.createdBy?.nombre} (${ownerRole})`);
-                    
+
                     const nueva = await createTemplate({
                         nombre: form.name || "Plantilla sin nombre",
                         contenido: form.message,
                     });
                     toast.success(`✅ Plantilla creada a tu nombre (no puedes editar plantillas de ${ownerRole})`);
-                    
+
                     await loadTemplates();
                     setForm((prev) => ({
                         ...prev,
@@ -545,29 +546,24 @@ export default function BulkMessages() {
     };
 
     const emojis = [
-        "😀","😃","😄","😉","😊","😍","🤩","😎","😁","😂",
-        "🙌","👍","💪","🎉","🎯","✨","📞","📲","📅","🕒",
-        "💬","✅","❌","⚠️","📍","📌","🔔","🚀","💡","🧾"
+        "😀", "😃", "😄", "😉", "😊", "😍", "🤩", "😎", "😁", "😂",
+        "🙌", "👍", "💪", "🎉", "🎯", "✨", "📞", "📲", "📅", "🕒",
+        "💬", "✅", "❌", "⚠️", "📍", "📌", "🔔", "🚀", "💡", "🧾"
     ];
-
-    const escapeHtml = (str) =>
-        String(str)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#39;");
 
     // Render básico de formato: *bold* y _italic_
     const formatPreview = (text) => {
-        let html = escapeHtml(text || "");
+        // Primero sanitizar el texto base para evitar XSS
+        let safeText = DOMPurify.sanitize(text || "");
+
         // negrita: *texto*
-        html = html.replace(/\*(.+?)\*/g, "<strong>$1</strong>");
+        safeText = safeText.replace(/\*(.+?)\*/g, "<strong>$1</strong>");
         // cursiva: _texto_
-        html = html.replace(/_(.+?)_/g, "<em>$1</em>");
+        safeText = safeText.replace(/_(.+?)_/g, "<em>$1</em>");
         // saltos de línea
-        html = html.replace(/\n/g, "<br/>");
-        return html;
+        safeText = safeText.replace(/\n/g, "<br/>");
+
+        return safeText;
     };
 
     // campos disponibles desde headers (excluir campos de telefono)
@@ -600,7 +596,7 @@ export default function BulkMessages() {
                 {/* Botones de navegación */}
                 <div className="flex justify-end mb-4 gap-2">
                     <label className="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700 cursor-pointer">
-                         Subir contactos (CSV/XLS)
+                        Subir contactos (CSV/XLS)
                         <input
                             type="file"
                             accept=".csv,.xls,.xlsx"
@@ -628,7 +624,7 @@ export default function BulkMessages() {
                         onClick={() => navigate("/")}
                         className="px-3 py-2 rounded text-white bg-red-500 hover:bg-red-600"
                     >
-                         ← Volver al Menú
+                        ← Volver al Menú
                     </button>
                 </div>
 
@@ -909,12 +905,12 @@ export default function BulkMessages() {
                                     const selectedDate = new Date(campaignDate + 'T00:00:00');
                                     const nextDay = new Date(selectedDate);
                                     nextDay.setDate(nextDay.getDate() + 1);
-                                    
+
                                     const filteredJobs = jobs.filter(job => {
                                         const createdAt = new Date(job.createdAt);
                                         return createdAt >= selectedDate && createdAt < nextDay;
                                     });
-                                    
+
                                     if (filteredJobs.length === 0) {
                                         return (
                                             <tr>
@@ -924,113 +920,113 @@ export default function BulkMessages() {
                                             </tr>
                                         );
                                     }
-                                    
+
                                     return filteredJobs.map((job) => {
-                                    const progress = parseFloat(job.progress || 0);
-                                    const stats = job.stats || { total: 0, sent: 0, failed: 0, pending: 0 };
-                                    
-                                    // Colores según estado
-                                    const statusColors = {
-                                        pendiente: "bg-blue-100 text-blue-800",
-                                        "en_progreso": "bg-green-100 text-green-800",
-                                        ejecutando: "bg-green-100 text-green-800",
-                                        pausado: "bg-yellow-100 text-yellow-800",
-                                        descanso: "bg-orange-100 text-orange-800",
-                                        "en_descanso": "bg-orange-100 text-orange-800",
-                                        completado: "bg-emerald-100 text-emerald-800",
-                                        cancelado: "bg-red-100 text-red-800",
-                                        fallido: "bg-red-100 text-red-800"
-                                    };
-                                    
-                                    const statusColor = statusColors[job.status] || "bg-gray-100 text-gray-800";
-                                    
-                                    return (
-                                        <tr key={job._id} className="hover:bg-gray-50">
-                                            <td className="p-2 border">
-                                                <button
-                                                    onClick={() => navigate(`/jobs/${job._id}`)}
-                                                    className="text-blue-600 hover:text-blue-800 underline font-medium"
-                                                >
-                                                    {job.name}
-                                                </button>
-                                            </td>
-                                            <td className="p-2 border">
-                                                <div className="text-sm">
-                                                    <div className="font-medium text-gray-800">
-                                                        {job.createdBy?.nombre || "N/A"}
-                                                    </div>
-                                                    {job.createdBy?.numeroEquipo && (
-                                                        <div className="text-xs text-gray-500">
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold">
-                                                                👥 {job.createdBy.numeroEquipo}
-                                                            </span>
+                                        const progress = parseFloat(job.progress || 0);
+                                        const stats = job.stats || { total: 0, sent: 0, failed: 0, pending: 0 };
+
+                                        // Colores según estado
+                                        const statusColors = {
+                                            pendiente: "bg-blue-100 text-blue-800",
+                                            "en_progreso": "bg-green-100 text-green-800",
+                                            ejecutando: "bg-green-100 text-green-800",
+                                            pausado: "bg-yellow-100 text-yellow-800",
+                                            descanso: "bg-orange-100 text-orange-800",
+                                            "en_descanso": "bg-orange-100 text-orange-800",
+                                            completado: "bg-emerald-100 text-emerald-800",
+                                            cancelado: "bg-red-100 text-red-800",
+                                            fallido: "bg-red-100 text-red-800"
+                                        };
+
+                                        const statusColor = statusColors[job.status] || "bg-gray-100 text-gray-800";
+
+                                        return (
+                                            <tr key={job._id} className="hover:bg-gray-50">
+                                                <td className="p-2 border">
+                                                    <button
+                                                        onClick={() => navigate(`/jobs/${job._id}`)}
+                                                        className="text-blue-600 hover:text-blue-800 underline font-medium"
+                                                    >
+                                                        {job.name}
+                                                    </button>
+                                                </td>
+                                                <td className="p-2 border">
+                                                    <div className="text-sm">
+                                                        <div className="font-medium text-gray-800">
+                                                            {job.createdBy?.nombre || "N/A"}
                                                         </div>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="p-2 border">
-                                                <span className={`px-2 py-1 rounded text-xs font-semibold ${statusColor}`}>
-                                                    {job.status}
-                                                </span>
-                                            </td>
-                                            <td className="p-2 border">
-                                                <div className="space-y-1">
-                                                    {/* Barra de progreso visual */}
-                                                    <div className="w-full bg-gray-200 rounded-full h-2.5">
-                                                        <div
-                                                            className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-                                                            style={{ width: `${Math.min(progress, 100)}%` }}
-                                                        ></div>
+                                                        {job.createdBy?.numeroEquipo && (
+                                                            <div className="text-xs text-gray-500">
+                                                                <span className="inline-flex items-center px-2 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold">
+                                                                    👥 {job.createdBy.numeroEquipo}
+                                                                </span>
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                    <span className="text-xs text-gray-600 font-medium">
-                                                        {progress.toFixed(1)}%
+                                                </td>
+                                                <td className="p-2 border">
+                                                    <span className={`px-2 py-1 rounded text-xs font-semibold ${statusColor}`}>
+                                                        {job.status}
                                                     </span>
-                                                </div>
-                                            </td>
-                                            <td className="p-2 border">
-                                                <div className="flex gap-2 text-xs">
-                                                    <span className="px-2 py-1 bg-green-100 text-green-800 rounded" title="Enviados">
-                                                        ✅ {stats.sent}
-                                                    </span>
-                                                    <span className="px-2 py-1 bg-red-100 text-red-800 rounded" title="Fallidos">
-                                                        ❌ {stats.failed}
-                                                    </span>
-                                                    <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded" title="Pendientes">
-                                                        ⏳ {stats.pending}
-                                                    </span>
-                                                </div>
-                                            </td>
-                                            <td className="p-2 border text-sm text-gray-700">
-                                                {new Date(job.createdAt).toLocaleTimeString('es-AR', {
-                                                    hour: '2-digit',
-                                                    minute: '2-digit'
-                                                })}
-                                            </td>
-                                            <td className="p-2 border space-x-2">
-                                                <button
-                                                    onClick={() => handleAction(job._id, "pause")}
-                                                    disabled={job.status === "pausado" || job.status === "completado" || job.status === "cancelado"}
-                                                    className="px-2 py-1 bg-yellow-500 text-white rounded text-sm hover:bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    ⏸️
-                                                </button>
-                                                <button
-                                                    onClick={() => handleAction(job._id, "resume")}
-                                                    disabled={job.status !== "pausado"}
-                                                    className="px-2 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    ▶️
-                                                </button>
-                                                <button
-                                                    onClick={() => handleAction(job._id, "cancel")}
-                                                    disabled={job.status === "completado" || job.status === "cancelado"}
-                                                    className="px-2 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    🗑️
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    );
+                                                </td>
+                                                <td className="p-2 border">
+                                                    <div className="space-y-1">
+                                                        {/* Barra de progreso visual */}
+                                                        <div className="w-full bg-gray-200 rounded-full h-2.5">
+                                                            <div
+                                                                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                                                                style={{ width: `${Math.min(progress, 100)}%` }}
+                                                            ></div>
+                                                        </div>
+                                                        <span className="text-xs text-gray-600 font-medium">
+                                                            {progress.toFixed(1)}%
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="p-2 border">
+                                                    <div className="flex gap-2 text-xs">
+                                                        <span className="px-2 py-1 bg-green-100 text-green-800 rounded" title="Enviados">
+                                                            ✅ {stats.sent}
+                                                        </span>
+                                                        <span className="px-2 py-1 bg-red-100 text-red-800 rounded" title="Fallidos">
+                                                            ❌ {stats.failed}
+                                                        </span>
+                                                        <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded" title="Pendientes">
+                                                            ⏳ {stats.pending}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="p-2 border text-sm text-gray-700">
+                                                    {new Date(job.createdAt).toLocaleTimeString('es-AR', {
+                                                        hour: '2-digit',
+                                                        minute: '2-digit'
+                                                    })}
+                                                </td>
+                                                <td className="p-2 border space-x-2">
+                                                    <button
+                                                        onClick={() => handleAction(job._id, "pause")}
+                                                        disabled={job.status === "pausado" || job.status === "completado" || job.status === "cancelado"}
+                                                        className="px-2 py-1 bg-yellow-500 text-white rounded text-sm hover:bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        ⏸️
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleAction(job._id, "resume")}
+                                                        disabled={job.status !== "pausado"}
+                                                        className="px-2 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        ▶️
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleAction(job._id, "cancel")}
+                                                        disabled={job.status === "completado" || job.status === "cancelado"}
+                                                        className="px-2 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
                                     });
                                 })()}
                             </tbody>

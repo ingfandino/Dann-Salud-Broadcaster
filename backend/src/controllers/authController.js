@@ -18,18 +18,18 @@ exports.register = async (req, res) => {
     // Validar duplicados
     let userExists = await User.findOne({ email });
     if (userExists) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         ok: false,
         code: "EMAIL_IN_USE",
-        message: "El email ya está registrado" 
+        message: "El email ya está registrado"
       });
     }
     userExists = await User.findOne({ username });
     if (userExists) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         ok: false,
         code: "USERNAME_IN_USE",
-        message: "El nombre de usuario ya está en uso" 
+        message: "El nombre de usuario ya está en uso"
       });
     }
 
@@ -86,11 +86,17 @@ exports.forgotPassword = async (req, res) => {
       try {
         const r = await sendPasswordResetEmail(user.email, resetUrl);
         emailSent = !!r?.sent;
-      } catch {}
+      } catch { }
     }
 
-    // En desarrollo (o si no hay SMTP) devolvemos el token para facilitar pruebas
-    return res.json({ ok: true, resetToken: hasSmtpConfig() ? undefined : rawToken, expiresAt: expires.toISOString(), emailSent });
+    // En desarrollo devolvemos el token para facilitar pruebas. En producción NUNCA.
+    const isDev = process.env.NODE_ENV === 'development';
+    return res.json({
+      ok: true,
+      resetToken: isDev ? rawToken : undefined,
+      expiresAt: isDev ? expires.toISOString() : undefined,
+      emailSent
+    });
   } catch (err) {
     handleControllerError(err, res, "solicitud de recuperación");
   }
@@ -134,10 +140,10 @@ exports.login = async (req, res) => {
 
     const user = await User.findOne({ email }).select("+password");
     if (!user) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         ok: false,
         code: "INVALID_CREDENTIALS",
-        message: "Credenciales inválidas" 
+        message: "Credenciales inválidas"
       });
     }
 
@@ -151,10 +157,10 @@ exports.login = async (req, res) => {
 
     const ok = await user.comparePassword(password);
     if (!ok) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         ok: false,
         code: "INVALID_CREDENTIALS",
-        message: "Credenciales inválidas" 
+        message: "Credenciales inválidas"
       });
     }
 
@@ -186,10 +192,10 @@ exports.me = async (req, res) => {
       "nombre email role"
     );
     if (!user) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         ok: false,
         code: "USER_NOT_FOUND",
-        message: "Usuario no encontrado" 
+        message: "Usuario no encontrado"
       });
     }
     return res.json({

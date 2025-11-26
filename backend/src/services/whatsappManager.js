@@ -63,13 +63,13 @@ async function initClientForUser(userId) {
   const userIdStr = String(userId);
   const existing = clients.get(userIdStr);
   const room = `user_${userId}`;
-  
+
   // ✅ CORRECCIÓN: Prevenir inicializaciones concurrentes
   if (existing?.initializing) {
     logger.warn(`[WA][${userId}] Ya hay una inicialización en progreso, esperando...`);
     return existing.client;
   }
-  
+
   // ✅ CORRECCIÓN: Limpiar cliente existente adecuadamente
   if (existing?.client) {
     logger.info(`[WA][${userId}] Limpiando cliente existente antes de reinicializar...`);
@@ -79,7 +79,7 @@ async function initClientForUser(userId) {
         existing.eventListeners.forEach(({ event, handler }) => {
           try {
             existing.client.removeListener(event, handler);
-          } catch (e) {}
+          } catch (e) { }
         });
       }
       await existing.client.destroy();
@@ -110,7 +110,7 @@ async function initClientForUser(userId) {
     'Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
   ];
-  
+
   // Seleccionar User-Agent basado en hash del userId para consistencia
   const userIdHash = String(userId).split('').reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0);
   const userAgent = userAgentVariations[Math.abs(userIdHash) % userAgentVariations.length];
@@ -137,12 +137,12 @@ async function initClientForUser(userId) {
   // ✅ CORRECCIÓN: Soporte para proxy por usuario (variable de entorno)
   // Formato: PROXY_USER_<userId>=http://proxy.com:8080 (sin autenticación para proxies locales)
   const userProxy = process.env[`PROXY_USER_${userId}`] || process.env.HTTPS_PROXY;
-  
+
   if (userProxy) {
     try {
       const proxyUrl = new URL(userProxy);
       const proxyHost = `${proxyUrl.hostname}:${proxyUrl.port}`;
-      
+
       puppeteerArgs.push(`--proxy-server=${proxyHost}`);
       logger.info(`[WA][${userId}] Usando proxy: ${proxyHost}`);
     } catch (error) {
@@ -183,28 +183,28 @@ async function initClientForUser(userId) {
       type: 'none'
     }
   };
-  
+
   const client = new Client(clientConfig);
 
   // Manejo de eventos del cliente
   const onQr = (qr) => {
     state.lastActivity = Date.now();
-    
+
     // ✅ CORRECCIÓN CRÍTICA: Ignorar QRs después de estar conectado
     if (state.ready) {
       logger.warn(`[WA][${userId}] QR recibido pero cliente ya está Ready, ignorando (comportamiento normal de WhatsApp después de autenticar)`);
       return;
     }
-    
+
     logger.info(`[WA][${userId}] QR recibido`);
     state.currentQR = qr;
-    
+
     // ✅ CORRECCIÓN: Cancelar timeout anterior si existe antes de crear uno nuevo
     if (state.qrTimeout) {
       clearTimeout(state.qrTimeout);
       state.qrTimeout = null;
     }
-    
+
     try {
       getIO().to(room).emit('qr', qr);
     } catch (error) {
@@ -218,7 +218,7 @@ async function initClientForUser(userId) {
         logger.info(`[WA][${userId}] QR expiró pero cliente ya está conectado, ignorando`);
         return;
       }
-      
+
       logger.warn(`[WA][${userId}] QR expirado, regenerando...`);
       try {
         getIO().to(room).emit('qr_expired');
@@ -237,27 +237,27 @@ async function initClientForUser(userId) {
       logger.warn(`[WA][${userId}] Ready ya procesado, ignorando evento duplicado`);
       return;
     }
-    
+
     state.lastActivity = Date.now();
     logger.info(`[WA][${userId}] Ready`);
     state.ready = true;
     state.currentQR = null;
     state.reconnectAttempts = 0; // Reiniciar contador en conexión exitosa
-    
+
     // ✅ CORRECCIÓN CRÍTICA: Cancelar timeout del QR cuando se conecta exitosamente
     if (state.qrTimeout) {
       clearTimeout(state.qrTimeout);
       state.qrTimeout = null;
       logger.info(`[WA][${userId}] Timeout de QR cancelado (conexión exitosa)`);
     }
-    
+
     try {
       getIO().to(room).emit('ready');
     } catch (error) {
       logger.error(`[WA][${userId}] Error emitiendo evento ready:`, error.message);
     }
   };
-  
+
   // ✅ CORRECCIÓN CRÍTICA: Usar .once() para ready ya que solo debe ejecutarse una vez
   client.once('ready', onReady);
   state.eventListeners.push({ event: 'ready', handler: onReady });
@@ -275,7 +275,8 @@ async function initClientForUser(userId) {
       }
 
       // Lógica de auto-respuestas
-      const enviado = await Message.findOne({ to: msg.from, direction: "outbound" });
+      // ✅ MEJORA: Buscar el mensaje outbound MÁS RECIENTE para asociar job correctamente
+      const enviado = await Message.findOne({ to: msg.from, direction: "outbound" }).sort({ timestamp: -1 });
       if (!enviado) {
         logger.info(`[WA][${userId}] Mensaje entrante ignorado (no corresponde a campaña): ${msg.from}`);
         return;
@@ -286,7 +287,7 @@ async function initClientForUser(userId) {
         { to: msg.from, direction: "outbound" },
         { $set: { respondio: true } }
       );
-      
+
       // ✅ CORRECCIÓN BUG 5: Crear registro del mensaje inbound
       try {
         await Message.create({
@@ -300,7 +301,7 @@ async function initClientForUser(userId) {
           to: msg.from,
           from: msg.to || userId
         });
-        logger.info(`[WA][${userId}] Mensaje inbound registrado de ${msg.from}`);
+        logger.info(`[WA][${userId}] Mensaje inbound registrado de ${msg.from} (job: ${enviado.job})`);
       } catch (e) {
         logger.error(`[WA][${userId}] Error registrando mensaje inbound:`, e.message);
       }
@@ -372,7 +373,7 @@ async function initClientForUser(userId) {
       state.intentionalLogout = true; // Marcar como logout intencional
       return;
     }
-    
+
     // ✅ CORRECCIÓN: No reconectar si fue un logout intencional del usuario
     if (state.intentionalLogout) {
       logger.warn(`[WA][${userId}] Sesión marcada como logout intencional, no se reconectará`);
@@ -455,13 +456,13 @@ function getCurrentQR(userId) {
 async function forceNewSessionForUser(userId) {
   logger.info(`[WA][${userId}] Forzando nueva sesión...`);
   const s = getState(userId);
-  
+
   // ✅ CORRECCIÓN: No destruir si ya está conectado y listo
   if (s?.ready && s?.client) {
     logger.warn(`[WA][${userId}] Cliente ya está conectado y listo, ignorando forceNewSession`);
     return;
   }
-  
+
   if (s?.client) {
     try { await s.client.destroy(); } catch (e) { logger.warn(`[WA][${userId}] destroy error: ${e?.message}`); }
     s.client = null;
@@ -492,9 +493,9 @@ async function forceNewSessionForUser(userId) {
 async function logoutForUser(userId) {
   const userIdStr = String(userId);
   logger.info(`[WA][${userId}] Iniciando logout completo...`);
-  
+
   const s = getState(userIdStr);
-  
+
   // 1. Cerrar sesión en WhatsApp (logout remoto)
   if (s?.client) {
     try {
@@ -504,10 +505,10 @@ async function logoutForUser(userId) {
       logger.warn(`[WA][${userId}] Error en logout del cliente:`, err.message);
     }
   }
-  
+
   // 2. Destruir cliente completamente (limpia listeners, timeouts, etc)
   await destroyClient(userIdStr);
-  
+
   // 3. Eliminar archivos de sesión del disco
   const p = getSessionPathForUser(userIdStr);
   try {
@@ -518,7 +519,7 @@ async function logoutForUser(userId) {
   } catch (err) {
     logger.warn(`[WA][${userId}] Error eliminando sesión del disco:`, err.message);
   }
-  
+
   // 4. Emitir evento de logout exitoso
   try {
     getIO().to(`user_${userId}`).emit('logout_success');
@@ -526,7 +527,7 @@ async function logoutForUser(userId) {
   } catch (err) {
     logger.warn(`[WA][${userId}] Error emitiendo logout_success:`, err.message);
   }
-  
+
   logger.info(`[WA][${userId}] ✅ Logout completo finalizado`);
 }
 

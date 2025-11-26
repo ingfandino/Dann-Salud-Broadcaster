@@ -12,7 +12,7 @@ function pickOriginFromList(raw) {
     try {
       const u = /^https?:\/\//i.test(item) ? new URL(item) : new URL(`http://${item}`);
       if (u.hostname === currentHost) return u.toString();
-    } catch {}
+    } catch { }
   }
 
   // Prioridad 2: localhost si estamos en localhost
@@ -26,7 +26,7 @@ function pickOriginFromList(raw) {
     try {
       const u = /^https?:\/\//i.test(item) ? new URL(item) : new URL(`http://${item}`);
       return u.toString();
-    } catch {}
+    } catch { }
   }
 
   return list[0];
@@ -44,8 +44,8 @@ function normalizeApiUrl(raw) {
 
     const url = new URL(u);
 
-    // Forzar http en entornos sin TLS
-    url.protocol = "http:";
+    // Respetar protocolo si ya existe, sino default a http
+    if (!url.protocol) url.protocol = "http:";
 
     if (!url.port) url.port = "5000";
 

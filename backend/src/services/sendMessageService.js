@@ -18,15 +18,15 @@ function humanDelay(min, max) {
     // Usar distribución normal en lugar de uniforme
     const mean = (min + max) / 2;
     const stdDev = (max - min) / 4;
-    
+
     // Box-Muller transform para generar distribución normal
     const u1 = Math.random();
     const u2 = Math.random();
     const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-    
+
     let result = mean + z * stdDev;
     result = Math.max(min, Math.min(max, result)); // Clamp entre min y max
-    
+
     return Math.floor(result);
 }
 
@@ -36,10 +36,10 @@ function calculateTypingTime(messageLength) {
     // Pero con errores, pausas, correcciones: más lento
     const baseCharsPerSecond = 3 + Math.random() * 2; // 3-5 chars/segundo
     const typingTime = (messageLength / baseCharsPerSecond) * 1000;
-    
+
     // Agregar variabilidad (distracciones, pausas para pensar)
     const variability = 1 + (Math.random() * 0.5 - 0.25); // ±25%
-    
+
     // Mínimo 2s, máximo 30s (nadie escribe más de 30s seguidos)
     return Math.min(30000, Math.max(2000, typingTime * variability));
 }
@@ -49,11 +49,11 @@ function isWorkingHours() {
     const now = new Date();
     const hour = now.getHours();
     const day = now.getDay(); // 0 = Domingo, 6 = Sábado
-    
+
     // Lunes a Viernes: 8am - 8pm
     // Sábados: 9am - 2pm
     // Domingos: No enviar
-    
+
     if (day === 0) return false; // Domingo
     if (day === 6) return hour >= 9 && hour < 14; // Sábado 9am-2pm
     return hour >= 8 && hour < 20; // Lun-Vie 8am-8pm
@@ -81,11 +81,11 @@ const MESSAGE_RATE_LIMITER = {
 async function throttleMessage() {
     const now = Date.now();
     const elapsed = now - MESSAGE_RATE_LIMITER.lastMessageTime;
-    
+
     // ✅ Delay variable entre 3-10 segundos (más humano, menos predecible)
-    const targetDelay = MESSAGE_RATE_LIMITER.minIntervalMs + 
-                       Math.random() * (MESSAGE_RATE_LIMITER.maxIntervalMs - MESSAGE_RATE_LIMITER.minIntervalMs);
-    
+    const targetDelay = MESSAGE_RATE_LIMITER.minIntervalMs +
+        Math.random() * (MESSAGE_RATE_LIMITER.maxIntervalMs - MESSAGE_RATE_LIMITER.minIntervalMs);
+
     if (elapsed < targetDelay) {
         const waitTime = targetDelay - elapsed;
         await delay(waitTime);
@@ -112,18 +112,44 @@ async function processJob(jobId) {
         return;
     }
 
+    // ✅ NUEVO: Verificar si está en descanso y auto-reanudar
+    if (initialJob.status === "descanso" && initialJob.restBreakUntil) {
+        const now = Date.now();
+        const breakEnd = new Date(initialJob.restBreakUntil).getTime();
+
+        if (now < breakEnd) {
+            const remainingMs = breakEnd - now;
+            const remainingMinutes = Math.ceil(remainingMs / 60000);
+            logger.info(`😴 Job en descanso. Reanudando en ${remainingMinutes} minutos...`);
+
+            // Emitir progreso con tiempo restante
+            emitJobProgress(jobId.toString(), {
+                status: "descanso",
+                restBreakMinutesRemaining: remainingMinutes
+            });
+
+            await delay(remainingMs);
+        }
+
+        // Reanudar automáticamente
+        logger.info(`▶️ Auto-reanudando job después del descanso...`);
+        initialJob.status = "ejecutando";
+        initialJob.restBreakUntil = null;
+        await initialJob.save();
+    }
+
     // ✅ CORRECCIÓN: Límite de intentos para evitar bucles infinitos
     const MAX_ATTEMPTS = 10;
     const currentAttempts = initialJob.attempts || 0;
-    
+
     if (currentAttempts >= MAX_ATTEMPTS) {
         logger.error(`❌ Job ${jobId} excedió el límite de intentos (${currentAttempts}/${MAX_ATTEMPTS}). Marcando como fallido.`);
         initialJob.status = "fallido";
         initialJob.finishedAt = new Date();
         await initialJob.save();
-        await addLog({ 
-            tipo: "error", 
-            mensaje: `Job ${jobId} marcado como fallido tras ${currentAttempts} intentos (WhatsApp no disponible)` 
+        await addLog({
+            tipo: "error",
+            mensaje: `Job ${jobId} marcado como fallido tras ${currentAttempts} intentos (WhatsApp no disponible)`
         });
         return;
     }
@@ -135,14 +161,14 @@ async function processJob(jobId) {
         // ✅ CORRECCIÓN: Re-programar con delay de 2 minutos para evitar bucle infinito
         const delayMinutes = 2;
         const nextAttempt = new Date(Date.now() + delayMinutes * 60 * 1000);
-        
-        logger.warn(`⏸️ WhatsApp no está listo; re-programando job para ${nextAttempt.toLocaleTimeString('es-AR')}`, { 
-            userId, 
-            jobId, 
+
+        logger.warn(`⏸️ WhatsApp no está listo; re-programando job para ${nextAttempt.toLocaleTimeString('es-AR')}`, {
+            userId,
+            jobId,
             attempts: (initialJob.attempts || 0) + 1,
-            nextAttempt 
+            nextAttempt
         });
-        
+
         initialJob.status = "pendiente";
         initialJob.scheduledFor = nextAttempt; // ✅ Posponer 2 minutos
         initialJob.attempts = (initialJob.attempts || 0) + 1; // ✅ Incrementar contador
@@ -197,7 +223,7 @@ async function processJob(jobId) {
     for (let p = 0; p < startIndex; p++) {
         const prev = contactsToSend[p];
         if (prev && prev.telefono) {
-            try { seenPhones.add(normalizeArNumber(prev.telefono)); } catch {}
+            try { seenPhones.add(normalizeArNumber(prev.telefono)); } catch { }
         }
     }
 
@@ -246,15 +272,15 @@ async function processJob(jobId) {
         const placeholders = placeholderMatches.map(m => m[1]);
         const placeholdersNormalized = Array.from(new Set(placeholders.map(k => normalizeKey(k))));
         const dataKeys = Array.from(dataMap.keys());
-        
+
         // 🔍 Debug mejorado: mostrar valores del dataMap
         const dataMapObj = Object.fromEntries(dataMap);
-        logger.info("🔎 Placeholder debug", { 
-            jobId: initialJob._id, 
-            contactId: contact?._id, 
+        logger.info("🔎 Placeholder debug", {
+            jobId: initialJob._id,
+            contactId: contact?._id,
             telefono: contact?.telefono,
-            placeholders, 
-            placeholdersNormalized, 
+            placeholders,
+            placeholdersNormalized,
             dataKeys,
             dataMapSample: dataMapObj // Mostrar todos los datos disponibles
         });
@@ -306,17 +332,17 @@ async function processJob(jobId) {
 
         if (recentMessage) {
             logger.warn(`🚨 DUPLICADO GLOBAL: ${toDigits} ya recibió mensaje hace ${Math.round((Date.now() - recentMessage.timestamp) / 60000)} minutos. OMITIENDO.`);
-            await addLog({ 
-                tipo: "warning", 
-                mensaje: `Duplicado global omitido: ${toDigits} (ya contactado en campaña anterior)`, 
-                metadata: { 
-                    jobId: initialJob._id, 
+            await addLog({
+                tipo: "warning",
+                mensaje: `Duplicado global omitido: ${toDigits} (ya contactado en campaña anterior)`,
+                metadata: {
+                    jobId: initialJob._id,
                     index: i,
                     previousJob: recentMessage.job,
                     minutesAgo: Math.round((Date.now() - recentMessage.timestamp) / 60000)
-                } 
+                }
             });
-            
+
             // NO enviar, avanzar currentIndex sin afectar stats
             await SendJob.updateOne(
                 { _id: jobId },
@@ -326,16 +352,48 @@ async function processJob(jobId) {
             );
             continue;
         }
-        
+
         seenPhones.add(toDigits);
 
         let wasSent = false;
         try {
             // ✅ CORRECCIÓN: Aplicar throttling global antes de enviar
             await throttleMessage();
-            
-            // ✅ CORRECCIÓN: SOLO 1 INTENTO - No reintentar si falla
-            await sendMessage(userId, to, messageText);
+
+            // ✅ NUEVO: Sistema de reintentos con backoff exponencial (20 intentos)
+            const MAX_RETRIES = 20;
+            let attempt = 0;
+            let sent = false;
+            let lastError = null;
+
+            while (attempt < MAX_RETRIES && !sent) {
+                try {
+                    await sendMessage(userId, to, messageText);
+                    sent = true;
+                } catch (err) {
+                    attempt++;
+                    lastError = err;
+
+                    if (attempt < MAX_RETRIES) {
+                        // Backoff exponencial: 1s, 2s, 4s, 8s, 16s, 30s (máx)
+                        const backoffMs = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
+                        logger.warn(`⚠️ Reintento ${attempt}/${MAX_RETRIES} para ${contact.telefono} en ${Math.round(backoffMs / 1000)}s`);
+                        await delay(backoffMs);
+                    } else {
+                        // Fallo definitivo después de 20 intentos
+                        logger.error(`❌ FALLIDO DEFINITIVO después de ${MAX_RETRIES} intentos: ${contact.telefono}`);
+
+                        // Emitir notificación de fallo al usuario
+                        const { emitMessageFailureAlert } = require("../config/socket");
+                        emitMessageFailureAlert(initialJob.createdBy, {
+                            nombre: contact.nombre,
+                            telefono: contact.telefono
+                        }, jobId);
+
+                        throw lastError; // Re-lanzar para que se maneje como fallido
+                    }
+                }
+            }
 
             // ✅ CORRECCIÓN BUG 1: Verificar si ya existe mensaje para este contacto en este job
             const existingMsg = await Message.findOne({
@@ -343,7 +401,7 @@ async function processJob(jobId) {
                 to: to,
                 direction: "outbound"
             });
-            
+
             if (existingMsg) {
                 logger.warn(`⚠️ Mensaje duplicado detectado en BD para ${contact.telefono}, omitiendo guardado pero marcando como enviado...`);
                 wasSent = true; // Contar como enviado para no afectar stats
@@ -372,7 +430,7 @@ async function processJob(jobId) {
                 to: to,
                 direction: "outbound"
             });
-            
+
             if (!existingMsg) {
                 const failedMsg = new Message({
                     contact: contact._id,
@@ -409,7 +467,7 @@ async function processJob(jobId) {
                 // ✅ CORRECCIÓN: Calcular progreso basado en procesados vs total
                 const processed = sentLocal + failedLocal;
                 const progressPercent = Math.min(100, Math.round((processed / totalLocal) * 100));
-                
+
                 emitJobProgress(initialJob._id.toString(), {
                     currentIndex: i + 1,
                     total: totalLocal,
@@ -434,31 +492,31 @@ async function processJob(jobId) {
                 tomorrow8am.setDate(tomorrow8am.getDate() + (now.getDay() === 6 ? 2 : 1)); // Skip domingo
                 tomorrow8am.setHours(8, 0, 0, 0);
                 const waitTime = tomorrow8am - now;
-                
+
                 await addLog({
                     tipo: "info",
                     mensaje: `Job pausado hasta ${tomorrow8am.toLocaleString('es-AR')} (fuera de horario)`,
                     metadata: { jobId, waitTimeHours: Math.round(waitTime / 3600000) }
                 });
-                
+
                 await delay(Math.min(waitTime, 3600000)); // Máx 1 hora, luego re-chequear
                 continue; // Re-evaluar horario
             }
-            
+
             const min = Math.max(0, dMin);
             const max = Math.max(min, dMax);
-            
+
             // 🛡️ ANTI-DETECCIÓN: Delay más humano con distribución gaussiana
             const randomDelay = humanDelay(min, max);
-            
+
             // 🛡️ ANTI-DETECCIÓN: Simular tiempo de escritura
             const typingTime = calculateTypingTime(messageText.length);
             const typingSeconds = Math.round(typingTime / 1000);
-            
+
             logger.info(`⌨️ Simulando escritura (${typingSeconds}s) + delay (${randomDelay}s)...`);
             await delay(typingTime); // Simular typing
             await delay(randomDelay * 1000); // Delay post-envío
-            
+
             // 🛡️ ANTI-DETECCIÓN: Pausa aleatoria ocasional (5% probabilidad)
             if (shouldTakeRandomBreak()) {
                 const breakDuration = getRandomBreakDuration();
@@ -472,45 +530,56 @@ async function processJob(jobId) {
             const basePause = Math.max(0, pauseMinutes) * 60 * 1000;
             const variability = 0.8 + Math.random() * 0.4; // ±20%
             const pauseMs = Math.floor(basePause * variability);
-            
+
             // ✅ Cambiar estado a "descanso" durante la pausa de lote
             if (pauseMs > 0) {
-                await SendJob.findByIdAndUpdate(jobId, { 
-                    $set: { status: "descanso" } 
+                const restBreakUntil = new Date(Date.now() + pauseMs);
+
+                await SendJob.findByIdAndUpdate(jobId, {
+                    $set: {
+                        status: "descanso",
+                        restBreakUntil: restBreakUntil  // ✅ Persistir timestamp
+                    }
                 });
-                
+
+                const remainingMinutes = Math.ceil(pauseMs / 60000);
+
                 emitJobProgress(jobId.toString(), {
                     currentIndex: i + 1,
                     total: totalLocal,
                     progress: progressPercent,
-                    status: "descanso"
+                    status: "descanso",
+                    restBreakMinutesRemaining: remainingMinutes  // ✅ Incluir tiempo restante
                 });
-                
+
                 logger.info(`😴 Pausa de lote: ${Math.round(pauseMs / 1000)}s (fin de batch ${Math.floor((i + 1) / jobBatchSize)})`);
                 await addLog({
                     tipo: "info",
                     mensaje: `Job ${jobId} en descanso entre lotes`,
-                    metadata: { 
+                    metadata: {
                         batchNumber: Math.floor((i + 1) / jobBatchSize),
                         pauseDurationSeconds: Math.round(pauseMs / 1000),
                         currentIndex: i + 1
                     }
                 });
-                
+
                 await delay(pauseMs);
-                
+
                 // ✅ Volver a estado "ejecutando" después de la pausa
-                await SendJob.findByIdAndUpdate(jobId, { 
-                    $set: { status: "ejecutando" } 
+                await SendJob.findByIdAndUpdate(jobId, {
+                    $set: {
+                        status: "ejecutando",
+                        restBreakUntil: null  // ✅ Limpiar timestamp
+                    }
                 });
-                
+
                 emitJobProgress(jobId.toString(), {
                     currentIndex: i + 1,
                     total: totalLocal,
                     progress: progressPercent,
                     status: "ejecutando"
                 });
-                
+
                 logger.info(`▶️ Reanudando job después del descanso...`);
             }
         }
@@ -539,7 +608,7 @@ async function processJob(jobId) {
     try {
         const Report = require('../models/Report');
         const messages = await Message.find({ job: jobId }).populate('contact');
-        
+
         let reportsGenerated = 0;
         for (const msg of messages) {
             const contact = msg.contact;
@@ -568,7 +637,7 @@ async function processJob(jobId) {
             await report.save();
             reportsGenerated++;
         }
-        
+
         logger.info(`📊 Generados ${reportsGenerated} reportes para campaña ${completedJob.name}`);
     } catch (reportErr) {
         logger.error("❌ Error generando reportes automáticos:", reportErr.message);

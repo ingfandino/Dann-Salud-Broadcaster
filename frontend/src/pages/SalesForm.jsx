@@ -1,8 +1,9 @@
 // frontend/src/pages/SalesForm.jsx
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import apiClient from '../services/api';
 import { toast } from 'react-toastify';
+import * as XLSX from 'xlsx';
 
 const ARGENTINE_OBRAS_SOCIALES = [
     "OSDE",
@@ -44,7 +45,8 @@ const ARGENTINE_OBRAS_SOCIALES = [
     "OSPAGA (101000)",
     "OSPF (107404)",
     "OSPIP (116006)",
-    "OSPIC"
+    "OSPIC",
+    "OSG (109202)"
 ];
 
 export default function SalesForm({ currentUser }) {
@@ -82,6 +84,12 @@ export default function SalesForm({ currentUser }) {
     const [availableSlots, setAvailableSlots] = useState([]);
     const [loadingSlots, setLoadingSlots] = useState(false);
     const [otroEquipo, setOtroEquipo] = useState(false); // ✅ Checkbox para mostrar validadores de todos los equipos
+
+    // ✅ Estados para carga masiva
+    const [uploadingBulk, setUploadingBulk] = useState(false);
+    const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
+    const [rejectedRows, setRejectedRows] = useState([]);
+    const fileInputRef = useRef(null);
 
     // Rol de usuario
     const isSupervisor = currentUser?.role === 'Supervisor' || currentUser?.role === 'supervisor';
@@ -173,7 +181,9 @@ export default function SalesForm({ currentUser }) {
                 .filter(u => {
                     const isActive = u?.active !== false;
                     const usuarioNumeroEquipo = u.numeroEquipo ? String(u.numeroEquipo) : null;
-                    const esRolCorrecto = u.role === 'asesor' || u.role === 'Asesor' || u.role === 'auditor' || u.role === 'Auditor';
+                    const esRolCorrecto = u.role === 'asesor' || u.role === 'Asesor' ||
+                        u.role === 'auditor' || u.role === 'Auditor' ||
+                        u.role === 'supervisor' || u.role === 'Supervisor';
                     const mismoEquipo = usuarioNumeroEquipo === myNumeroEquipo;
                     const tieneNombre = u.nombre && u.nombre.trim().length > 0;
 
@@ -208,7 +218,9 @@ export default function SalesForm({ currentUser }) {
                 .filter(u => {
                     const isActive = u?.active !== false;
                     const usuarioNumeroEquipo = u.numeroEquipo ? String(u.numeroEquipo) : null;
-                    const esRolCorrecto = u.role === 'asesor' || u.role === 'Asesor' || u.role === 'auditor' || u.role === 'Auditor';
+                    const esRolCorrecto = u.role === 'asesor' || u.role === 'Asesor' ||
+                        u.role === 'auditor' || u.role === 'Auditor' ||
+                        u.role === 'supervisor' || u.role === 'Supervisor';
                     const mismoEquipo = usuarioNumeroEquipo === equipoBuscado;
                     const tieneNombre = u.nombre && u.nombre.trim().length > 0;
 
@@ -268,10 +280,10 @@ export default function SalesForm({ currentUser }) {
         }
     }
 
-    // ✅ Cargar TODOS los usuarios de la plataforma (cuando checkbox está activo)
     async function fetchTodosLosValidadores() {
         try {
-            const res = await apiClient.get('/users');
+            // ✅ includeAllAuditors=true para que supervisores puedan ver TODOS los usuarios
+            const res = await apiClient.get('/users?includeAllAuditors=true');
             const list = Array.isArray(res.data) ? res.data : [];
 
             console.log('🔍 fetchTodosLosValidadores - Total usuarios:', list.length);
@@ -280,7 +292,7 @@ export default function SalesForm({ currentUser }) {
                 .filter(u => {
                     const isActive = u?.active !== false;
                     const role = u.role?.toLowerCase();
-                    
+
                     if (!isActive) return false;
                     // Debe tener nombre
                     if (!u.nombre || u.nombre.trim().length === 0) return false;
@@ -389,7 +401,7 @@ export default function SalesForm({ currentUser }) {
         if (isGerenciaOrAuditor && !form.asesor) return 'Debe seleccionar un asesor';
         // Validador es obligatorio
         if (!form.validador) return 'Debe seleccionar un validador';
-        
+
         // ✅ CORRECCIÓN: Se eliminó la restricción de horario de 20 minutos
         // Ahora se permite crear turnos en cualquier hora, incluso después de las 21 hrs
         return null;
@@ -466,12 +478,12 @@ export default function SalesForm({ currentUser }) {
     // ✅ PRIVILEGIO ESPECIAL: Gerencia puede seleccionar cualquier fecha del pasado
     function getMinDate() {
         const isGerencia = currentUser?.role?.toLowerCase() === 'gerencia';
-        
+
         // Gerencia puede crear ventas de cualquier fecha (sin restricción)
         if (isGerencia) {
             return '2020-01-01'; // Fecha mínima muy antigua
         }
-        
+
         const now = new Date();
         const hours = now.getHours();
         const minutes = now.getMinutes();
@@ -520,9 +532,466 @@ export default function SalesForm({ currentUser }) {
 
     const timeOptions = getEnabledTimeOptions();
 
+    // ✅ Procesar archivo de carga masiva
+    async function handleBulkUpload(event) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setUploadingBulk(true);
+        setRejectedRows([]);
+        setBulkProgress({ current: 0, total: 0 });
+
+        try {
+            const data = await readExcelFile(file);
+            if (!data || data.length === 0) {
+                toast.error('El archivo está vacío o no tiene el formato correcto');
+                return;
+            }
+
+            // ✅ Obtener todos los usuarios para resolver nombres a IDs
+            const usersRes = await apiClient.get('/users?includeAllAuditors=true');
+            const allUsers = usersRes.data || [];
+
+            // Obtener todas las auditorías existentes para validación
+            const existingAuditsRes = await apiClient.get('/audits');
+            const existingAudits = existingAuditsRes.data || [];
+
+            const rejected = [];
+            const toCreate = [];
+
+            setBulkProgress({ current: 0, total: data.length });
+
+            // Validar cada fila
+            for (let i = 0; i < data.length; i++) {
+                const row = data[i];
+                const rowNumber = i + 2; // +2 porque Excel empieza en 1 y tiene header
+
+                // Validar campos requeridos
+                if (!row.nombre?.trim()) {
+                    rejected.push({ row: rowNumber, data: row, reason: 'Nombre de afiliado es requerido' });
+                    continue;
+                }
+
+                if (!row.cuil?.trim() || !/^\d{11}$/.test(row.cuil.trim())) {
+                    rejected.push({ row: rowNumber, data: row, reason: 'CUIL debe tener exactamente 11 dígitos' });
+                    continue;
+                }
+
+                const telefonoNormalizado = row.telefono?.replace(/\D/g, '') || '';
+                if (!/^\d{10}$/.test(telefonoNormalizado)) {
+                    rejected.push({ row: rowNumber, data: row, reason: 'Teléfono debe tener 10 dígitos' });
+                    continue;
+                }
+
+                // ✅ Validar duplicados (CUIL + teléfono)
+                const duplicateConflict = existingAudits.find(a => {
+                    const cuilMatch = a.cuil?.trim() === row.cuil.trim();
+                    const telefonoMatch = a.telefono?.replace(/\D/g, '') === telefonoNormalizado;
+                    return cuilMatch && telefonoMatch;
+                });
+
+                if (duplicateConflict && duplicateConflict.status !== 'Rechazada') {
+                    rejected.push({
+                        row: rowNumber,
+                        data: row,
+                        reason: 'CUIL y teléfono ya registrados en el sistema'
+                    });
+                    continue;
+                }
+
+                if (!row.obraSocialAnterior) {
+                    rejected.push({ row: rowNumber, data: row, reason: 'Obra social anterior es requerida' });
+                    continue;
+                }
+
+                if (!row.obraSocialVendida) {
+                    rejected.push({ row: rowNumber, data: row, reason: 'Obra social vendida es requerida' });
+                    continue;
+                }
+
+                if (!row.fecha) {
+                    rejected.push({ row: rowNumber, data: row, reason: 'Fecha es requerida' });
+                    continue;
+                }
+
+                if (!row.asesor) {
+                    rejected.push({ row: rowNumber, data: row, reason: 'Asesor es requerido' });
+                    continue;
+                }
+
+                if (!row.validador) {
+                    rejected.push({ row: rowNumber, data: row, reason: 'Validador es requerido' });
+                    continue;
+                }
+
+                // ✅ Resolver nombres de usuario a IDs
+                const asesorUser = allUsers.find(u =>
+                    u.nombre?.toLowerCase().trim() === row.asesor?.toLowerCase().trim() ||
+                    u._id === row.asesor
+                );
+
+                if (!asesorUser) {
+                    rejected.push({
+                        row: rowNumber,
+                        data: row,
+                        reason: `Asesor "${row.asesor}" no encontrado en el sistema`
+                    });
+                    continue;
+                }
+
+                const validadorUser = allUsers.find(u =>
+                    u.nombre?.toLowerCase().trim() === row.validador?.toLowerCase().trim() ||
+                    u._id === row.validador
+                );
+
+                if (!validadorUser) {
+                    rejected.push({
+                        row: rowNumber,
+                        data: row,
+                        reason: `Validador "${row.validador}" no encontrado en el sistema`
+                    });
+                    continue;
+                }
+
+                // Supervisor es opcional
+                let supervisorId = null;
+                if (row.supervisor) {
+                    const supervisorUser = allUsers.find(u =>
+                        u.nombre?.toLowerCase().trim() === row.supervisor?.toLowerCase().trim() ||
+                        u._id === row.supervisor
+                    );
+
+                    if (!supervisorUser) {
+                        rejected.push({
+                            row: rowNumber,
+                            data: row,
+                            reason: `Supervisor "${row.supervisor}" no encontrado en el sistema`
+                        });
+                        continue;
+                    }
+                    supervisorId = supervisorUser._id;
+                }
+
+                // Auditor es opcional
+                let auditorId = null;
+                if (row.auditor) {
+                    const auditorUser = allUsers.find(u =>
+                        u.nombre?.toLowerCase().trim() === row.auditor?.toLowerCase().trim() ||
+                        u._id === row.auditor
+                    );
+
+                    if (!auditorUser) {
+                        // No se rechaza si el auditor no se encuentra, simplemente no se asigna
+                        console.warn(`Auditor "${row.auditor}" no encontrado para la fila ${rowNumber}. Se ignorará.`);
+                    } else {
+                        auditorId = auditorUser._id;
+                    }
+                }
+
+                // Validación exitosa, agregar a la lista de creación con IDs resueltos
+                toCreate.push({
+                    ...row,
+                    telefonoNormalizado,
+                    asesorId: asesorUser._id,
+                    validadorId: validadorUser._id,
+                    supervisorId,
+                    auditorId,
+                    estado: row.estado || '' // Opcional
+                });
+            }
+
+            setRejectedRows(rejected);
+
+            // Crear auditorías válidas
+            let successCount = 0;
+            if (toCreate.length > 0) {
+                successCount = await createBulkAudits(toCreate, rejected);
+            }
+
+            // Generar reporte final consolidado
+            if (rejected.length > 0) {
+                const message = successCount > 0
+                    ? `${successCount} ventas creadas exitosamente, ${rejected.length} rechazadas.`
+                    : `Todas las filas fueron rechazadas (${rejected.length} rechazos).`;
+                toast.warning(message);
+                generateRejectionReport(rejected);
+            } else {
+                toast.success(`¡${successCount} ventas creadas exitosamente!`);
+            }
+
+        } catch (err) {
+            console.error('Error procesando archivo:', err);
+            toast.error('Error al procesar el archivo: ' + (err.message || 'Error desconocido'));
+        } finally {
+            setUploadingBulk(false);
+            setBulkProgress({ current: 0, total: 0 });
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    }
+
+    // Leer archivo Excel/CSV
+    async function readExcelFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+
+                    // Función para normalizar fechas de Excel
+                    const normalizeFecha = (value) => {
+                        if (!value) return '';
+
+                        // Si es un número (serial de Excel)
+                        if (typeof value === 'number') {
+                            // Excel almacena fechas como días desde 30/12/1899
+                            const excelEpoch = new Date(1899, 11, 30);
+                            const date = new Date(excelEpoch.getTime() + value * 24 * 60 * 60 * 1000);
+
+                            if (!isNaN(date.getTime())) {
+                                const year = date.getFullYear();
+                                const month = String(date.getMonth() + 1).padStart(2, '0');
+                                const day = String(date.getDate()).padStart(2, '0');
+                                return `${year}-${month}-${day}`;
+                            }
+                        }
+
+                        // Si es un string, intentar parsearlo
+                        if (typeof value === 'string') {
+                            // Si ya está en formato YYYY-MM-DD
+                            if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+                                return value;
+                            }
+
+                            // Intentar parsear DD/MM/YYYY o D/M/YYYY
+                            const parts = value.split('/');
+                            if (parts.length === 3) {
+                                const day = parseInt(parts[0], 10);
+                                const month = parseInt(parts[1], 10);
+                                const year = parseInt(parts[2], 10);
+
+                                if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+                                    const date = new Date(year, month - 1, day);
+                                    if (!isNaN(date.getTime())) {
+                                        const year = date.getFullYear();
+                                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                                        const day = String(date.getDate()).padStart(2, '0');
+                                        return `${year}-${month}-${day}`;
+                                    }
+                                }
+                            }
+
+                            // Intentar parsear como fecha genérica
+                            const date = new Date(value);
+                            if (!isNaN(date.getTime())) {
+                                const year = date.getFullYear();
+                                const month = String(date.getMonth() + 1).padStart(2, '0');
+                                const day = String(date.getDate()).padStart(2, '0');
+                                return `${year}-${month}-${day}`;
+                            }
+                        }
+
+                        return '';
+                    };
+
+                    // Normalizar nombre de obra social (BINIMED -> Binimed, MEPLIFE -> Meplife)
+                    const normalizarObraSocial = (value) => {
+                        if (!value) return 'Binimed';
+                        const str = String(value).trim().toUpperCase();
+
+                        if (str === 'BINIMED') return 'Binimed';
+                        if (str === 'MEPLIFE') return 'Meplife';
+
+                        // Si no coincide, capitalizar primera letra
+                        return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+                    };
+
+                    // Normalizar nombres de columnas
+                    const normalized = jsonData.map(row => ({
+                        nombre: row['Nombre de afiliado'] || row['Nombre'] || row['nombre'] || '',
+                        cuil: String(row['CUIL'] || row['cuil'] || '').trim(),
+                        telefono: String(row['Teléfono'] || row['Telefono'] || row['telefono'] || '').trim(),
+                        tipoVenta: (row['Tipo de venta'] || row['Tipo'] || row['tipo'] || 'alta').toLowerCase(),
+                        obraSocialAnterior: row['Obra social anterior'] || row['OS Anterior'] || row['obraSocialAnterior'] || '',
+                        obraSocialVendida: normalizarObraSocial(row['Obra social vendida'] || row['OS Vendida'] || row['obraSocialVendida']),
+                        fecha: normalizeFecha(row['Fecha'] || row['fecha']),
+                        supervisor: row['Supervisor'] || row['supervisor'] || '',
+                        asesor: row['Asesor'] || row['asesor'] || '',
+                        validador: row['Validador'] || row['validador'] || '',
+                        auditor: row['Auditor'] || row['auditor'] || '', // Opcional
+                        estado: row['Estado'] || row['estado'] || '', // Opcional
+                        datosExtra: row['Datos extra'] || row['datosExtra'] || ''
+                    }));
+
+                    resolve(normalized);
+                } catch (err) {
+                    reject(err);
+                }
+            };
+
+            reader.onerror = () => reject(new Error('Error al leer el archivo'));
+            reader.readAsArrayBuffer(file);
+        });
+    }
+
+    // Crear auditorías en lote
+    async function createBulkAudits(rows, rejectedArray) {
+        let successCount = 0;
+
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            setBulkProgress({ current: i + 1, total: rows.length });
+
+            try {
+                // Validar que la fecha sea válida antes de consultar turnos
+                if (!row.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(row.fecha)) {
+                    const rejection = {
+                        row: i + 2,
+                        data: row,
+                        reason: `Fecha inválida: "${row.fecha}". Debe estar en formato YYYY-MM-DD`
+                    };
+                    rejectedArray.push(rejection);
+                    setRejectedRows(prev => [...prev, rejection]);
+                    continue;
+                }
+
+                console.log(`🔍 [DEBUG] Procesando fila ${i + 2}, fecha: "${row.fecha}"`);
+
+                // Obtener turnos disponibles para la fecha
+                const slotsRes = await apiClient.get(`/audits/available-slots?date=${row.fecha}`);
+                const slots = slotsRes.data || [];
+
+                // Buscar primer turno disponible (con menos de 10 auditorías)
+                const availableSlot = slots.find(s => s.count < 10);
+
+                if (!availableSlot) {
+                    const rejection = {
+                        row: i + 2,
+                        data: row,
+                        reason: 'No hay turnos disponibles para la fecha especificada'
+                    };
+                    rejectedArray.push(rejection);
+                    setRejectedRows(prev => [...prev, rejection]);
+                    continue;
+                }
+
+                const payload = {
+                    nombre: row.nombre,
+                    cuil: row.cuil,
+                    telefono: row.telefonoNormalizado,
+                    tipoVenta: row.tipoVenta,
+                    obraSocialAnterior: row.obraSocialAnterior,
+                    obraSocialVendida: row.obraSocialVendida,
+                    scheduledAt: `${row.fecha}T${availableSlot.time}:00`,
+                    asesor: row.asesorId,
+                    validador: row.validadorId,
+                    datosExtra: row.datosExtra?.trim() || ''
+                };
+
+                // Añadir campos opcionales si existen
+                if (row.auditorId) {
+                    payload.auditor = row.auditorId;
+                }
+                if (row.estado) {
+                    payload.estado = row.estado;
+                }
+
+                await apiClient.post('/audits', payload);
+                successCount++;
+
+                // Pequeña pausa para no saturar el servidor
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+            } catch (err) {
+                console.error('Error creando auditoría:', err);
+                const rejection = {
+                    row: i + 2,
+                    data: row,
+                    reason: err.response?.data?.message || err.message || 'Error al crear la auditoría'
+                };
+                rejectedArray.push(rejection);
+                setRejectedRows(prev => [...prev, rejection]);
+            }
+        }
+
+        return successCount;
+    }
+
+    // Generar reporte de rechazos en Excel
+    function generateRejectionReport(rejected) {
+        const reportData = rejected.map(r => ({
+            'Fila': r.row,
+            'Nombre': r.data.nombre,
+            'CUIL': r.data.cuil,
+            'Teléfono': r.data.telefono,
+            'Motivo de Rechazo': r.reason
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(reportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Rechazados');
+
+        const fileName = `ventas_rechazadas_${new Date().toISOString().split('T')[0]}.xlsx`;
+        XLSX.writeFile(wb, fileName);
+
+        toast.info(`Reporte de rechazos descargado: ${fileName}`);
+    }
+
     return (
         <div className="max-w-3xl mx-auto p-4">
-            <h2 className="text-2xl font-semibold mb-4">Pautar auditoría / Venta</h2>
+            <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-semibold">Pautar auditoría / Venta</h2>
+
+                {/* ✅ Botón de carga masiva */}
+                <div className="relative">
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        onChange={handleBulkUpload}
+                        className="hidden"
+                        disabled={uploadingBulk}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploadingBulk}
+                        className="px-3 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                        {uploadingBulk ? (
+                            <>
+                                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Procesando... {bulkProgress.current}/{bulkProgress.total}
+                            </>
+                        ) : (
+                            <>
+                                📤 Carga Masiva
+                            </>
+                        )}
+                    </button>
+                </div>
+            </div>
+
+            {/* ✅ Mostrar rechazos si existen */}
+            {rejectedRows.length > 0 && (
+                <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                    <p className="text-sm font-semibold text-yellow-800 mb-2">
+                        ⚠️ {rejectedRows.length} filas rechazadas
+                    </p>
+                    <p className="text-xs text-yellow-700">
+                        Se ha descargado un reporte con los detalles de las filas rechazadas.
+                    </p>
+                </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4 bg-white p-4 rounded shadow-sm">
                 <div className="grid grid-cols-1 md:grid-cols-1 gap-3">
                     <div>
@@ -662,15 +1131,15 @@ export default function SalesForm({ currentUser }) {
                             <option value="">-- Seleccionar validador --</option>
                             {validadores.map(v => (
                                 <option key={v._id} value={v._id}>
-                                    {v.nombre} ({v.role}) {v.numeroEquipo ? `- Equipo ${v.numeroEquipo}` : ''}
+                                    {v.nombre} ({v.role}) {v.numeroEquipo ? `- Equipo ${v.numeroEquipo} ` : ''}
                                 </option>
                             ))}
                         </select>
-                        
+
                         {/* ✅ Checkbox para mostrar validadores de todos los equipos */}
                         <div className="flex items-center gap-2 mt-2">
-                            <input 
-                                type="checkbox" 
+                            <input
+                                type="checkbox"
                                 id="otroEquipo"
                                 checked={otroEquipo}
                                 onChange={(e) => {
@@ -684,13 +1153,13 @@ export default function SalesForm({ currentUser }) {
                                 Pertenece a otro equipo
                             </label>
                         </div>
-                        
+
                         <p className="text-xs text-gray-500 mt-1">
-                            {otroEquipo 
+                            {otroEquipo
                                 ? 'Mostrando todos los usuarios de la plataforma'
                                 : isSupervisor
-                                ? 'Selecciona un compañero de tu equipo que validará la venta (puedes seleccionarte a ti mismo)'
-                                : 'Selecciona un compañero de tu equipo que validará la venta'
+                                    ? 'Selecciona un compañero de tu equipo que validará la venta (puedes seleccionarte a ti mismo)'
+                                    : 'Selecciona un compañero de tu equipo que validará la venta'
                             }
                         </p>
                     </div>

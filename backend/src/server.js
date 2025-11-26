@@ -37,59 +37,63 @@ const logger = require("./utils/logger");
 validateEnv();
 
 // 🔹 Conectar DB (excepto en test)
+// 🔹 Conectar DB (excepto en test)
 if (process.env.NODE_ENV !== "test") {
   connectDB()
     .then(async () => {
-      try {
-        await User.syncIndexes();
-        logger.info("✅ Índices de User sincronizados");
-
+      // Sincronizar índices solo si se especifica explícitamente o en desarrollo
+      if (process.env.SYNC_INDEXES === 'true' || process.env.NODE_ENV === 'development') {
         try {
-          await Autoresponse.syncIndexes();
-          logger.info("✅ Índices de Autoresponse sincronizados");
-        } catch (e) {
-          logger.warn("⚠️  No se pudieron sincronizar índices de Autoresponse", { error: e?.message });
-        }
+          await User.syncIndexes();
+          logger.info("✅ Índices de User sincronizados");
 
-        try {
-          await AutoResponseLog.syncIndexes();
-          logger.info("✅ Índices de AutoResponseLog sincronizados");
-        } catch (e) {
-          logger.warn("⚠️  No se pudieron sincronizar índices de AutoResponseLog", { error: e?.message });
-        }
+          try {
+            await Autoresponse.syncIndexes();
+            logger.info("✅ Índices de Autoresponse sincronizados");
+          } catch (e) {
+            logger.warn("⚠️  No se pudieron sincronizar índices de Autoresponse", { error: e?.message });
+          }
 
-        try {
-          await Message.syncIndexes();
-          logger.info("✅ Índices de Message sincronizados");
-        } catch (e) {
-          logger.warn("⚠️  No se pudieron sincronizar índices de Message", { error: e?.message });
-        }
+          try {
+            await AutoResponseLog.syncIndexes();
+            logger.info("✅ Índices de AutoResponseLog sincronizados");
+          } catch (e) {
+            logger.warn("⚠️  No se pudieron sincronizar índices de AutoResponseLog", { error: e?.message });
+          }
 
-        try {
-          await SendJob.syncIndexes();
-          logger.info("✅ Índices de SendJob sincronizados");
-        } catch (e) {
-          logger.warn("⚠️  No se pudieron sincronizar índices de SendJob", { error: e?.message });
-        }
+          try {
+            await Message.syncIndexes();
+            logger.info("✅ Índices de Message sincronizados");
+          } catch (e) {
+            logger.warn("⚠️  No se pudieron sincronizar índices de Message", { error: e?.message });
+          }
 
-        try {
-          await Affiliate.syncIndexes();
-          logger.info("✅ Índices de Affiliate sincronizados");
-        } catch (e) {
-          logger.warn("⚠️  No se pudieron sincronizar índices de Affiliate", { error: e?.message });
-        }
+          try {
+            await SendJob.syncIndexes();
+            logger.info("✅ Índices de SendJob sincronizados");
+          } catch (e) {
+            logger.warn("⚠️  No se pudieron sincronizar índices de SendJob", { error: e?.message });
+          }
 
-        try {
-          await AffiliateExportConfig.syncIndexes();
-          logger.info("✅ Índices de AffiliateExportConfig sincronizados");
-        } catch (e) {
-          logger.warn("⚠️  No se pudieron sincronizar índices de AffiliateExportConfig", { error: e?.message });
-        }
+          try {
+            await Affiliate.syncIndexes();
+            logger.info("✅ Índices de Affiliate sincronizados");
+          } catch (e) {
+            logger.warn("⚠️  No se pudieron sincronizar índices de Affiliate", { error: e?.message });
+          }
 
-        // 🌱 Semilla opcional para crear auditor
-        await seedAuditorRole();
-      } catch (err) {
-        logger.error("❌ Error al sincronizar índices de User", { error: err.message });
+          try {
+            await AffiliateExportConfig.syncIndexes();
+            logger.info("✅ Índices de AffiliateExportConfig sincronizados");
+          } catch (e) {
+            logger.warn("⚠️  No se pudieron sincronizar índices de AffiliateExportConfig", { error: e?.message });
+          }
+
+          // 🌱 Semilla opcional para crear auditor
+          await seedAuditorRole();
+        } catch (err) {
+          logger.error("❌ Error al sincronizar índices de User", { error: err.message });
+        }
       }
     })
     .catch(err => {
@@ -103,24 +107,24 @@ if (process.env.NODE_ENV !== "test") {
 
 const app = express();
 const uploadsPath = path.join(__dirname, '../uploads');
-try { require("fs").mkdirSync(uploadsPath, { recursive: true }); } catch (e) {}
+try { require("fs").mkdirSync(uploadsPath, { recursive: true }); } catch (e) { }
 
 // 🔹 Configuración CORS
 let allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",").map(s => {
-      let origin = s.trim();
-      if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
-        origin = 'http://' + origin;
-      }
-      if (origin.endsWith('/')) {
-        origin = origin.slice(0, -1);
-      }
-      return origin;
-    }).filter(Boolean)
+    let origin = s.trim();
+    if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
+      origin = 'http://' + origin;
+    }
+    if (origin.endsWith('/')) {
+      origin = origin.slice(0, -1);
+    }
+    return origin;
+  }).filter(Boolean)
   : [];
 
 // Añadir origen del servidor actual para permitir peticiones desde el frontend servido por el mismo backend
- 
+
 if (process.env.NODE_ENV === "development") {
   allowedOrigins.push("http://localhost:5173"); // Vite por defecto
 }
@@ -167,12 +171,26 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Configuración de Helmet modificada para evitar redirecciones HTTPS
+// Configuración de Helmet con CSP permisiva para evitar bloqueos en LAN/HTTP
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'", "http:", "https:", "data:", "blob:"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "http:", "https:"],
+      styleSrc: ["'self'", "'unsafe-inline'", "http:", "https:"],
+      imgSrc: ["'self'", "data:", "blob:", "http:", "https:"],
+      connectSrc: ["'self'", "ws:", "wss:", "http:", "https:", "*"], // Permitir conexiones a cualquier origen (necesario para socket/api en LAN)
+      fontSrc: ["'self'", "data:", "http:", "https:"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'", "http:", "https:"],
+      frameSrc: ["'self'"],
+      upgradeInsecureRequests: null, // ❌ Deshabilitar upgrade automático a HTTPS
+    },
+  },
   crossOriginEmbedderPolicy: false,
   crossOriginOpenerPolicy: false,
-  crossOriginResourcePolicy: false
+  crossOriginResourcePolicy: false,
+  strictTransportSecurity: false, // ❌ Deshabilitar HSTS para evitar forzar HTTPS en puerto HTTP
 }));
 
 // 🔹 Rate limit global (relajado en desarrollo)
@@ -244,9 +262,7 @@ if (process.env.NODE_ENV === 'production') {
     path.resolve(process.cwd(), '../../frontend/dist'),
     path.resolve(__dirname, '../../../frontend/dist'),
     path.resolve(process.cwd(), '../frontend/dist'),
-    path.resolve(process.cwd(), 'frontend/dist'),
-    'C:/Users/Daniel/Downloads/frontend/dist',
-    'C:/Users/Daniel/Downloads/Dann+Salud Online (DEV)/frontend/dist'
+    path.resolve(process.cwd(), 'frontend/dist')
   ];
 
   let frontendBuildPath = null;
@@ -384,10 +400,10 @@ if (process.env.NODE_ENV !== "test") {
     console.error("\n❌ ========== UNCAUGHT EXCEPTION ==========");
     console.error("Message:", err.message);
     console.error("Stack:", err.stack);
-    logger.error("Uncaught Exception", { 
-      error: err.message, 
+    logger.error("Uncaught Exception", {
+      error: err.message,
       stack: err.stack,
-      name: err.name 
+      name: err.name
     });
     try {
       if (metricsInterval) clearInterval(metricsInterval);

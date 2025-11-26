@@ -36,6 +36,25 @@ socket.on("connect_error", (err) => {
     logger.error("❌ Error de conexión de Socket:", err.message);
 });
 
+// ✅ NUEVO: Listener global para alertas de fallos de mensajes
+socket.on("message:failure_alert", (data) => {
+    // Importar toast dinámicamente para evitar problemas de dependencias circulares
+    import('react-toastify').then(({ toast }) => {
+        toast.error(
+            `❌ Fallo definitivo: ${data.message}`,
+            {
+                position: "top-right",
+                autoClose: 10000,
+                hideProgressBar: false,
+                closeOnClick: true,
+                pauseOnHover: true,
+                draggable: true,
+            }
+        );
+    });
+    logger.error("❌ Alerta de fallo de mensaje:", data);
+});
+
 // 🔹 Métricas globales
 export function subscribeToMetrics(callback) {
     socket.emit("metrics:subscribe");

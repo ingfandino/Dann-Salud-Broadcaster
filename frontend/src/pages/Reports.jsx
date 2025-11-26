@@ -82,7 +82,7 @@ export default function Reports() {
             out = out.filter((c) => (c.status || "").toLowerCase() === status.toLowerCase());
         }
         if (asesor) {
-            out = out.filter((c) => 
+            out = out.filter((c) =>
                 (c.createdBy?.nombre || "").toLowerCase().includes(asesor.toLowerCase())
             );
         }
@@ -93,7 +93,7 @@ export default function Reports() {
                 (c.createdBy?.nombre || "").toLowerCase().includes(qq)
             );
         }
-        return out.sort((a, b) => 
+        return out.sort((a, b) =>
             new Date(b.scheduledFor || b.createdAt) - new Date(a.scheduledFor || a.createdAt)
         );
     }, [campaigns, filters]);
@@ -108,7 +108,7 @@ export default function Reports() {
             const res = await apiClient.get(`/send-jobs/${jobId}/export`, {
                 responseType: "blob"
             });
-            
+
             const blob = new Blob([res.data], {
                 type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             });
@@ -120,21 +120,21 @@ export default function Reports() {
             link.click();
             link.remove();
             window.URL.revokeObjectURL(url);
-            
+
             toast.success("✅ Excel descargado");
         } catch (err) {
             logger.error("Error descargando Excel:", err);
             toast.error("Error descargando Excel");
         }
     };
-    
+
     // ✅ MEJORA 3: Exportar reporte de auto-respuestas
     const handleExportAutoResponses = async (jobId) => {
         try {
             const res = await apiClient.get(`/send-jobs/${jobId}/autoresponse-report`, {
                 responseType: "blob"
             });
-            
+
             const blob = new Blob([res.data], {
                 type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             });
@@ -146,7 +146,7 @@ export default function Reports() {
             link.click();
             link.remove();
             window.URL.revokeObjectURL(url);
-            
+
             toast.success("✅ Reporte de auto-respuestas descargado");
         } catch (err) {
             if (err.response?.status === 404) {
@@ -218,18 +218,18 @@ export default function Reports() {
             >
                 <h2 className="font-semibold mb-3">🔍 Filtros</h2>
                 <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                    <input 
-                        type="date" 
-                        name="startDate" 
-                        value={filters.startDate} 
+                    <input
+                        type="date"
+                        name="startDate"
+                        value={filters.startDate}
                         onChange={handleChange}
                         placeholder="Desde"
                         className="border p-2 rounded"
                     />
-                    <input 
-                        type="date" 
-                        name="endDate" 
-                        value={filters.endDate} 
+                    <input
+                        type="date"
+                        name="endDate"
+                        value={filters.endDate}
                         onChange={handleChange}
                         placeholder="Hasta"
                         className="border p-2 rounded"
@@ -248,34 +248,34 @@ export default function Reports() {
                         <option value="cancelado">Cancelada</option>
                         <option value="fallido">Fallida</option>
                     </select>
-                    <input 
-                        type="text" 
-                        name="asesor" 
-                        placeholder="Buscar asesor" 
+                    <input
+                        type="text"
+                        name="asesor"
+                        placeholder="Buscar asesor"
                         value={filters.asesor}
-                        onChange={handleChange} 
+                        onChange={handleChange}
                         className="border p-2 rounded"
                     />
-                    <input 
-                        type="text" 
-                        name="q" 
-                        placeholder="Buscar campaña..." 
+                    <input
+                        type="text"
+                        name="q"
+                        placeholder="Buscar campaña..."
                         value={filters.q}
-                        onChange={handleChange} 
+                        onChange={handleChange}
                         className="border p-2 rounded lg:col-span-1"
                     />
                 </div>
                 <div className="mt-3 flex gap-2">
-                    <button 
-                        onClick={fetchCampaigns} 
+                    <button
+                        onClick={fetchCampaigns}
                         className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
                     >
                         🔄 Actualizar
                     </button>
-                    <button 
-                        onClick={() => { 
-                            setFilters({ startDate: "", endDate: "", status: "", asesor: "", q: "" }); 
-                            setPage(1); 
+                    <button
+                        onClick={() => {
+                            setFilters({ startDate: "", endDate: "", status: "", asesor: "", q: "" });
+                            setPage(1);
                         }}
                         className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300"
                     >
@@ -317,7 +317,7 @@ export default function Reports() {
                                     const stats = campaign.stats || { total: 0, sent: 0, failed: 0 };
                                     const statusColor = statusColors[campaign.status] || "bg-gray-100 text-gray-800";
                                     const statusLabel = statusLabels[campaign.status] || campaign.status;
-                                    
+
                                     return (
                                         <tr key={campaign._id} className="border-b hover:bg-gray-50">
                                             <td className="p-3 text-sm">
@@ -356,6 +356,12 @@ export default function Reports() {
                                                 <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-semibold ${statusColor}`}>
                                                     {statusLabel}
                                                 </span>
+                                                {/* ✅ NUEVO: Mostrar contador de descanso */}
+                                                {campaign.status === 'descanso' && campaign.restBreakMinutesRemaining && (
+                                                    <div className="text-xs text-orange-600 mt-1 font-medium">
+                                                        ⏳ Reanuda en {campaign.restBreakMinutesRemaining} min
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="p-3 text-sm">
                                                 <div className="flex gap-2">
@@ -401,8 +407,8 @@ export default function Reports() {
                     Mostrando <span className="font-semibold">{Math.min((page - 1) * perPage + 1, total)}</span> - <span className="font-semibold">{Math.min(page * perPage, total)}</span> de <span className="font-semibold">{total}</span> campañas
                 </div>
                 <div className="flex items-center gap-2">
-                    <button 
-                        disabled={page <= 1} 
+                    <button
+                        disabled={page <= 1}
                         onClick={() => setPage((p) => Math.max(1, p - 1))}
                         className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -411,8 +417,8 @@ export default function Reports() {
                     <span className="px-3 text-sm">
                         Página <span className="font-semibold">{page}</span> de <span className="font-semibold">{totalPages}</span>
                     </span>
-                    <button 
-                        disabled={page >= totalPages} 
+                    <button
+                        disabled={page >= totalPages}
                         onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                         className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
