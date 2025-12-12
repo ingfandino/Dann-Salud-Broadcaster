@@ -133,3 +133,19 @@ exports.deleteAutoresponse = async (req, res) => {
         res.status(500).json({ error: "Error interno" });
     }
 };
+
+// Toggle activo/inactivo
+exports.toggleAutoresponse = async (req, res) => {
+    try {
+        const autoresponse = await Autoresponse.findOne({ _id: req.params.id, createdBy: req.user._id });
+        if (!autoresponse) return res.status(404).json({ error: "Autoresponse no encontrado" });
+
+        autoresponse.active = !autoresponse.active;
+        await autoresponse.save();
+
+        res.json(autoresponse);
+    } catch (err) {
+        logger.error(" Error alternando estado de autoresponse:", err);
+        res.status(500).json({ error: "Error interno" });
+    }
+};

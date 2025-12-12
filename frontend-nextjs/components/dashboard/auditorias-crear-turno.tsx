@@ -1,0 +1,824 @@
+"use client"
+
+import { useState, useEffect, useMemo, useRef } from "react"
+import { useTheme } from "./theme-provider"
+import { cn } from "@/lib/utils"
+import { Upload, Send, X, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
+import { api } from "@/lib/api"
+import { toast } from "sonner"
+import { useAuth } from "@/lib/auth"
+
+const ARGENTINE_OBRAS_SOCIALES = [
+  "OSDE",
+  "OSDEPYM",
+  "IOMA",
+  "OSSEG",
+  "OSDE 210",
+  "OSFATUN",
+  "OSDE GBA",
+  "OSECAC (126205)",
+  "OSPRERA",
+  "OMINT",
+  "OSSEGUR",
+  "OSPR",
+  "OSUTHGRA (108803)",
+  "OSBLYCA",
+  "UOM",
+  "OSPM",
+  "OSPECON (105408)",
+  "Elevar (114307)",
+  "OSCHOCA (105804)",
+  "OSPEP (113908)",
+  "OSPROTURA",
+  "OSPSIP (119708)",
+  "OSEIV (122401)",
+  "OSPIF (108100)",
+  "OSIPA (114208)",
+  "OSPESESGYPE (107206)",
+  "OSTCARA (126007)",
+  "OSPIT (121002)",
+  "OSMP (111209)",
+  "OSPECA (103709)",
+  "OSPIQYP (118705)",
+  "OSBLYCA (102904)",
+  "VIASANO (2501)",
+  "OSPCYD (103402)",
+  "OSUOMRA (112103)",
+  "OSAMOC (3405)",
+  "OSPAGA (101000)",
+  "OSPF (107404)",
+  "OSPIP (116006)",
+  "OSPIC",
+  "OSG (109202)",
+  "OSPERYH (106500)",
+  "OSPCRA (104009)"
+]
+
+const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
+const TIPO_VENTA = ["alta", "cambio"]
+
+export function AuditoriasCrearTurno() {
+  const { theme } = useTheme()
+  const { user } = useAuth()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const isSupervisor = user?.role?.toLowerCase() === "supervisor"
+  const isGerenciaOrAuditor = ["gerencia", "auditor"].includes(user?.role?.toLowerCase() || "")
+
+  // Form State
+  const [form, setForm] = useState({
+    nombre: "",
+    cuil: "",
+    telefono: "",
+    tipoVenta: "alta",
+    obraSocialAnterior: "",
+    obraSocialVendida: "Binimed",
+    fecha: "",
+    hora: "",
+    supervisor: "",
+    asesor: "",
+    validador: "",
+    datosExtra: ""
+  })
+
+  // Lists
+  const [asesores, setAsesores] = useState<any[]>([])
+  const [supervisores, setSupervisores] = useState<any[]>([])
+  const [validadores, setValidadores] = useState<any[]>([])
+  const [availableSlots, setAvailableSlots] = useState<any[]>([])
+  const [otroEquipo, setOtroEquipo] = useState(false)
+
+  // Loading states
+  const [loading, setLoading] = useState(false)
+  const [loadingSlots, setLoadingSlots] = useState(false)
+
+  // Bulk upload
+  const [uploadingBulk, setUploadingBulk] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 })
+  const [rejectedRows, setRejectedRows] = useState<any[]>([])
+
+  // Load supervisors (for Gerencia/Auditor)
+  useEffect(() => {
+    if (isGerenciaOrAuditor) {
+      loadSupervisores()
+    }
+  }, [isGerenciaOrAuditor])
+
+  // Load asesores when supervisor changes
+  useEffect(() => {
+    if (form.supervisor) {
+      loadAsesoresByEquipo(form.supervisor)
+    } else if (isSupervisor) {
+      loadAsesores()
+    }
+  }, [form.supervisor, isSupervisor])
+
+  // Load validadores
+  useEffect(() => {
+    console.log('Validadores useEffect triggered:', { otroEquipo, asesor: form.asesor, user: user?.nombre, numeroEquipo: user?.numeroEquipo, isSupervisor })
+    if (otroEquipo) {
+      loadTodosLosValidadores()
+    } else {
+      loadValidadores()
+    }
+  }, [otroEquipo, form.asesor, user, isSupervisor])
+
+  // Load available slots when date changes
+  useEffect(() => {
+    if (form.fecha) {
+      loadAvailableSlots(form.fecha)
+    }
+  }, [form.fecha])
+
+  // Check for pre-fill data from Lead Management
+  useEffect(() => {
+    const prefillData = sessionStorage.getItem('prefillAudit')
+    if (prefillData) {
+      try {
+        const data = JSON.parse(prefillData)
+        setForm(prev => ({
+          ...prev,
+          nombre: data.nombre || "",
+          cuil: data.cuil || "",
+          telefono: data.telefono || "",
+          obraSocialAnterior: data.obraSocialAnterior || "",
+          datosExtra: data.localidad ? `Localidad: ${data.localidad}` : ""
+        }))
+        sessionStorage.removeItem('prefillAudit')
+        toast.info("Datos precargados desde Lead Management")
+      } catch (e) {
+        console.error("Error parsing prefill data", e)
+      }
+    }
+  }, [])
+
+  const loadSupervisores = async () => {
+    try {
+      const { data } = await api.users.list()
+      const users = Array.isArray(data) ? data : []
+      setSupervisores(users.filter((u: any) => u.role?.toLowerCase() === "supervisor" && u.active !== false))
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  // Load asesores
+  const loadAsesores = async () => {
+    try {
+      // Use scope=group to filter by team on backend if possible, or filter on client
+      const { data } = await api.users.list("scope=group")
+      const users = Array.isArray(data) ? data : []
+      const myNumeroEquipo = user?.numeroEquipo
+
+      const filtered = users.filter((u: any) => {
+        const isActive = u.active !== false
+        const hasName = u.nombre && u.nombre.trim().length > 0
+        const isCorrectRole = ["asesor", "auditor", "supervisor"].includes(u.role?.toLowerCase())
+        // If supervisor, filter by own team. If not supervisor, backend 'scope=group' might have already filtered, 
+        // but we double check if we have the info.
+        const sameTeam = !isSupervisor || !myNumeroEquipo || String(u.numeroEquipo) === String(myNumeroEquipo)
+        return isActive && hasName && isCorrectRole && sameTeam
+      }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
+
+      setAsesores(filtered)
+    } catch (err) {
+      console.error(err)
+      toast.error("Error al cargar asesores")
+    }
+  }
+
+  const loadAsesoresByEquipo = async (supervisorId: string) => {
+    try {
+      // First get the supervisor to know their team
+      const { data: allUsers } = await api.users.list()
+      const users = Array.isArray(allUsers) ? allUsers : []
+
+      const supervisor = users.find((u: any) => u._id === supervisorId)
+      if (!supervisor?.numeroEquipo) {
+        setAsesores([])
+        return
+      }
+
+      const filtered = users.filter((u: any) => {
+        const isActive = u.active !== false
+        const hasName = u.nombre && u.nombre.trim().length > 0
+        const isCorrectRole = ["asesor", "auditor", "supervisor"].includes(u.role?.toLowerCase())
+        const sameTeam = String(u.numeroEquipo) === String(supervisor.numeroEquipo)
+        return isActive && hasName && isCorrectRole && sameTeam
+      }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
+
+      setAsesores(filtered)
+
+      // Also load validators for this team
+      loadValidadoresByEquipo(supervisor.numeroEquipo, users)
+    } catch (err) {
+      console.error(err)
+      toast.error("Error al cargar asesores del equipo")
+    }
+  }
+
+  const loadValidadoresByEquipo = (numeroEquipo: string, allUsers: any[]) => {
+    const filtered = allUsers.filter((u: any) => {
+      const isActive = u.active !== false
+      const hasName = u.nombre && u.nombre.trim().length > 0
+      const sameTeam = String(u.numeroEquipo) === String(numeroEquipo)
+      // Exclude selected asesor if any (handled in render or selection, but good to keep in mind)
+      return isActive && hasName && sameTeam
+    }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
+    setValidadores(filtered)
+  }
+
+  const loadValidadores = async () => {
+    try {
+      // Determine the target team number
+      let targetNumeroEquipo = user?.numeroEquipo
+
+      if (isGerenciaOrAuditor) {
+        if (!form.supervisor) {
+          setValidadores([])
+          return
+        }
+        const selectedSupervisor = supervisores.find(s => s._id === form.supervisor)
+        if (selectedSupervisor) {
+          targetNumeroEquipo = selectedSupervisor.numeroEquipo
+        }
+      }
+
+      console.log('loadValidadores called', {
+        role: user?.role,
+        userTeam: user?.numeroEquipo,
+        targetTeam: targetNumeroEquipo,
+        supervisor: form.supervisor
+      })
+
+      if (!targetNumeroEquipo) {
+        console.log('No targetNumeroEquipo, setting validadores to empty')
+        setValidadores([])
+        return
+      }
+
+      const { data } = await api.users.list("scope=group")
+      const users = Array.isArray(data) ? data : []
+
+      const filtered = users.filter((u: any) => {
+        const isActive = u.active !== false
+        const hasName = u.nombre && u.nombre.trim().length > 0
+        const sameTeam = String(u.numeroEquipo) === String(targetNumeroEquipo)
+        const notAsesor = !form.asesor || u._id !== form.asesor
+        // If supervisor, can select self. If not, exclude self.
+        const notSelf = isSupervisor || u._id !== user?._id
+        return isActive && hasName && sameTeam && notAsesor && notSelf
+      }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
+
+      console.log('Filtered validadores:', filtered.length, 'users from team', targetNumeroEquipo)
+      setValidadores(filtered)
+    } catch (err) {
+      console.error('Error loading validadores:', err)
+    }
+  }
+
+  const loadTodosLosValidadores = async () => {
+    try {
+      const { data } = await api.users.list("includeAllAuditors=true")
+      const users = Array.isArray(data) ? data : []
+
+      const filtered = users.filter((u: any) => {
+        const isActive = u.active !== false
+        const hasName = u.nombre && u.nombre.trim().length > 0
+        const isCorrectRole = ["asesor", "supervisor", "auditor", "gerencia"].includes(u.role?.toLowerCase())
+        const notAsesor = !form.asesor || u._id !== form.asesor
+        return isActive && hasName && isCorrectRole && notAsesor
+      }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
+
+      setValidadores(filtered)
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  const loadAvailableSlots = async (date: string) => {
+    try {
+      setLoadingSlots(true)
+      const { data } = await api.audits.getAvailableSlots(date)
+      setAvailableSlots(Array.isArray(data) ? data : [])
+    } catch (err) {
+      console.error(err)
+      setAvailableSlots([])
+    } finally {
+      setLoadingSlots(false)
+    }
+  }
+
+  const generateTimeOptions = () => {
+    const options = []
+    const start = new Date()
+    start.setHours(9, 20, 0, 0)
+    const end = new Date()
+    end.setHours(23, 0, 0, 0)
+    let cur = new Date(start)
+
+    while (cur <= end) {
+      const hh = String(cur.getHours()).padStart(2, "0")
+      const mm = String(cur.getMinutes()).padStart(2, "0")
+      options.push(`${hh}:${mm}`)
+      cur.setMinutes(cur.getMinutes() + 20)
+    }
+    return options
+  }
+
+  const timeOptions = useMemo(() => {
+    const all = generateTimeOptions()
+    const map: Record<string, number> = {}
+
+    if (Array.isArray(availableSlots)) {
+      availableSlots.forEach((s: any) => {
+        map[s.time] = s.count
+      })
+    }
+
+    return all.map(t => ({
+      time: t,
+      disabled: (map[t] || 0) >= 10
+    }))
+  }, [availableSlots])
+
+  const handleChange = (field: string, value: string) => {
+    setForm(prev => ({ ...prev, [field]: value }))
+  }
+
+  const validate = () => {
+    if (!form.nombre.trim()) return "Nombre es requerido"
+    if (!/^\d{11}$/.test(form.cuil)) return "CUIL debe tener exactamente 11 dígitos"
+    if (form.telefono && !/^\d{10}$/.test(form.telefono.replace(/\D/g, '')))
+      return "Teléfono debe tener 10 dígitos"
+    if (!form.fecha) return "Fecha es requerida"
+    if (!form.hora) return "Hora es requerida"
+    if (!form.asesor) return "Asesor es requerido"
+    if (!form.validador) return "Validador es requerido"
+    if (isGerenciaOrAuditor && !form.supervisor) return "Supervisor es requerido"
+    return null
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    const error = validate()
+    if (error) {
+      toast.error(error)
+      return
+    }
+
+    try {
+      setLoading(true)
+
+      // Use browser's local timezone
+      const scheduledAt = new Date(`${form.fecha}T${form.hora}:00`)
+      const payload: any = {
+        nombre: form.nombre,
+        cuil: form.cuil,
+        telefono: form.telefono,
+        tipoVenta: form.tipoVenta,
+        obraSocialAnterior: form.obraSocialAnterior,
+        obraSocialVendida: form.obraSocialVendida,
+        scheduledAt: scheduledAt.toISOString(),
+        asesor: form.asesor,
+        validador: form.validador,
+        datosExtra: form.datosExtra,
+        status: "Pendiente"
+      }
+
+      if (form.supervisor) {
+        payload.supervisor = form.supervisor
+      }
+
+      await api.audits.create(payload)
+      toast.success("Auditoría creada exitosamente")
+
+      // Reset form
+      setForm({
+        nombre: "",
+        cuil: "",
+        telefono: "",
+        tipoVenta: "alta",
+        obraSocialAnterior: "",
+        obraSocialVendida: "Binimed",
+        fecha: "",
+        hora: "",
+        supervisor: "",
+        asesor: "",
+        validador: "",
+        datosExtra: ""
+      })
+    } catch (err: any) {
+      console.error('Full error:', err)
+      console.error('Error response:', err.response)
+      console.error('Error response data:', JSON.stringify(err.response?.data, null, 2))
+      console.error('Error status:', err.response?.status)
+
+      // Log specific error details if they exist
+      if (err.response?.data?.error) {
+        console.error('Error details:', JSON.stringify(err.response.data.error, null, 2))
+        console.error('Error code:', err.response.data.error.code)
+        console.error('Error message:', err.response.data.error.message)
+        console.error('Error traceId:', err.response.data.error.traceId)
+        console.error('Error details array:', err.response.data.error.details)
+      }
+
+      let errorMessage = "Error al crear auditoría"
+
+      if (err.response?.data?.error) {
+        if (typeof err.response.data.error === 'string') {
+          errorMessage = err.response.data.error
+        } else if (typeof err.response.data.error === 'object' && err.response.data.error.message) {
+          errorMessage = err.response.data.error.message
+        }
+      } else if (err.response?.data?.message) {
+        errorMessage = err.response.data.message
+      } else if (err.message) {
+        errorMessage = err.message
+      }
+
+      toast.error(errorMessage)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    try {
+      setUploadingBulk(true)
+      setBulkProgress({ current: 0, total: 0 })
+      setRejectedRows([])
+
+      const response = await api.audits.bulkUpload(file)
+      const { accepted, rejected } = response.data
+
+      toast.success(`${accepted} auditorías creadas exitosamente`)
+
+      if (rejected && rejected.length > 0) {
+        setRejectedRows(rejected)
+        toast.warning(`${rejected.length} filas rechazadas`)
+      }
+    } catch (err: any) {
+      console.error(err)
+      toast.error(err.response?.data?.message || "Error en carga masiva")
+    } finally {
+      setUploadingBulk(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+    }
+  }
+
+  return (
+    <div className="space-y-6 animate-fade-in-up">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className={cn("text-xl font-semibold", theme === "dark" ? "text-white" : "text-gray-800")}>
+            Pautar Auditoría / Venta
+          </h2>
+          <p className={cn("text-sm mt-1", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+            Crear nuevo turno de auditoría
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={handleBulkUpload}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingBulk}
+            className={cn(
+              "px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2",
+              uploadingBulk ? "opacity-50 cursor-not-allowed" : "",
+              theme === "dark"
+                ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
+                : "bg-green-500 text-white hover:bg-green-600"
+            )}
+          >
+            {uploadingBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            Carga Masiva
+          </button>
+        </div>
+      </div>
+
+      {/* Rejected Rows Alert */}
+      {rejectedRows.length > 0 && (
+        <div className={cn(
+          "rounded-xl border p-4",
+          theme === "dark" ? "bg-red-500/10 border-red-500/20" : "bg-red-50 border-red-200"
+        )}>
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-500 mt-0.5" />
+            <div className="flex-1">
+              <h3 className={cn("font-semibold text-sm mb-2", theme === "dark" ? "text-red-400" : "text-red-700")}>
+                Filas rechazadas ({rejectedRows.length})
+              </h3>
+              <div className="space-y-1 text-xs">
+                {rejectedRows.slice(0, 5).map((row, idx) => (
+                  <div key={idx} className={theme === "dark" ? "text-red-300" : "text-red-600"}>
+                    Fila {row.row}: {row.reason}
+                  </div>
+                ))}
+                {rejectedRows.length > 5 && (
+                  <div className="text-gray-500">... y {rejectedRows.length - 5} más</div>
+                )}
+              </div>
+              <button
+                onClick={() => setRejectedRows([])}
+                className="mt-2 text-xs underline hover:no-underline"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Form */}
+      <div className={cn(
+        "rounded-2xl border p-6 backdrop-blur-sm max-w-2xl mx-auto",
+        theme === "dark"
+          ? "bg-gradient-to-br from-white/5 to-white/[0.02] border-white/10"
+          : "bg-white border-gray-200 shadow-sm"
+      )}>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Nombre */}
+          <div>
+            <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+              Nombre de afiliado <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.nombre}
+              onChange={(e) => handleChange("nombre", e.target.value)}
+              className={cn(
+                "w-full px-3 py-2 rounded-lg border text-sm",
+                theme === "dark"
+                  ? "bg-white/5 border-white/10 text-white placeholder-gray-500"
+                  : "bg-white border-gray-200 text-gray-800 placeholder-gray-400"
+              )}
+              required
+            />
+          </div>
+
+          {/* CUIL */}
+          <div>
+            <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+              CUIL <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="11 dígitos"
+              value={form.cuil}
+              onChange={(e) => handleChange("cuil", e.target.value.replace(/\D/g, ""))}
+              maxLength={11}
+              className={cn(
+                "w-full px-3 py-2 rounded-lg border text-sm",
+                theme === "dark"
+                  ? "bg-white/5 border-white/10 text-white placeholder-gray-500"
+                  : "bg-white border-gray-200 text-gray-800 placeholder-gray-400"
+              )}
+              required
+            />
+          </div>
+
+          {/* Teléfono */}
+          <div>
+            <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+              Teléfono
+            </label>
+            <input
+              type="tel"
+              value={form.telefono}
+              onChange={(e) => handleChange("telefono", e.target.value)}
+              className={cn(
+                "w-full px-3 py-2 rounded-lg border text-sm",
+                theme === "dark"
+                  ? "bg-white/5 border-white/10 text-white placeholder-gray-500"
+                  : "bg-white border-gray-200 text-gray-800 placeholder-gray-400"
+              )}
+            />
+          </div>
+
+          {/* Tipo de venta & Obra Social Vendida */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                Tipo de venta
+              </label>
+              <select
+                value={form.tipoVenta}
+                onChange={(e) => handleChange("tipoVenta", e.target.value)}
+                className={cn(
+                  "w-full px-3 py-2 rounded-lg border text-sm",
+                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                )}
+              >
+                {TIPO_VENTA.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                Obra social vendida
+              </label>
+              <select
+                value={form.obraSocialVendida}
+                onChange={(e) => handleChange("obraSocialVendida", e.target.value)}
+                className={cn(
+                  "w-full px-3 py-2 rounded-lg border text-sm",
+                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                )}
+              >
+                {OBRAS_VENDIDAS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Obra social anterior */}
+          <div>
+            <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+              Obra social anterior
+            </label>
+            <select
+              value={form.obraSocialAnterior}
+              onChange={(e) => handleChange("obraSocialAnterior", e.target.value)}
+              className={cn(
+                "w-full px-3 py-2 rounded-lg border text-sm",
+                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+              )}
+            >
+              <option value="">-- Seleccionar --</option>
+              {ARGENTINE_OBRAS_SOCIALES.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+
+          {/* Fecha & Hora */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                Fecha (día) <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date"
+                value={form.fecha}
+                onChange={(e) => handleChange("fecha", e.target.value)}
+                className={cn(
+                  "w-full px-3 py-2 rounded-lg border text-sm",
+                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                )}
+                required
+              />
+            </div>
+            <div>
+              <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                Hora (turno) <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={form.hora}
+                onChange={(e) => handleChange("hora", e.target.value)}
+                disabled={loadingSlots}
+                className={cn(
+                  "w-full px-3 py-2 rounded-lg border text-sm",
+                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                )}
+                required
+              >
+                <option value="">-- Seleccionar --</option>
+                {timeOptions.map(({ time, disabled }) => (
+                  <option key={time} value={time} disabled={disabled}>
+                    {time} {disabled ? "(lleno)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Supervisor (only for Gerencia/Auditor) */}
+          {isGerenciaOrAuditor && (
+            <div>
+              <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                Supervisor <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={form.supervisor}
+                onChange={(e) => handleChange("supervisor", e.target.value)}
+                className={cn(
+                  "w-full px-3 py-2 rounded-lg border text-sm",
+                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                )}
+                required
+              >
+                <option value="">-- Seleccionar supervisor --</option>
+                {supervisores.map(s => <option key={s._id} value={s._id}>{s.nombre}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Asesor */}
+          <div>
+            <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+              Asesor <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={form.asesor}
+              onChange={(e) => handleChange("asesor", e.target.value)}
+              className={cn(
+                "w-full px-3 py-2 rounded-lg border text-sm",
+                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+              )}
+              required
+            >
+              <option value="">-- Seleccionar asesor --</option>
+              {asesores.map(a => <option key={a._id} value={a._id}>{a.nombre} ({a.role})</option>)}
+            </select>
+            {isGerenciaOrAuditor && !form.supervisor && (
+              <p className={cn("text-xs mt-1", theme === "dark" ? "text-cyan-400" : "text-cyan-600")}>
+                Primero selecciona un supervisor
+              </p>
+            )}
+          </div>
+
+          {/* Validador */}
+          <div>
+            <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+              Validador <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={form.validador}
+              onChange={(e) => handleChange("validador", e.target.value)}
+              className={cn(
+                "w-full px-3 py-2 rounded-lg border text-sm",
+                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+              )}
+              required
+            >
+              <option value="">-- Seleccionar validador --</option>
+              {validadores.map(v => <option key={v._id} value={v._id}>{v.nombre} ({v.role})</option>)}
+            </select>
+
+            {/* Checkbox otro equipo */}
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                type="checkbox"
+                id="otroEquipo"
+                checked={otroEquipo}
+                onChange={(e) => setOtroEquipo(e.target.checked)}
+                className="w-4 h-4 rounded"
+              />
+              <label htmlFor="otroEquipo" className={cn("text-xs", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                Pertenece a otro equipo
+              </label>
+            </div>
+            <p className={cn("text-xs mt-1", theme === "dark" ? "text-gray-500" : "text-gray-500")}>
+              Selecciona un compañero de tu equipo que validará la venta
+            </p>
+          </div>
+
+          {/* Datos extra */}
+          <div>
+            <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+              Datos extra (opcional)
+            </label>
+            <textarea
+              placeholder="Ejemplo: Afiliado con familiares, enfermedad preexistente, observaciones..."
+              value={form.datosExtra}
+              onChange={(e) => handleChange("datosExtra", e.target.value)}
+              rows={3}
+              className={cn(
+                "w-full px-3 py-2 rounded-lg border text-sm resize-none",
+                theme === "dark"
+                  ? "bg-white/5 border-white/10 text-white placeholder-gray-500"
+                  : "bg-white border-gray-200 text-gray-800 placeholder-gray-400"
+              )}
+            />
+          </div>
+
+          {/* Submit button */}
+          <button
+            type="submit"
+            disabled={loading}
+            className={cn(
+              "w-full px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2",
+              loading ? "opacity-50 cursor-not-allowed" : "",
+              theme === "dark"
+                ? "bg-gradient-to-r from-cyan-500 to-teal-500 text-white hover:from-cyan-600 hover:to-teal-600"
+                : "bg-gradient-to-r from-cyan-500 to-teal-500 text-white hover:from-cyan-600 hover:to-teal-600"
+            )}
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            {loading ? "Creando..." : "Crear Auditoría"}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}

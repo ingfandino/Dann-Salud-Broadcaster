@@ -25,7 +25,7 @@ exports.startJob = async (req, res) => {
         // ✅ CORRECCIÓN: Deduplicar contactos por teléfono antes de crear el job
         const Contact = require('../models/Contact');
         const contactDocs = await Contact.find({ _id: { $in: contacts } }).lean();
-        
+
         const normalizePhone = (raw) => {
             let digits = String(raw || "").replace(/\D/g, "");
             digits = digits.replace(/^0+/, "");
@@ -38,11 +38,11 @@ exports.startJob = async (req, res) => {
             }
             return digits;
         };
-        
+
         const seenPhones = new Set();
         const uniqueContactIds = [];
         let duplicatesRemoved = 0;
-        
+
         for (const contact of contactDocs) {
             const normalized = normalizePhone(contact.telefono);
             if (!seenPhones.has(normalized)) {
@@ -53,11 +53,11 @@ exports.startJob = async (req, res) => {
                 logger.warn(`⚠️ Contacto duplicado eliminado del job: ${contact.telefono} (${normalized})`);
             }
         }
-        
+
         if (duplicatesRemoved > 0) {
             logger.info(`🔄 Eliminados ${duplicatesRemoved} contactos duplicados del job`);
         }
-        
+
         if (uniqueContactIds.length === 0) {
             return res.status(400).json({ error: "No hay contactos válidos únicos para enviar" });
         }
@@ -88,10 +88,10 @@ exports.startJob = async (req, res) => {
         // 🚨 DETECCIÓN DE PALABRAS PROHIBIDAS
         const bannedWordController = require("./bannedWordController");
         const detectedWords = await bannedWordController.detectBannedWords(finalMessage);
-        
+
         if (detectedWords.length > 0) {
             logger.warn(`⚠️ Palabras prohibidas detectadas en campaña: ${detectedWords.map(w => w.word).join(", ")}`);
-            
+
             // Notificar a gerencia y supervisores
             for (const detected of detectedWords) {
                 await bannedWordController.notifyBannedWordDetection({
@@ -103,7 +103,7 @@ exports.startJob = async (req, res) => {
                     detectedIn: "bulk_message"
                 });
             }
-            
+
             // OPCIONAL: Decidir si bloquear el envío o solo alertar
             // Por ahora solo alertamos, pero la campaña continúa
             logger.info(`✅ Notificaciones de palabras prohibidas enviadas. Campaña continúa.`);
@@ -147,6 +147,14 @@ exports.startJob = async (req, res) => {
         });
 
         pushMetrics();
+
+        // ✅ Emitir evento de nuevo job
+        try {
+            emitJobsUpdate({ ...job.toObject(), progress: 0 });
+        } catch (e) {
+            logger.warn(`Error emitiendo evento de nuevo job ${job._id}:`, e.message);
+        }
+
         res.status(201).json(job);
     } catch (err) {
         logger.error("❌ Error creando job", { error: err.message });
@@ -173,13 +181,13 @@ exports.pauseJob = async (req, res) => {
 
         await addLog({ tipo: "info", mensaje: `Job pausado: ${job._id}`, metadata: { jobId: job._id } });
         pushMetrics();
-        
+
         // ✅ Emitir actualizaciones en tiempo real
         try {
             const total = job.stats?.total || job.contacts?.length || 0;
             const processed = (job.stats?.sent || 0) + (job.stats?.failed || 0);
             const progress = total > 0 ? Math.min(100, ((processed / total) * 100).toFixed(2)) : 0;
-            
+
             emitJobProgress(job._id.toString(), {
                 _id: job._id,
                 status: job.status,
@@ -187,12 +195,12 @@ exports.pauseJob = async (req, res) => {
                 stats: job.stats,
                 currentIndex: job.currentIndex
             });
-            
+
             emitJobsUpdate({ ...job.toObject(), progress: parseFloat(progress) });
         } catch (e) {
             logger.warn(`Error emitiendo actualizaciones del job ${job._id}:`, e.message);
         }
-        
+
         res.json(job);
     } catch (err) {
         logger.error("❌ Error pausando job:", err);
@@ -223,13 +231,13 @@ exports.resumeJob = async (req, res) => {
 
         await addLog({ tipo: "info", mensaje: `Job reanudado: ${job._id}`, metadata: { jobId: job._id } });
         pushMetrics();
-        
+
         // ✅ Emitir actualizaciones en tiempo real
         try {
             const total = job.stats?.total || job.contacts?.length || 0;
             const processed = (job.stats?.sent || 0) + (job.stats?.failed || 0);
             const progress = total > 0 ? Math.min(100, ((processed / total) * 100).toFixed(2)) : 0;
-            
+
             emitJobProgress(job._id.toString(), {
                 _id: job._id,
                 status: job.status,
@@ -237,7 +245,7 @@ exports.resumeJob = async (req, res) => {
                 stats: job.stats,
                 currentIndex: job.currentIndex
             });
-            
+
             emitJobsUpdate({ ...job.toObject(), progress: parseFloat(progress) });
         } catch (e) {
             logger.warn(`Error emitiendo actualizaciones del job ${job._id}:`, e.message);
@@ -245,7 +253,7 @@ exports.resumeJob = async (req, res) => {
 
         // Re-despachar procesamiento en background (no bloquear la respuesta)
         setTimeout(() => {
-            try { processJob(job._id).catch(() => {}); } catch (_) {}
+            try { processJob(job._id).catch(() => { }); } catch (_) { }
         }, 0);
 
         res.json(job);
@@ -272,7 +280,7 @@ exports.cancelJob = async (req, res) => {
 
         // 🗑️ Eliminar mensajes asociados
         await Message.deleteMany({ job: job._id });
-        
+
         // ✅ Emitir actualización antes de eliminar (para que UI actualice)
         try {
             emitJobsUpdate({ _id: job._id, status: "cancelado", deleted: true });
@@ -344,10 +352,10 @@ exports.listJobs = async (req, res) => {
             filter = {};
         } else if (role === "supervisor") {
             // mostrar jobs creados por usuarios del mismo numeroEquipo (incluyéndose)
-            filter = { };
+            filter = {};
         } else if (role === "revendedor") {
             // ✅ Revendedores ven jobs creados por otros revendedores
-            filter = { };
+            filter = {};
         } else if (role === "asesor") {
             filter = { createdBy: userId };
         } else {
@@ -373,13 +381,13 @@ exports.listJobs = async (req, res) => {
             const total = job.stats?.total || job.contacts?.length || 0;
             const processed = (job.stats?.sent || 0) + (job.stats?.failed || 0);
             const progress = total > 0 ? Math.min(100, ((processed / total) * 100).toFixed(2)) : 0;
-            
+
             // Contar respuestas recibidas (mensajes inbound)
             const repliesCount = await Message.countDocuments({
                 job: job._id,
                 direction: 'inbound'
             });
-            
+
             return {
                 _id: job._id,
                 name: job.name,
@@ -387,8 +395,14 @@ exports.listJobs = async (req, res) => {
                 progress,
                 scheduledFor: job.scheduledFor,
                 createdAt: job.createdAt,
+                completedAt: job.completedAt, // ✅ Agregar fecha de finalización
                 stats: job.stats,
+                // ✅ Agregar campos que espera el frontend
+                totalContacts: job.stats?.total || job.contacts?.length || 0,
+                sentCount: job.stats?.sent || 0,
+                failedCount: job.stats?.failed || 0,
                 repliesCount,
+                restBreakUntil: job.restBreakUntil,
                 createdBy: job.createdBy
                     ? {
                         _id: job.createdBy._id,
@@ -467,15 +481,15 @@ exports.exportAutoResponseReport = async (req, res) => {
         const { id } = req.params;
         const AutoResponseLog = require("../models/AutoResponseLog");
         const Contact = require("../models/Contact");
-        
+
         // Obtener job para verificar permisos
         const job = await SendJob.findById(id);
         if (!job) return res.status(404).json({ error: "Job no encontrado" });
-        
+
         // Verificar permisos (similar a exportJobResultsExcel)
         const userRole = req.user?.role?.toLowerCase();
         const userId = req.user?._id;
-        
+
         if (!["admin", "gerencia"].includes(userRole)) {
             if (userRole === "supervisor") {
                 const jobCreatorEquipo = job.createdBy?.numeroEquipo;
@@ -489,25 +503,25 @@ exports.exportAutoResponseReport = async (req, res) => {
                 }
             }
         }
-        
+
         // Obtener logs de auto-respuestas para este job
         const logs = await AutoResponseLog.find({ job: id })
             .populate('contact', 'nombre telefono')
             .sort({ respondedAt: 1 });
-        
+
         if (logs.length === 0) {
-            return res.status(404).json({ 
-                error: "No hay auto-respuestas registradas para esta campaña" 
+            return res.status(404).json({
+                error: "No hay auto-respuestas registradas para esta campaña"
             });
         }
-        
+
         const workbook = new ExcelJS.Workbook();
-        
+
         // ═══════════════════════════════════════════════════════════
         // HOJA 1: DETALLE DE AUTO-RESPUESTAS
         // ═══════════════════════════════════════════════════════════
         const detailSheet = workbook.addWorksheet('Detalle Auto-respuestas');
-        
+
         detailSheet.columns = [
             { header: 'Fecha/Hora', key: 'fecha', width: 20 },
             { header: 'Afiliado', key: 'nombre', width: 30 },
@@ -516,7 +530,7 @@ exports.exportAutoResponseReport = async (req, res) => {
             { header: 'Palabra Clave', key: 'keyword', width: 20 },
             { header: 'Auto-respuesta Enviada', key: 'response', width: 50 }
         ];
-        
+
         // Agregar datos
         logs.forEach(log => {
             detailSheet.addRow({
@@ -528,7 +542,7 @@ exports.exportAutoResponseReport = async (req, res) => {
                 response: log.response || ''
             });
         });
-        
+
         // Estilo del header
         detailSheet.getRow(1).eachCell(cell => {
             cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -539,27 +553,27 @@ exports.exportAutoResponseReport = async (req, res) => {
             };
             cell.alignment = { vertical: 'middle', horizontal: 'center' };
         });
-        
+
         // ═══════════════════════════════════════════════════════════
         // HOJA 2: RESUMEN POR PALABRA CLAVE
         // ═══════════════════════════════════════════════════════════
         const summarySheet = workbook.addWorksheet('Resumen');
-        
+
         summarySheet.columns = [
             { header: 'Palabra Clave', key: 'keyword', width: 25 },
             { header: 'Cantidad de Respuestas', key: 'count', width: 25 },
             { header: 'Porcentaje', key: 'percentage', width: 15 }
         ];
-        
+
         // Agrupar por keyword
         const grouped = logs.reduce((acc, log) => {
             const key = log.isFallback ? 'Comodín' : (log.keyword || 'Sin keyword');
             acc[key] = (acc[key] || 0) + 1;
             return acc;
         }, {});
-        
+
         const total = logs.length;
-        
+
         // Agregar filas de resumen
         Object.entries(grouped)
             .sort((a, b) => b[1] - a[1]) // Ordenar por cantidad descendente
@@ -571,14 +585,14 @@ exports.exportAutoResponseReport = async (req, res) => {
                     percentage: `${percentage}%`
                 });
             });
-        
+
         // Agregar fila de total
         summarySheet.addRow({
             keyword: 'TOTAL',
             count: total,
             percentage: '100%'
         });
-        
+
         // Estilo del header
         summarySheet.getRow(1).eachCell(cell => {
             cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -589,7 +603,7 @@ exports.exportAutoResponseReport = async (req, res) => {
             };
             cell.alignment = { vertical: 'middle', horizontal: 'center' };
         });
-        
+
         // Estilo de la fila de total
         const lastRow = summarySheet.lastRow;
         lastRow.eachCell(cell => {
@@ -600,7 +614,7 @@ exports.exportAutoResponseReport = async (req, res) => {
                 fgColor: { argb: 'FFE7E6E6' }
             };
         });
-        
+
         // ═══════════════════════════════════════════════════════════
         // ENVIAR ARCHIVO
         // ═══════════════════════════════════════════════════════════
@@ -612,10 +626,10 @@ exports.exportAutoResponseReport = async (req, res) => {
             "Content-Disposition",
             `attachment; filename=autorespuestas_${id}.xlsx`
         );
-        
+
         await workbook.xlsx.write(res);
         res.end();
-        
+
         logger.info(`✅ Reporte de auto-respuestas generado para job ${id}: ${logs.length} registros`);
     } catch (err) {
         logger.error("❌ Error generando reporte de auto-respuestas:", err);

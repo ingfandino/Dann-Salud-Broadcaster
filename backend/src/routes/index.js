@@ -39,19 +39,19 @@ router.use("/users", userRoutes);
 router.get("/groups", requireAuth, async (req, res) => {
     try {
         const User = require("../models/User");
-        const grupos = await User.distinct("numeroEquipo", { 
+        const grupos = await User.distinct("numeroEquipo", {
             deletedAt: null,
             numeroEquipo: { $exists: true, $ne: null, $ne: "" }
         });
-        
+
         grupos.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-        
+
         const gruposFormateados = grupos.map(g => ({
             _id: g,
             nombre: g,
             name: g
         }));
-        
+
         res.json(gruposFormateados);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -76,5 +76,6 @@ router.use("/internal-messages", internalMessageRoutes);
 router.use("/affiliates", affiliateRoutes);
 router.use("/banned-words", bannedWordRoutes);
 router.use("/employees", employeeRoutes);
+router.use("/assignments", require("./assignments"));
 
 module.exports = router;

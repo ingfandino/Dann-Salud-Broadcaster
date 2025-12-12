@@ -247,6 +247,18 @@ class BaileysClient {
               from: this.userId
             });
             logger.info(`[Baileys][${this.userId}] Mensaje inbound registrado de ${phoneNumber} (job: ${enviado.job})`);
+
+            // ✅ Emitir evento de respuesta de campaña para actualizar métricas
+            try {
+              getIO().to(`user_${this.userId}`).emit('campaign:reply', {
+                campaignId: enviado.job,
+                jobId: enviado.job,
+                contact: enviado.contact,
+                timestamp: new Date()
+              });
+            } catch (e) {
+              logger.warn(`[Baileys][${this.userId}] Error emitiendo evento campaign:reply:`, e.message);
+            }
           } catch (e) {
             logger.error(`[Baileys][${this.userId}] Error registrando mensaje inbound:`, e.message);
           }

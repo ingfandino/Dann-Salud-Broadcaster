@@ -1,0 +1,83 @@
+/* Semantic CSS for Stats Cards - Light Mode */
+
+/* Primary Card (Ocean Blue) */
+.cardPrimaryLight {
+    background-image: linear-gradient(135deg, rgba(0, 120, 160, 0.1) 0%, rgba(255, 255, 255, 0.5) 100%) !important;
+    border: 1px solid rgba(0, 120, 160, 0.2) !important;
+    color: #334155 !important;
+    transform-origin: center center;
+    /* Default text color */
+}
+
+.glowPrimaryLight {
+    background-image: linear-gradient(135deg, #009ccf, #0078A0) !important;
+}
+
+.textPrimaryLight {
+    color: #0078A0 !important;
+}
+
+.iconPrimaryLight {
+    background-color: #0078A0 !important;
+    background-image: none !important;
+    color: white !important;
+}
+
+.progressPrimaryLight {
+    background-color: #0078A0 !important;
+    background-image: none !important;
+}
+
+/* Secondary Card (Emerald Green) */
+.cardSecondaryLight {
+    background-image: linear-gradient(135deg, rgba(0, 199, 148, 0.1) 0%, rgba(255, 255, 255, 0.5) 100%) !important;
+    border: 1px solid rgba(0, 199, 148, 0.2) !important;
+    color: #334155 !important;
+    transform-origin: center center;
+}
+
+.glowSecondaryLight {
+    background-image: linear-gradient(135deg, #34d399, #00C794) !important;
+}
+
+.textSecondaryLight {
+    color: #00C794 !important;
+}
+
+.iconSecondaryLight {
+    background-color: #00C794 !important;
+    background-image: none !important;
+    color: white !important;
+}
+
+.progressSecondaryLight {
+    background-color: #00C794 !important;
+    background-image: none !important;
+}
+
+/* Accent Card (Orange) */
+.cardAccentLight {
+    background-image: linear-gradient(135deg, rgba(255, 159, 67, 0.1) 0%, rgba(255, 255, 255, 0.5) 100%) !important;
+    border: 1px solid rgba(255, 159, 67, 0.2) !important;
+    color: #334155 !important;
+    transform-origin: center center;
+}
+
+.glowAccentLight {
+    background-image: linear-gradient(135deg, #fcd34d, #FF9F43) !important;
+}
+
+.textAccentLight {
+    color: #FF9F43 !important;
+}
+
+.iconAccentLight {
+    background-color: #FF9F43 !important;
+    background-image: none !important;
+    color: white !important;
+}
+
+.progressAccentLight {
+    background-color: #FF9F43 !important;
+    background-image: none !important;
+}

@@ -63,12 +63,33 @@ router.post("/import", requireAuth, (req, res) => {
     });
 });
 
+// 🔹 Alias para /upload (para compatibilidad con frontend legacy o incorrecto)
+router.post("/upload", requireAuth, (req, res) => {
+    upload.single("file")(req, res, async (err) => {
+        if (err) {
+            if (err.name === "MulterError" && err.code === "LIMIT_FILE_SIZE") {
+                return res.status(400).json({ error: `Archivo demasiado grande. Límite: ${MAX_MB}MB` });
+            }
+            if (err.message && /Formato inválido/i.test(err.message)) {
+                return res.status(400).json({ error: err.message });
+            }
+            return res.status(400).json({ error: "No se pudo procesar el archivo subido" });
+        }
+        await contactController.importContacts(req, res);
+    });
+});
+
 // Logs
 router.get("/logs", requireAuth, async (req, res) => {
     await contactController.listImportLogs(req, res);
 });
 router.get("/logs/:id", requireAuth, async (req, res) => {
     await contactController.downloadImportLog(req, res);
+});
+
+// 📥 Descargar archivo de rechazados en formato .txt
+router.get("/import-logs/:id/download-txt", requireAuth, async (req, res) => {
+    await contactController.downloadRejectedTxt(req, res);
 });
 
 router.get("/headers", requireAuth, async (req, res) => {

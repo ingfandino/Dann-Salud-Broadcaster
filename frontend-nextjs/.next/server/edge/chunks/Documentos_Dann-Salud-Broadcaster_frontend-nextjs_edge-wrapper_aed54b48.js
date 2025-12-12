@@ -1,0 +1,3 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["chunks/Documentos_Dann-Salud-Broadcaster_frontend-nextjs_edge-wrapper_aed54b48.js",48697,(e,n,t)=>{self._ENTRIES||={};let r=Promise.resolve().then(()=>e.i(82287));r.catch(()=>{}),self._ENTRIES.middleware_middleware=new Proxy(r,{get(e,n){if("then"===n)return(n,t)=>e.then(n,t);let t=(...t)=>e.then(e=>(0,e[n])(...t));return t.then=(t,r)=>e.then(e=>e[n]).then(t,r),t}})}]);
+
+//# sourceMappingURL=Documentos_Dann-Salud-Broadcaster_frontend-nextjs_edge-wrapper_aed54b48.js.map

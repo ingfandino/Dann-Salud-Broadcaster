@@ -22,18 +22,18 @@ router.post("/frontend", (req, res) => {
 });
 
 // 📌 Listado de logs (supervisor/admin)
-router.get("/", requireAuth, permit("supervisor", "admin"), async (req, res) => {
+router.get("/", requireAuth, permit("supervisor", "administrativo"), async (req, res) => {
     await logController.listLogs(req, res);
 });
 
 // 📌 Exportaciones (solo admin)
-router.get("/export/json", requireAuth, permit("admin"), async (req, res) => {
+router.get("/export/json", requireAuth, permit("administrativo"), async (req, res) => {
     await logController.exportLogsJSON(req, res);
 });
-router.get("/export/csv", requireAuth, permit("admin"), async (req, res) => {
+router.get("/export/csv", requireAuth, permit("administrativo"), async (req, res) => {
     await logController.exportLogsCSV(req, res);
 });
-router.get("/export/excel", requireAuth, permit("admin"), async (req, res) => {
+router.get("/export/excel", requireAuth, permit("administrativo"), async (req, res) => {
     await logController.exportLogsExcel(req, res);
 });
 

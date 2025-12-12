@@ -9,6 +9,11 @@ const http = require("http");
 const path = require("path");
 const connectDB = require("./config/db");
 const { initSocket, getIO } = require("./config/socket");
+const initScheduledJobs = require('./cron/recyclerJob');
+
+// Inicializar tareas programadas
+initScheduledJobs();
+
 const { initWhatsappClient, whatsappEvents } = require("./config/whatsapp");
 const { startScheduler } = require("./services/jobScheduler");
 const { startRecoveryScheduler } = require("./services/recoveryScheduler");
@@ -36,8 +41,6 @@ const logger = require("./utils/logger");
 
 validateEnv();
 
-// 🔹 Conectar DB (excepto en test)
-// 🔹 Conectar DB (excepto en test)
 if (process.env.NODE_ENV !== "test") {
   connectDB()
     .then(async () => {
@@ -106,6 +109,9 @@ if (process.env.NODE_ENV !== "test") {
 }
 
 const app = express();
+// ✅ Confiar en proxies (Nginx/Cloudflare) para obtener la IP real del cliente
+app.set('trust proxy', 1);
+
 const uploadsPath = path.join(__dirname, '../uploads');
 try { require("fs").mkdirSync(uploadsPath, { recursive: true }); } catch (e) { }
 
@@ -124,6 +130,21 @@ let allowedOrigins = process.env.ALLOWED_ORIGINS
   : [];
 
 // Añadir origen del servidor actual para permitir peticiones desde el frontend servido por el mismo backend
+
+// Detectar IP local para permitir acceso LAN
+// Detectar TODAS las IPs locales para permitir acceso LAN/VPN
+const interfaces = require("os").networkInterfaces();
+if (interfaces) {
+  Object.values(interfaces).flat().forEach((iface) => {
+    if (iface.family === "IPv4" && !iface.internal) {
+      allowedOrigins.push(`http://${iface.address}:5000`);
+      allowedOrigins.push(`http://${iface.address}:3000`);
+      allowedOrigins.push(`http://${iface.address}:5173`);
+    }
+  });
+}
+allowedOrigins.push("http://localhost:5000");
+allowedOrigins.push("http://localhost:3000");
 
 if (process.env.NODE_ENV === "development") {
   allowedOrigins.push("http://localhost:5173"); // Vite por defecto
@@ -231,13 +252,13 @@ if (process.env.NODE_ENV === "development") {
 } else {
   authLimiter = rateLimit({
     windowMs: 5 * 60 * 1000,
-    max: 10,
+    max: 50, // ✅ Aumentado de 10 a 50 para evitar bloqueos en oficinas con IP compartida
     message: { error: "Demasiados intentos de login, intente más tarde." },
     standardHeaders: true,
     legacyHeaders: false,
   });
 }
-app.use("/api/auth/login", authLimiter);
+// app.use("/api/auth/login", authLimiter); // ❌ Deshabilitado temporalmente por problemas con proxy/IPs compartidas
 
 // 🔹 Health checks
 app.get("/api/ping", (_req, res) => res.json({ message: "pong" }));
@@ -419,6 +440,8 @@ if (process.env.NODE_ENV !== "test") {
 
   const PORT = process.env.PORT || 5000;
   const HOST = process.env.HOST || "0.0.0.0";
+
+  console.log(`Intentando iniciar servidor en ${HOST}:${PORT}...`);
 
   appServer.listen(PORT, HOST, () => {
     const localIp = require("os")

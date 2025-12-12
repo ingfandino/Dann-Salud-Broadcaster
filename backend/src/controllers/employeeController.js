@@ -11,7 +11,7 @@ const InternalMessage = require('../models/InternalMessage');
 exports.getAllEmployees = async (req, res) => {
     try {
         const employees = await Employee.find()
-            .populate('userId', 'nombre email role numeroEquipo active')
+            .populate('userId', 'nombre email role numeroEquipo active teamHistory')
             .populate('createdBy', 'nombre email')
             .sort({ createdAt: -1 });
 
@@ -47,7 +47,7 @@ exports.getEmployeeById = async (req, res) => {
         const { id } = req.params;
 
         const employee = await Employee.findById(id)
-            .populate('userId', 'nombre email role numeroEquipo active')
+            .populate('userId', 'nombre email role numeroEquipo active teamHistory')
             .populate('createdBy', 'nombre email')
             .populate('updatedBy', 'nombre email');
 
@@ -110,7 +110,7 @@ exports.createEmployee = async (req, res) => {
 
         await employee.save();
 
-        await employee.populate('userId', 'nombre email role numeroEquipo active');
+        await employee.populate('userId', 'nombre email role numeroEquipo active teamHistory');
 
         res.status(201).json(employee);
     } catch (error) {
@@ -131,9 +131,19 @@ exports.updateEmployee = async (req, res) => {
         updates.updatedBy = req.user._id;
 
         // Si se está desactivando, agregar fecha de baja y fecha de egreso
-        if (updates.activo === false && !updates.fechaBaja) {
-            updates.fechaBaja = new Date();
-            updates.fechaEgreso = new Date();
+        if (updates.activo === false) {
+            if (!updates.fechaBaja) {
+                updates.fechaBaja = new Date();
+                updates.fechaEgreso = new Date();
+            }
+
+            // ✅ AUTOMATIC USER DEACTIVATION
+            // Si el empleado tiene un usuario asociado, desactivarlo también
+            const currentEmployee = await Employee.findById(id);
+            if (currentEmployee && currentEmployee.userId) {
+                await User.findByIdAndUpdate(currentEmployee.userId, { active: false });
+                console.log(`👤 Usuario ${currentEmployee.userId} desactivado automáticamente por baja de empleado.`);
+            }
         }
 
         // Si se está reactivando, limpiar fecha de baja y egreso
@@ -141,6 +151,13 @@ exports.updateEmployee = async (req, res) => {
             updates.fechaBaja = null;
             updates.fechaEgreso = null;
             updates.motivoBaja = '';
+
+            // Reactivar usuario asociado automáticamente
+            const currentEmployee = await Employee.findById(id);
+            if (currentEmployee && currentEmployee.userId) {
+                await User.findByIdAndUpdate(currentEmployee.userId, { active: true });
+                console.log(`👤 Usuario ${currentEmployee.userId} reactivado automáticamente por reactivación de empleado.`);
+            }
         }
 
         const employee = await Employee.findByIdAndUpdate(
@@ -148,7 +165,7 @@ exports.updateEmployee = async (req, res) => {
             updates,
             { new: true, runValidators: true }
         )
-            .populate('userId', 'nombre email role numeroEquipo active')
+            .populate('userId', 'nombre email role numeroEquipo active teamHistory')
             .populate('createdBy', 'nombre email')
             .populate('updatedBy', 'nombre email');
 
@@ -186,7 +203,7 @@ exports.deleteEmployee = async (req, res) => {
             // Buscar usuarios de RR.HH. y Gerencia
             const recipients = await User.find({
                 $or: [
-                    { role: 'rrhh' },
+                    { role: 'RR.HH' },
                     { role: 'gerencia' }
                 ],
                 active: true
@@ -254,7 +271,7 @@ exports.getEmployeeStats = async (req, res) => {
         }
 
         const employee = await Employee.findOne({ userId })
-            .populate('userId', 'nombre email role numeroEquipo active');
+            .populate('userId', 'nombre email role numeroEquipo active teamHistory');
 
         if (!employee) {
             return res.status(404).json({ message: 'Empleado no encontrado' });
@@ -492,7 +509,7 @@ exports.getEmployeeStats = async (req, res) => {
         }
 
         // ADMIN: Estadísticas de QR generados
-        else if (role === 'admin') {
+        else if (role === 'administrativo') {
             // QR generados en la última semana
             const qrWeek = await Audit.countDocuments({
                 administrador: userId,

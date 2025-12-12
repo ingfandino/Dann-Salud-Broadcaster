@@ -1,0 +1,109 @@
+{
+  "app": {
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/_not-found/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/affiliates/config/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/affiliates/contact/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/affiliates/exports/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/affiliates/failed/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/affiliates/fresh/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/affiliates/list/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/affiliates/reusable/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/affiliates/stats/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/affiliates/success/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/affiliates/upload/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/audits/create/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/audits/follow-up/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/audits/liquidation/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/audits/recovery/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/banned-words/add/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/banned-words/detections/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/banned-words/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/contact/admin/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/contact/today/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/hr/active/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/hr/add/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/hr/inactive/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/hr/stats/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/messages/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/reports/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/send/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/users/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/dashboard/whatsapp/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/login/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/recover/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ],
+    "[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/app/register/page": [
+      "static/media/83afe278b6a6bb3c-s.p.3a6ba036.woff2"
+    ]
+  },
+  "appUsingSizeAdjust": true,
+  "pages": {},
+  "pagesUsingSizeAdjust": false
+}

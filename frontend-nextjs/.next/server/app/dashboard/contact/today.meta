@@ -1,0 +1,17 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/dashboard/layout,_N_T_/dashboard/contact/layout,_N_T_/dashboard/contact/today/layout,_N_T_/dashboard/contact/today/page,_N_T_/dashboard/contact/today"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/dashboard/contact/today/__PAGE__",
+    "/dashboard/contact/today",
+    "/dashboard/contact",
+    "/dashboard",
+    "/_index",
+    "/_head"
+  ]
+}

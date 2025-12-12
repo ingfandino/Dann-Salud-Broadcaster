@@ -48,16 +48,23 @@ router.post("/upload", affiliateController.requireGerencia, upload.single("file"
 router.get("/download-report/:filename", affiliateController.requireGerencia, affiliateController.downloadReport);
 
 // 🔍 Buscar/filtrar afiliados (solo Gerencia)
+router.get("/", affiliateController.searchAffiliates);
 router.get("/search", affiliateController.requireGerencia, affiliateController.searchAffiliates);
 
 // 📊 Obtener estadísticas (solo Gerencia)
-router.get("/stats", affiliateController.requireGerencia, affiliateController.getStats);
+router.get("/stats", affiliateController.requireSupervisorOrGerencia, affiliateController.getStats);
 
 // ⚙️ Configurar exportación programada (solo Gerencia)
 router.post("/export-config", affiliateController.requireGerencia, affiliateController.configureExport);
 
-// 📋 Obtener configuración actual (solo Gerencia)
-router.get("/export-config", affiliateController.requireGerencia, affiliateController.getExportConfig);
+// 📋 Obtener configuración actual (Gerencia y Supervisores)
+router.get("/export-config", affiliateController.requireSupervisorOrGerencia, affiliateController.getExportConfig);
+
+// 📊 Obtener estadísticas de supervisor
+router.get("/supervisor-stats", affiliateController.requireSupervisorOrGerencia, affiliateController.getSupervisorStats);
+
+// 📋 Obtener obras sociales disponibles (solo Gerencia)
+router.get("/obras-sociales", affiliateController.requireGerencia, affiliateController.getAvailableObrasSociales);
 
 // 📁 Obtener lista de exportaciones disponibles (Gerencia y Supervisores)
 router.get("/exports", async (req, res) => {
@@ -74,12 +81,12 @@ router.get("/download-export/:filename", async (req, res) => {
     try {
         const { filename } = req.params;
         const userRole = req.user?.role?.toLowerCase();
-        
+
         // Solo gerencia y supervisores pueden descargar
-        if (!["gerencia", "supervisor", "admin"].includes(userRole)) {
+        if (!["gerencia", "supervisor", "administrativo"].includes(userRole)) {
             return res.status(403).json({ error: "No autorizado para descargar archivos" });
         }
-        
+
         const filePath = path.join(__dirname, "../../uploads/affiliate-exports", filename);
 
         // Seguridad: verificar que el archivo existe
@@ -88,7 +95,7 @@ router.get("/download-export/:filename", async (req, res) => {
         if (!exists) {
             return res.status(404).json({ error: "Archivo no encontrado" });
         }
-        
+
         // Si es supervisor, verificar que el archivo le pertenece
         if (userRole === "supervisor") {
             const userId = req.user._id.toString();
@@ -107,5 +114,34 @@ router.get("/download-export/:filename", async (req, res) => {
 
 // 🗑️ Eliminar afiliado (solo Gerencia)
 router.delete("/:id", affiliateController.requireGerencia, affiliateController.deleteAffiliate);
+
+// 🆕 RUTAS GESTIÓN DE LEADS
+
+// Datos Frescos (Supervisor/Gerencia)
+router.get("/fresh-data", affiliateController.requireSupervisorOrGerencia, affiliateController.getFreshData);
+
+// Datos Reutilizables (Supervisor/Gerencia)
+router.get("/reusable-data", affiliateController.requireSupervisorOrGerencia, affiliateController.getReusableData);
+
+// Distribuir (Supervisor/Gerencia)
+router.post("/distribute", affiliateController.requireSupervisorOrGerencia, affiliateController.distributeAffiliates);
+
+// Mis Asignados (Asesor)
+router.get("/assigned", affiliateController.getAssignedAffiliates);
+
+// Actualizar Estado (Asesor/Gerencia)
+router.put("/:id/status", affiliateController.updateAffiliateStatus);
+
+// Fallidas (Supervisor/Gerencia)
+router.get("/failed", affiliateController.requireSupervisorOrGerencia, affiliateController.getFailedAffiliations);
+
+// Datos Re utilizables (Supervisor/Gerencia)
+router.get("/reusable", affiliateController.requireSupervisorOrGerencia, affiliateController.getReusableData);
+
+// Datos Frescos (Supervisor/Gerencia)
+router.get("/fresh", affiliateController.requireSupervisorOrGerencia, affiliateController.getFreshData);
+
+// Cancelar envíos programados (Gerencia)
+router.post("/cancel-exports", affiliateController.requireGerencia, affiliateController.cancelExports);
 
 module.exports = router;

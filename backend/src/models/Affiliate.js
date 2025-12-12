@@ -35,7 +35,7 @@ const affiliateSchema = new mongoose.Schema(
             trim: true
             // index definido abajo en índices compuestos
         },
-        
+
         // Campos opcionales
         telefono2: {
             type: String,
@@ -62,7 +62,7 @@ const affiliateSchema = new mongoose.Schema(
             type: String,
             trim: true
         },
-        
+
         // Metadata del archivo
         uploadedBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -84,13 +84,13 @@ const affiliateSchema = new mongoose.Schema(
             required: true,
             index: true
         },
-        
+
         // Estado
         active: {
             type: Boolean,
             default: true
         },
-        
+
         // ✅ Control de exportaciones
         exported: {
             type: Boolean,
@@ -107,7 +107,37 @@ const affiliateSchema = new mongoose.Schema(
         exportBatchId: {
             type: String // ID del lote de exportación
         },
-        
+
+        // ✅ Gestión de Leads (Nuevo)
+        leadStatus: {
+            type: String,
+            enum: ['Pendiente', 'Asignado', 'Llamado', 'No contesta', 'No interesado', 'Venta', 'Fallido', 'Reutilizable'],
+            default: 'Pendiente',
+            index: true
+        },
+        assignedTo: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            index: true
+        },
+        assignedAt: {
+            type: Date
+        },
+        lastInteraction: {
+            type: Date
+        },
+        interactionHistory: [{
+            status: String,
+            note: String,
+            date: { type: Date, default: Date.now },
+            by: { type: mongoose.Schema.Types.ObjectId, ref: "User" }
+        }],
+        isUsed: {
+            type: Boolean,
+            default: false,
+            index: true
+        },
+
         // Campos adicionales dinámicos (para datos extra del Excel)
         additionalData: {
             type: Map,

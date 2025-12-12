@@ -37,7 +37,7 @@ const userSchema = new mongoose.Schema(
         },
         role: {
             type: String,
-            enum: ["admin", "supervisor", "asesor", "auditor", "revendedor", "gerencia", "rrhh"],
+            enum: ["administrativo", "supervisor", "asesor", "auditor", "gerencia", "RR.HH"],
             default: "asesor",
         },
         supervisor: {
@@ -53,6 +53,15 @@ const userSchema = new mongoose.Schema(
             type: Date,
             default: null,
         },
+        // ✅ Historial de cambios de equipo para tracking de supervisores
+        teamHistory: [{
+            numeroEquipo: { type: String, required: true },
+            fechaInicio: { type: Date, required: true },
+            fechaFin: { type: Date, default: null }, // null = equipo actual  
+            changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+            changedAt: { type: Date, default: Date.now },
+            notes: { type: String, default: '' }
+        }],
         resetPasswordToken: {
             type: String,
             default: null,

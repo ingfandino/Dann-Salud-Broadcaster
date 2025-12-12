@@ -2,6 +2,7 @@
 
 const Audit = require('../models/Audit');
 const User = require('../models/User');
+const InternalMessage = require('../models/InternalMessage');
 const {
     emitNewAudit,
     emitAuditUpdate,
@@ -49,7 +50,8 @@ function parseLocalDate(dateStr) {
 exports.createAudit = async (req, res) => {
     const { nombre, cuil, telefono, tipoVenta, obraSocialAnterior, obraSocialVendida, scheduledAt, asesor, validador } = req.body;
 
-    const sched = parseLocalDateTime(scheduledAt);
+    // Parse scheduledAt directly as Date - frontend sends ISO string with correct timezone
+    const sched = new Date(scheduledAt);
     if (!sched || isNaN(sched.getTime())) {
         return res.status(400).json({ message: 'Fecha inválida' });
     }
@@ -179,7 +181,10 @@ exports.getAuditsByDate = async (req, res) => {
             grupo,
             auditor,
             supervisor,
-            administrador
+            administrador,
+            ignoreDate, // ✅ Nuevo: Flag para ignorar filtro de fecha por defecto
+            dateField, // ✅ Nuevo: Campo de fecha a filtrar (default: scheduledAt)
+            userId // ✅ Nuevo: Filtrar por usuario específico (para estadísticas)
         } = req.query;
 
         let filter = {};
@@ -199,20 +204,48 @@ exports.getAuditsByDate = async (req, res) => {
             } else if (telefono) {
                 filter.telefono = { $regex: `^${escapeRegex(telefono)}$`, $options: "i" };
             }
+        } else if (userId && !date && !dateFrom && !dateTo) {
+            // ✅ Si filtramos por usuario para estadísticas y no hay fecha, traemos TODO el historial
+            // No aplicamos filtro de fecha
+        } else if (ignoreDate === 'true') {
+            // ✅ Si se solicita ignorar la fecha, no aplicamos ningún filtro de fecha
+            // Útil para Recuperaciones que necesita ver todo el historial
         } else {
             // Filtro de fecha normal para listados
+            const fieldToFilter = dateField || 'scheduledAt';
+
             if (dateFrom && dateTo) {
                 const from = parseLocalDate(dateFrom);
                 const to = parseLocalDate(dateTo);
                 to.setDate(to.getDate() + 1); // incluir hasta fin de día
-                filter.scheduledAt = { $gte: from, $lt: to };
+
+                // ✅ Si no se especifica campo, buscar en ambos para no perder ventas
+                // donde fechaCreacionQR difiere de scheduledAt
+                if (!dateField) {
+                    filter.$or = [
+                        { scheduledAt: { $gte: from, $lt: to } },
+                        { fechaCreacionQR: { $gte: from, $lt: to } }
+                    ];
+                } else {
+                    filter[fieldToFilter] = { $gte: from, $lt: to };
+                }
             } else {
                 // default: día actual (si no hay rango ni date explícito)
                 const day = parseLocalDate(date || undefined);
                 const next = new Date(day);
                 next.setDate(next.getDate() + 1);
-                filter.scheduledAt = { $gte: day, $lt: next };
+                filter[fieldToFilter] = { $gte: day, $lt: next };
             }
+        }
+
+        // ✅ Filtro por usuario (asesor, auditor, validador o creador)
+        if (userId) {
+            filter.$or = [
+                { asesor: userId },
+                { auditor: userId },
+                { validador: userId },
+                { createdBy: userId }
+            ];
         }
 
         if (afiliado) filter.nombre = { $regex: escapeRegex(afiliado), $options: "i" };
@@ -244,12 +277,10 @@ exports.getAuditsByDate = async (req, res) => {
 
         // Visibilidad por rol
         const expRole = (req.user?.role || '').toLowerCase();
-        if (expRole === 'supervisor') {
-            // Supervisores ahora ven TODAS las auditorías
+        if (expRole === 'supervisor' || expRole === 'asesor') {
+            // Supervisores y Asesores ven TODAS las auditorías
             // El frontend ocultará teléfonos de otros grupos
-            // No aplicamos ningún filtro adicional para supervisores
-        } else if (expRole === 'asesor') {
-            filter.$and = (filter.$and || []).concat([{ createdBy: req.user._id }]);
+            // No aplicamos ningún filtro adicional
         }
 
         // ✅ CORRECCIÓN: Ya NO se excluyen auditorías de recuperación de FollowUp
@@ -270,6 +301,14 @@ exports.getAuditsByDate = async (req, res) => {
             .populate('groupId', 'nombre name')
             .populate('datosExtraHistory.updatedBy', 'nombre name username email role')
             .populate('statusHistory.updatedBy', 'nombre name username email role')
+            .populate({
+                path: 'asesorHistory',
+                populate: [
+                    { path: 'previousAsesor', select: 'nombre name' },
+                    { path: 'newAsesor', select: 'nombre name' },
+                    { path: 'changedBy', select: 'nombre name' }
+                ]
+            })
             .sort({ scheduledAt: 1 })
             .lean();
 
@@ -529,14 +568,15 @@ exports.updateStatus = async (req, res) => {
     // ✅ ACTUALIZAR FECHA CUANDO CAMBIA A "QR hecho"
     if (status === 'QR hecho') {
         update.scheduledAt = now;
+        update.fechaCreacionQR = now; // ✅ Nuevo campo
         logger.info(`updateStatus: Auditoría ${id} cambió a QR hecho. Fecha actualizada a: ${update.scheduledAt}`);
     }
 
     // ✅ ACTUALIZAR FECHA CUANDO UN ADMIN CAMBIA EL ESTADO (cualquier cambio de estado)
     const userRole = req.user?.role?.toLowerCase();
-    if (userRole === 'admin') {
+    if (userRole === 'admin' || userRole === 'administrativo') {
         update.scheduledAt = now;
-        logger.info(`updateStatus: Admin cambió estado de auditoría ${id} a "${status}". Fecha actualizada a: ${update.scheduledAt}`);
+        logger.info(`updateStatus: Admin/Administrativo cambió estado de auditoría ${id} a "${status}". Fecha actualizada a: ${update.scheduledAt}`);
     }
 
     const recoveryStates = [
@@ -563,7 +603,28 @@ exports.updateStatus = async (req, res) => {
 
     if (audit) {
         try {
-            emitAuditUpdate(audit._id, { status });
+            // ✅ Incluir updatedBy para evitar notificaciones al propio usuario
+            emitAuditUpdate(audit._id, { status, updatedBy: req.user._id });
+
+            // ✅ Enviar notificación interna al asesor si no fue él quien hizo el cambio
+            /* 
+            // DESACTIVADO POR SOLICITUD DEL USUARIO (Solo notificaciones de distribución de datos)
+            if (audit.asesor && audit.asesor.toString() !== req.user._id.toString()) {
+                const message = await InternalMessage.create({
+                    from: req.user._id,
+                    to: audit.asesor,
+                    subject: `Actualización de estado: ${audit.afiliadoNombre}`,
+                    content: `El estado de la auditoría para ${audit.afiliadoNombre} ha cambiado a "${status}".`,
+                    read: false
+                });
+
+                const io = getIO();
+                if (io) {
+                    const populatedMsg = await InternalMessage.findById(message._id).populate('from', 'nombre email');
+                    io.to(audit.asesor.toString()).emit('new_message', populatedMsg);
+                }
+            }
+            */
         } catch (e) {
             logger.error("emitAuditUpdate error", e);
         }
@@ -580,8 +641,8 @@ exports.updateAudit = async (req, res) => {
         const { id } = req.params;
         const updates = req.body;
 
-        // Solo admin/auditor/supervisor/gerencia pueden editar
-        if (!['admin', 'auditor', 'supervisor', 'gerencia'].includes(req.user.role)) {
+        // Solo admin/auditor/supervisor/gerencia/RR.HH/administrativo pueden editar
+        if (!['admin', 'auditor', 'supervisor', 'gerencia', 'RR.HH', 'administrativo'].includes(req.user.role)) {
             return res.status(403).json({ message: 'No autorizado' });
         }
 
@@ -602,14 +663,15 @@ exports.updateAudit = async (req, res) => {
             // 
             if (updates.status === 'QR hecho') {
                 updates.scheduledAt = new Date();
+                updates.fechaCreacionQR = new Date(); // ✅ Nuevo campo
                 logger.info(`Auditoría ${id} cambió a QR hecho. Fecha actualizada a: ${updates.scheduledAt}`);
             }
 
             // 
             const userRole = req.user?.role?.toLowerCase();
-            if (userRole === 'admin') {
+            if (userRole === 'admin' || userRole === 'administrativo') {
                 updates.scheduledAt = new Date();
-                logger.info(`updateAudit: Admin cambió estado de auditoría ${id} a "${updates.status}". Fecha actualizada a: ${updates.scheduledAt}`);
+                logger.info(`updateAudit: Admin/Administrativo cambió estado de auditoría ${id} a "${updates.status}". Fecha actualizada a: ${updates.scheduledAt}`);
             }
 
             // 
@@ -657,17 +719,72 @@ exports.updateAudit = async (req, res) => {
             }
         }
 
+        let asesorHistoryEntry = null;
+        if (updates.asesor && updates.asesor !== oldAudit.asesor?.toString()) {
+            asesorHistoryEntry = {
+                previousAsesor: oldAudit.asesor,
+                newAsesor: updates.asesor,
+                changedBy: req.user._id,
+                changedAt: new Date()
+            };
+        }
+
+        // ✅ MANEJO DE SUPERVISOR (Manual vs Automático)
+        // 1. Si viene 'supervisor' (ID manual), lo usamos para actualizar el snapshot
+        if (updates.supervisor) {
+            const User = require('../models/User');
+            const supervisorUser = await User.findById(updates.supervisor).select('nombre name email numeroEquipo').lean();
+            if (supervisorUser) {
+                updates.supervisorSnapshot = {
+                    _id: supervisorUser._id,
+                    nombre: supervisorUser.nombre || supervisorUser.name,
+                    numeroEquipo: supervisorUser.numeroEquipo
+                };
+            }
+            // Eliminamos 'supervisor' del objeto updates para que no intente guardarlo como campo root (si no existe en schema)
+            delete updates.supervisor;
+        }
+        // 2. Si NO viene supervisor manual, pero cambió el asesor o el grupo, recalculamos
+        else if (updates.asesor || updates.groupId || updates.numeroEquipo) {
+            // Necesitamos el asesor completo para el helper
+            const User = require('../models/User');
+            const { getSupervisorSnapshotForAudit } = require('../utils/supervisorHelper');
+
+            // Construir objeto temporal para el cálculo
+            const tempAudit = {
+                ...oldAudit.toObject(),
+                ...updates,
+                // Asegurar que groupId sea objeto o ID según lo que espera el helper
+                groupId: updates.groupId || oldAudit.groupId
+            };
+
+            let asesorObj = null;
+            if (updates.asesor) {
+                asesorObj = await User.findById(updates.asesor).lean();
+            } else if (oldAudit.asesor) {
+                asesorObj = await User.findById(oldAudit.asesor).lean();
+            }
+
+            const snapshot = await getSupervisorSnapshotForAudit(tempAudit, asesorObj);
+            if (snapshot) {
+                updates.supervisorSnapshot = snapshot;
+            }
+        }
+
         const updateDoc = {};
         if (Object.keys(updates).length) {
             updateDoc.$set = updates;
         }
-        if (historyEntry || statusHistoryEntry) {
+        if (historyEntry || statusHistoryEntry || asesorHistoryEntry) {
             updateDoc.$push = {};
             if (historyEntry) {
                 updateDoc.$push.datosExtraHistory = historyEntry;
             }
             if (statusHistoryEntry) {
                 updateDoc.$push.statusHistory = statusHistoryEntry;
+            }
+            if (asesorHistoryEntry) {
+                updateDoc.$push.asesorHistory = asesorHistoryEntry;
             }
         }
 
@@ -687,6 +804,14 @@ exports.updateAudit = async (req, res) => {
             await oldAudit.populate('groupId', 'nombre name');
             await oldAudit.populate('datosExtraHistory.updatedBy', 'nombre name username email role');
             await oldAudit.populate('statusHistory.updatedBy', 'nombre name username email role');
+            await oldAudit.populate({
+                path: 'asesorHistory',
+                populate: [
+                    { path: 'previousAsesor', select: 'nombre name' },
+                    { path: 'newAsesor', select: 'nombre name' },
+                    { path: 'changedBy', select: 'nombre name' }
+                ]
+            });
             return res.json(oldAudit);
         }
 
@@ -711,14 +836,24 @@ exports.updateAudit = async (req, res) => {
             .populate('createdBy', 'nombre name email numeroEquipo')
             .populate('groupId', 'nombre name')
             .populate('datosExtraHistory.updatedBy', 'nombre name username email role')
-            .populate('statusHistory.updatedBy', 'nombre name username email role');
+            .populate('statusHistory.updatedBy', 'nombre name username email role')
+            .populate({
+                path: 'asesorHistory',
+                populate: [
+                    { path: 'previousAsesor', select: 'nombre name' },
+                    { path: 'newAsesor', select: 'nombre name' },
+                    { path: 'changedBy', select: 'nombre name' }
+                ]
+            });
 
         if (!audit) {
             return res.status(404).json({ message: 'Auditoría no encontrada' });
         }
 
         try {
-            emitAuditUpdate(audit._id, audit);
+            // ✅ Incluir updatedBy para evitar notificaciones al propio usuario
+            const payload = audit.toObject ? audit.toObject() : audit;
+            emitAuditUpdate(audit._id, { ...payload, updatedBy: req.user._id });
         } catch (e) {
             logger.error("emitAuditUpdate error", e);
         }
@@ -896,7 +1031,9 @@ exports.uploadMultimedia = async (req, res) => {
         await audit.populate('administrador', 'nombre email'); // ✅
 
         try {
-            emitAuditUpdate(audit);
+            // ✅ Incluir updatedBy para evitar notificaciones al propio usuario
+            const payload = audit.toObject ? audit.toObject() : audit;
+            emitAuditUpdate(audit._id, { ...payload, updatedBy: req.user._id });
         } catch (e) {
             logger.error("socket emit error uploadMultimedia", e);
         }
@@ -929,7 +1066,7 @@ exports.uploadMultimedia = async (req, res) => {
 exports.deleteAudit = async (req, res) => {
     const { id } = req.params;
 
-    const allowedRoles = ['admin', 'auditor', 'supervisor', 'gerencia'];
+    const allowedRoles = ['admin', 'auditor', 'supervisor', 'gerencia', 'RR.HH', 'administrativo'];
     if (!allowedRoles.includes(req.user.role)) {
         return res.status(403).json({ message: 'No autorizado' });
     }
@@ -975,10 +1112,12 @@ exports.deleteAudit = async (req, res) => {
 
     await Audit.findByIdAndDelete(id);
 
+    // ✅ Emitir evento de eliminación para actualización en tiempo real
     try {
-        emitAuditUpdate(id, { deleted: true });
+        const { emitAuditDeleted } = require("../config/socket");
+        emitAuditDeleted(id);
     } catch (e) {
-        logger.error("emitAuditUpdate (delete) error", e);
+        logger.error("emitAuditDeleted error", e);
     }
 
     res.json({ message: 'Auditoría eliminada', id });
@@ -1246,5 +1385,153 @@ exports.getAuditsByDateRange = async (req, res) => {
     } catch (error) {
         logger.error("getAuditsByDateRange error", error);
         return res.status(500).json({ message: "Error interno al filtrar auditorías" });
+    }
+};
+
+// ✅ POST /audits/recalculate-supervisors - Batch recalcular supervisores
+exports.recalculateSupervisors = async (req, res) => {
+    try {
+        const { dateFrom, dateTo, onlyMissing } = req.body;
+
+        logger.info(`[RECALCULATE] Iniciando recalculo de supervisores por ${req.user.email}`);
+
+        // Construir filtro
+        let filter = {};
+
+        if (dateFrom && dateTo) {
+            const from = new Date(dateFrom);
+            const to = new Date(dateTo);
+            to.setDate(to.getDate() + 1);
+
+            filter.$or = [
+                { fechaCreacionQR: { $gte: from, $lt: to } },
+                { scheduledAt: { $gte: from, $lt: to } }
+            ];
+        }
+
+        // Solo ventas sin snapshot si se especifica
+        if (onlyMissing) {
+            filter["supervisorSnapshot._id"] = { $exists: false };
+        }
+
+        const { getSupervisorSnapshotForAudit } = require("../utils/supervisorHelper");
+
+        // Obtener ventas a recalcular (incluir teamHistory del asesor para historial)
+        const audits = await Audit.find(filter).populate("asesor", "nombre numeroEquipo teamHistory");
+
+        logger.info(`[RECALCULATE] ${audits.length} ventas encontradas para recalcular`);
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        // Recalcular en batch
+        for (const audit of audits) {
+            try {
+                if (!audit.asesor) {
+                    logger.warn(`[RECALCULATE] Audit ${audit._id} sin asesor, saltando`);
+                    errorCount++;
+                    continue;
+                }
+
+                const snapshot = await getSupervisorSnapshotForAudit(audit, audit.asesor);
+
+                if (snapshot) {
+                    audit.supervisorSnapshot = snapshot;
+                    await audit.save();
+                    successCount++;
+                } else {
+                    logger.warn(`[RECALCULATE] No se pudo calcular supervisor para audit ${audit._id}`);
+                    errorCount++;
+                }
+            } catch (err) {
+                logger.error(`[RECALCULATE] Error procesando audit ${audit._id}:`, err.message);
+                errorCount++;
+            }
+        }
+
+        logger.info(`[RECALCULATE] Completado: ${successCount} exitosos, ${errorCount} errores`);
+
+        res.json({
+            message: "Recalculo completado",
+            total: audits.length,
+            success: successCount,
+            errors: errorCount
+        });
+
+    } catch (err) {
+        logger.error("[RECALCULATE] Error en recalculateSupervisors:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
+ * Obtener estadísticas de ventas por supervisor (histórico)
+ * Solo cuenta auditorías con estado "QR hecho"
+ */
+exports.getSupervisorStats = async (req, res) => {
+    try {
+        // Traer todas las auditorías con QR hecho
+        // Proyectamos solo lo necesario para determinar el supervisor
+        const audits = await Audit.find({ status: 'QR hecho' })
+            .select('supervisorSnapshot asesor')
+            .populate({
+                path: 'asesor',
+                select: 'supervisor',
+                populate: { path: 'supervisor', select: 'nombre' }
+            })
+            .lean();
+
+        const stats = {};
+
+        for (const audit of audits) {
+            let supervisorName = 'Sin Supervisor';
+
+            // Lógica de prioridad igual al frontend: 1. Snapshot, 2. Asesor.Supervisor
+            if (audit.supervisorSnapshot && audit.supervisorSnapshot.nombre) {
+                supervisorName = audit.supervisorSnapshot.nombre;
+            } else if (audit.asesor && audit.asesor.supervisor && audit.asesor.supervisor.nombre) {
+                supervisorName = audit.asesor.supervisor.nombre;
+            }
+
+            if (!stats[supervisorName]) {
+                stats[supervisorName] = 0;
+            }
+            stats[supervisorName]++;
+        }
+
+        // Convertir a array y ordenar descendente
+        const result = Object.entries(stats)
+            .map(([nombre, count]) => ({ nombre, count }))
+            .sort((a, b) => b.count - a.count);
+
+        res.json(result);
+
+    } catch (err) {
+        logger.error("Error en getSupervisorStats:", err);
+        res.status(500).json({ message: "Error al obtener estadísticas de supervisores" });
+    }
+};
+
+/**
+ * Obtener estadísticas de ventas por Obra Social Vendida (histórico)
+ * Solo cuenta auditorías con estado "QR hecho"
+ */
+exports.getObraSocialStats = async (req, res) => {
+    try {
+        const stats = await Audit.aggregate([
+            { $match: { status: 'QR hecho' } },
+            { $group: { _id: "$obraSocialVendida", count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+        ]);
+
+        const result = stats.map(s => ({
+            nombre: s._id || 'Sin Obra Social',
+            count: s.count
+        }));
+
+        res.json(result);
+    } catch (err) {
+        logger.error("Error en getObraSocialStats:", err);
+        res.status(500).json({ message: "Error al obtener estadísticas de obras sociales" });
     }
 };

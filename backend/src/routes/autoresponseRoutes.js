@@ -29,6 +29,7 @@ router.put("/:id", updateAutoresponseValidator, (req, res, next) => {
   return autoresponseController.updateAutoresponse(req, res, next);
 });
 
+router.patch("/:id/toggle", autoresponseController.toggleAutoresponse);
 router.delete("/:id", autoresponseController.deleteAutoresponse);
 
 module.exports = router;

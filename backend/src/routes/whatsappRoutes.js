@@ -34,7 +34,7 @@ router.get("/qr", requireAuth, async (req, res) => {
 });
 
 // 🔁 Forzar nueva sesión / refrescar QR
-router.post("/relink", requireAuth, permit("admin"), whatsappController.relink);
-router.post("/logout", requireAuth, permit("admin"), whatsappController.logout);
+router.post("/relink", requireAuth, permit("administrativo"), whatsappController.relink);
+router.post("/logout", requireAuth, permit("administrativo"), whatsappController.logout);
 
 module.exports = router;

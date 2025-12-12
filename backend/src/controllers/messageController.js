@@ -132,45 +132,146 @@ exports.deleteMessage = async (req, res) => {
 /**
  * POST /messages/preview
  * Body:
- *  - contenido: string (plantilla con placeholders {{campo}})
- *  - variables: object | array<object> (opcional) - datos para reemplazar
+ *  - message: string (mensaje con formato WhatsApp, Spintax y campos dinámicos)
+ *  - contactId: string (opcional) - ID del primer contacto cargado
  *
- * Si variables es array -> devuelve un array de previsualizaciones.
- * Si es objeto o ausente -> devuelve una sola previsualización.
+ * Devuelve:
+ *  - HTML formateado
+ *  - Opciones de Spintax
+ *  - Campos dinámicos reemplazados con datos del contacto
  */
 exports.previewMessage = async (req, res) => {
     try {
-        const { contenido, variables } = req.body;
-        if (!contenido) {
-            return res.status(400).json({ error: "Campo 'contenido' es requerido para previsualizar" });
+        const { message, contactId } = req.body;
+
+        if (!message) {
+            return res.status(400).json({ error: "El mensaje es requerido" });
         }
 
-        const render = (template, data = {}) => {
-            try {
-                const withPlaceholders = template.replace(/{{\s*([^}]+)\s*}}/g, (match, key) => {
-                    // intentamos con la key tal cual, y con su versión normalizada
-                    const nk = normalizeHeader(key);
-                    const rawVal = data[key] ?? data[nk];
-                    return rawVal !== undefined && rawVal !== null ? String(rawVal) : "";
-                });
-                // Expandir Spintax {a|b|c}
-                return parseSpintax(withPlaceholders);
-            } catch (err) {
-                // en caso de error de render fallback al template crudo
-                return template;
-            }
+        // Helper: Formatear WhatsApp a HTML
+        const formatWhatsAppToHTML = (text) => {
+            if (!text) return "";
+
+            let formatted = text;
+
+            // Negrita: *texto* -> <strong>texto</strong>
+            formatted = formatted.replace(/\*([^*]+)\*/g, '<strong>$1</strong>');
+
+            // Cursiva: _texto_ -> <em>texto</em>
+            formatted = formatted.replace(/_([^_]+)_/g, '<em>$1</em>');
+
+            // Tachado: ~texto~ -> <del>texto</del>
+            formatted = formatted.replace(/~([^~]+)~/g, '<del>$1</del>');
+
+            // Monoespaciado: ```texto``` -> <code>texto</code>
+            formatted = formatted.replace(/```([^`]+)```/g, '<code>$1</code>');
+
+            // Saltos de línea
+            formatted = formatted.replace(/\n/g, '<br>');
+
+            return formatted;
         };
 
-        if (Array.isArray(variables)) {
-            const previews = variables.map(v => ({
-                variables: v,
-                preview: render(contenido, v)
-            }));
-            return res.json({ previews });
-        } else {
-            const preview = render(contenido, variables || {});
-            return res.json({ preview });
+        // Helper: Extraer opciones de Spintax
+        const extractSpintaxOptions = (text) => {
+            if (!text) return [];
+
+            const spintaxRegex = /\{([^{}]+)\}/g;
+            const options = [];
+            let match;
+
+            while ((match = spintaxRegex.exec(text)) !== null) {
+                const variants = match[1].split('|').map(v => v.trim());
+                options.push({
+                    original: match[0],
+                    variants: variants
+                });
+            }
+
+            return options;
+        };
+
+        // Helper: Reemplazar Spintax con primera opción
+        const replaceSpintaxForPreview = (text) => {
+            if (!text) return "";
+
+            return text.replace(/\{([^{}]+)\}/g, (match, content) => {
+                const options = content.split('|');
+                return options[0].trim(); // Usar primera opción
+            });
+        };
+
+        // Helper: Reemplazar campos dinámicos
+        const replaceDynamicFields = (text, contact) => {
+            if (!text || !contact) return text;
+
+            let result = text;
+
+            // Campos básicos
+            result = result.replace(/\{\{nombre\}\}/gi, contact.nombre || '[Nombre]');
+            result = result.replace(/\{\{telefono\}\}/gi, contact.telefono || '[Teléfono]');
+            result = result.replace(/\{\{cuil\}\}/gi, contact.cuil || '[CUIL]');
+
+            // Campos adicionales del extraData si existen
+            if (contact.extraData && typeof contact.extraData === 'object') {
+                // Si extraData es un Map de Mongoose, convertirlo a objeto
+                const extraObj = contact.extraData instanceof Map
+                    ? Object.fromEntries(contact.extraData)
+                    : contact.extraData;
+
+                for (const [key, value] of Object.entries(extraObj)) {
+                    const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'gi');
+                    result = result.replace(regex, value || `[${key}]`);
+                }
+            }
+
+            return result;
+        };
+
+        // Obtener contacto si se proporciona ID
+        let contact = null;
+        if (contactId) {
+            contact = await Contact.findById(contactId).lean();
         }
+
+        // Si no hay contacto, usar datos de ejemplo
+        if (!contact) {
+            contact = {
+                nombre: "Juan Pérez",
+                telefono: "1234567890",
+                cuil: "20-12345678-9",
+                extraData: {}
+            };
+        }
+
+        // 1. Extraer opciones de Spintax
+        const spintaxOptions = extractSpintaxOptions(message);
+
+        // 2. Reemplazar Spintax con primera opción
+        let processedMessage = replaceSpintaxForPreview(message);
+
+        // 3. Reemplazar campos dinámicos
+        processedMessage = replaceDynamicFields(processedMessage, contact);
+
+        // 4. Formatear a HTML
+        const htmlFormatted = formatWhatsAppToHTML(processedMessage);
+
+        // 5. Texto plano (sin HTML)
+        const plainText = processedMessage;
+
+        res.json({
+            preview: {
+                html: htmlFormatted,
+                plainText: plainText,
+                spintaxOptions: spintaxOptions,
+                contact: {
+                    nombre: contact.nombre,
+                    telefono: contact.telefono,
+                    cuil: contact.cuil
+                }
+            }
+        });
+
     } catch (err) {
         logger.error("❌ Error en previewMessage:", err);
         res.status(500).json({ error: err.message });

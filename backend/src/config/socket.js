@@ -106,7 +106,7 @@ function initSocket(server, app = null, allowedOrigins = []) {
         socket.on("metrics:unsubscribe", () => socket.leave("metrics"));
 
         socket.on("logs:subscribe", () => {
-            if (!hasUser() || !hasRole(["admin", "supervisor"])) return ackErr("logs");
+            if (!hasUser() || !hasRole(["administrativo", "supervisor"])) return ackErr("logs");
             socket.join("logs");
             socket.emit("server:ack", { ok: true, room: "logs" });
         });
@@ -114,7 +114,7 @@ function initSocket(server, app = null, allowedOrigins = []) {
 
         socket.on("job:subscribe", (jobId) => {
             if (!jobId) return;
-            if (!hasUser() || !hasRole(["asesor", "supervisor", "admin", "gerencia", "revendedor"])) return ackErr(`job_${jobId}`);
+            if (!hasUser() || !hasRole(["asesor", "supervisor", "administrativo", "gerencia"])) return ackErr(`job_${jobId}`);
             const room = `job_${jobId}`;
             socket.join(room);
             socket.emit("server:ack", { ok: true, room });
@@ -122,7 +122,7 @@ function initSocket(server, app = null, allowedOrigins = []) {
         socket.on("job:unsubscribe", (jobId) => socket.leave(`job_${jobId}`));
 
         socket.on("jobs:subscribe", () => {
-            if (!hasUser() || !hasRole(["asesor", "supervisor", "admin", "gerencia", "revendedor"])) return ackErr("jobs");
+            if (!hasUser() || !hasRole(["asesor", "supervisor", "administrativo", "gerencia", "revendedor"])) return ackErr("jobs");
             socket.join("jobs");
             socket.emit("server:ack", { ok: true, room: "jobs" });
         });
@@ -149,7 +149,7 @@ function initSocket(server, app = null, allowedOrigins = []) {
         });
 
         socket.on("audits:subscribeAll", () => {
-            if (!hasUser() || !hasRole(["admin", "supervisor", "auditor", "gerencia"])) return ackErr("audits_all");
+            if (!hasUser() || !hasRole(["administrativo", "supervisor", "auditor", "gerencia"])) return ackErr("audits_all");
             socket.join("audits_all");
             socket.emit("server:ack", { ok: true, room: "audits_all" });
         });
@@ -214,6 +214,7 @@ function emitMetrics(event, payload) {
 
 function emitJobProgress(jobId, payload) {
     safeEmit(`job_${jobId}`, "job:progress", payload);
+    safeEmit("jobs", "job:progress", payload); // ✅ Emitir también a la sala global de jobs
 }
 function emitJobsUpdate(payload) {
     safeEmit("jobs", "jobs:update", payload);
@@ -240,6 +241,15 @@ function emitFollowUpUpdate(payload) {
     safeEmit("followups", "followup:update", payload);
 }
 
+// ✅ NUEVO: Notificar eliminación de auditoría
+function emitAuditDeleted(auditId) {
+    safeEmit("audits_all", "audit:deleted", { _id: auditId });
+    safeEmit("auditors", "audit:deleted", { _id: auditId });
+    safeEmit("supervisors", "audit:deleted", { _id: auditId });
+    safeEmit("administrators", "audit:deleted", { _id: auditId });
+    logger.info(`🗑️ Auditoría eliminada emitida: ${auditId}`);
+}
+
 // ✅ NUEVO: Notificar fallo definitivo de mensaje después de reintentos
 function emitMessageFailureAlert(userId, contactInfo, jobId) {
     if (!userId) return;
@@ -261,6 +271,7 @@ module.exports = {
     emitNewLog,
     emitNewAudit,
     emitAuditUpdate,
+    emitAuditDeleted,  // ✅ Nueva función para eliminación
     emitFollowUpUpdate,
-    emitMessageFailureAlert,  // ✅ Exportar nueva función
+    emitMessageFailureAlert,
 };

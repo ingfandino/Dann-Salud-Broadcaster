@@ -1,0 +1,17 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/dashboard/layout,_N_T_/dashboard/affiliates/layout,_N_T_/dashboard/affiliates/list/layout,_N_T_/dashboard/affiliates/list/page,_N_T_/dashboard/affiliates/list"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/dashboard/affiliates/list/__PAGE__",
+    "/dashboard/affiliates/list",
+    "/dashboard/affiliates",
+    "/dashboard",
+    "/_index",
+    "/_head"
+  ]
+}

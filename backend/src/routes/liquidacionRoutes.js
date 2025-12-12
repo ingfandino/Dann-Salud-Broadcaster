@@ -9,4 +9,10 @@ router.use(requireAuth, permit('admin', 'auditor', 'revendedor', 'gerencia', 'su
 
 router.get('/', liquidacion.list);
 
+// Ruta DIRECTA sin middleware adicional para debugging
+router.post('/export-direct', liquidacion.exportLiquidationDirect);
+
+// Ruta normal
+router.post('/export', liquidacion.exportLiquidation);
+
 module.exports = router;

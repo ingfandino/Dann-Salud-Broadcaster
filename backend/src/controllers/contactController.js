@@ -64,7 +64,7 @@ exports.importContacts = async (req, res) => {
         const allRows = rawSheet.slice(1);
         const seenPhonesForLimit = new Set();
         const effectiveRows = [];
-        
+
         for (const row of allRows) {
             if (!row || !Array.isArray(row)) continue;
             const phoneRaw = phoneIdx >= 0 ? row[phoneIdx] : null;
@@ -205,22 +205,22 @@ exports.importContacts = async (req, res) => {
                     // Contacto existe pero NO recibió mensajes → Eliminar y permitir recarga
                     logger.info(`🔄 Eliminando contacto sin mensajes exitosos: ${normalizedPhone} (ID: ${existing._id})`);
                     await Contact.findByIdAndDelete(existing._id);
-                    
+
                     // Eliminar también cualquier mensaje fallido asociado para limpiar
                     const deletedMessages = await Message.deleteMany({ contact: existing._id });
                     if (deletedMessages.deletedCount > 0) {
                         logger.info(`🗑️ Eliminados ${deletedMessages.deletedCount} mensaje(s) fallido(s) asociado(s)`);
                     }
-                    
+
                     // Remover del Map para evitar re-detección
                     existingByPhone.delete(String(normalizedPhone));
-                    
+
                     warnings.push({
                         telefono: normalizedPhone,
                         tipo: "reemplazado",
                         detalle: `Contacto anterior sin mensajes exitosos fue eliminado y será reemplazado`
                     });
-                    
+
                     // Continuar con la inserción del nuevo contacto
                     // (no hacer continue aquí, seguir el flujo normal)
                 }
@@ -249,23 +249,47 @@ exports.importContacts = async (req, res) => {
         if (newContacts.length > 0) {
             const insertedRes = await Contact.insertMany(newContacts);
             inserted += insertedRes.length;
-            insertedContacts.push(...insertedRes.map(c => ({ _id: c._id, nombre: c.nombre, telefono: c.telefono })));
+            insertedContacts.push(...insertedRes.map(c => ({
+                _id: c._id,
+                nombre: c.nombre,
+                telefono: c.telefono,
+                cuil: c.cuil,
+                extraData: c.extraData
+            })));
         }
 
         fs.unlinkSync(req.file.path);
 
         logger.info(`📊 Importación completada: Insertados=${inserted}, Inválidos=${invalid}, Warnings=${warnings.length}`);
 
-        // Persistir log de rechazados y obtener id (si aplica)
+        // Generar archivo .txt con rechazados y persistir log
         let logId = null;
+        let rejectedTxtContent = "";
+
         if (warnings.length > 0) {
             try {
+                // Generar contenido del archivo .txt
+                rejectedTxtContent = "AFILIADOS RECHAZADOS\n";
+                rejectedTxtContent += "===================\n\n";
+                rejectedTxtContent += `Total rechazados: ${warnings.length}\n`;
+                rejectedTxtContent += `Fecha: ${new Date().toLocaleString('es-AR')}\n\n`;
+                rejectedTxtContent += "DETALLE DE RECHAZOS:\n";
+                rejectedTxtContent += "--------------------\n\n";
+
+                warnings.forEach((w, idx) => {
+                    rejectedTxtContent += `${idx + 1}. Teléfono: ${w.telefono}\n`;
+                    rejectedTxtContent += `   Tipo: ${w.tipo}\n`;
+                    rejectedTxtContent += `   Razón: ${w.detalle}\n\n`;
+                });
+
+                // Guardar en ImportLog con el contenido .txt
                 const log = await ImportLog.create({
-                    filename: `import_warnings_${Date.now()}`,
-                    type: "json",
-                    content: warnings
+                    filename: `rechazados_${Date.now()}.txt`,
+                    type: "txt",
+                    content: rejectedTxtContent
                 });
                 logId = log._id;
+                logger.info(`✅ Archivo de rechazados guardado con ID: ${logId}`);
             } catch (e) {
                 logger.error("❌ Error guardando ImportLog:", e);
             }
@@ -273,11 +297,16 @@ exports.importContacts = async (req, res) => {
 
         res.json({
             message: "Importación completada",
-            resumen: { inserted, invalid, truncated },
+            resumen: {
+                accepted: inserted,  // Aceptados
+                rejected: invalid,   // Rechazados
+                total: inserted + invalid,
+                truncated
+            },
             warnings,
-            insertedContacts,
+            contacts: insertedContacts,  // Cambiar nombre para mayor claridad
             headers: lastImportHeaders,
-            logId
+            rejectedFileId: logId  // ID del archivo de rechazados para descarga
         });
     } catch (error) {
         logger.error("❌ Error en importContacts:", { message: error?.message, stack: error?.stack });
@@ -360,5 +389,23 @@ exports.getLastImportHeaders = async (_req, res) => {
     } catch (error) {
         logger.error("❌ Error getLastImportHeaders:", error);
         return res.status(500).json({ error: "No se pudieron obtener los headers" });
+    }
+};
+
+// 📥 Descargar archivo de rechazados en formato .txt
+exports.downloadRejectedTxt = async (req, res) => {
+    try {
+        const log = await ImportLog.findById(req.params.id);
+        if (!log) return res.status(404).json({ error: "Archivo no encontrado" });
+
+        // Configurar headers para descarga de archivo .txt
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${log.filename}"`);
+
+        // Enviar el contenido del archivo
+        return res.send(log.content);
+    } catch (error) {
+        logger.error("❌ Error downloadRejectedTxt:", error);
+        return res.status(500).json({ error: "No se pudo descargar el archivo" });
     }
 };

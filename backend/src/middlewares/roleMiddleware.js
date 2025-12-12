@@ -25,7 +25,7 @@ exports.getTeamUserIds = getTeamUserIds;
 // Construye filtro por rol para createdBy (u otro campo)
 exports.buildOwnerFilter = async (req, ownerField = "createdBy") => {
     const role = req.user.role;
-    if (role === "admin" || role === "gerencia") return {}; // sin restricción
+    if (role === "administrativo" || role === "gerencia") return {}; // sin restricción
 
     if (role === "supervisor") {
         const team = await getTeamUserIds(req.user._id);

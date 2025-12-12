@@ -265,20 +265,22 @@ async function initClientForUser(userId) {
   const onMessage = async (msg) => {
     state.lastActivity = Date.now();
     try {
+      logger.info(`[WA][${userId}] Mensaje recibido: from = ${msg.from}, fromMe = ${msg.fromMe}, body = "${msg.body}"`);
+
       if (msg.fromMe) return;
 
       // Notificar al frontend
       try {
         getIO().to(room).emit('message', msg);
       } catch (error) {
-        logger.error(`[WA][${userId}] Error emitiendo mensaje:`, error.message);
+        logger.error(`[WA][${userId}] Error emitiendo mensaje: `, error.message);
       }
 
       // Lógica de auto-respuestas
       // ✅ MEJORA: Buscar el mensaje outbound MÁS RECIENTE para asociar job correctamente
       const enviado = await Message.findOne({ to: msg.from, direction: "outbound" }).sort({ timestamp: -1 });
       if (!enviado) {
-        logger.info(`[WA][${userId}] Mensaje entrante ignorado (no corresponde a campaña): ${msg.from}`);
+        logger.info(`[WA][${userId}] Mensaje entrante ignorado(no corresponde a campaña): ${msg.from} `);
         return;
       }
 
@@ -302,8 +304,20 @@ async function initClientForUser(userId) {
           from: msg.to || userId
         });
         logger.info(`[WA][${userId}] Mensaje inbound registrado de ${msg.from} (job: ${enviado.job})`);
+
+        // ✅ Emitir evento de respuesta de campaña
+        try {
+          getIO().to(room).emit('campaign:response', {
+            jobId: enviado.job,
+            contact: enviado.contact,
+            timestamp: new Date()
+          });
+        } catch (e) {
+          logger.warn(`[WA][${userId}] Error emitiendo evento campaign: response: `, e.message);
+        }
+
       } catch (e) {
-        logger.error(`[WA][${userId}] Error registrando mensaje inbound:`, e.message);
+        logger.error(`[WA][${userId}] Error registrando mensaje inbound: `, e.message);
       }
 
       // Cargar reglas de auto-respuesta
@@ -315,7 +329,10 @@ async function initClientForUser(userId) {
           const kw = normalize(r.keyword);
           if (!kw) return false;
           const mt = r.matchType || "contains";
-          return mt === "exact" ? bodyNorm === kw : bodyNorm.includes(kw);
+          if (mt === "exact") return bodyNorm === kw;
+          if (mt === "startsWith") return bodyNorm.startsWith(kw);
+          if (mt === "endsWith") return bodyNorm.endsWith(kw);
+          return bodyNorm.includes(kw);
         });
         const rule = matched || reglas.find(r => r.isFallback);
 
@@ -332,10 +349,10 @@ async function initClientForUser(userId) {
           if (!recent) {
             try {
               await client.sendMessage(msg.from, rule.response);
-              logger.info(`[WA][${userId}] Auto-respuesta enviada (${rule.keyword || "fallback"})`);
+              logger.info(`[WA][${userId}]Auto - respuesta enviada(${rule.keyword || "fallback"})`);
 
               // Registrar en log con detalles completos
-              await AutoResponseLog.create({
+              const logEntry = await AutoResponseLog.create({
                 createdBy: userId,
                 chatId: msg.from,
                 ruleId: rule._id,
@@ -348,21 +365,34 @@ async function initClientForUser(userId) {
                 isFallback: rule.isFallback || false,
                 userMessage: msg.body || ''
               });
+
+              // ✅ Notificar al frontend
+              try {
+                getIO().to(room).emit('auto_response:sent', {
+                  contact: enviado.contact,
+                  keyword: rule.keyword || "Fallback",
+                  response: rule.response,
+                  timestamp: new Date()
+                });
+              } catch (e) {
+                logger.warn(`[WA][${userId}] Error emitiendo evento auto_response: sent: `, e.message);
+              }
+
             } catch (e) {
-              logger.warn(`[WA][${userId}] Error enviando auto-respuesta:`, e.message);
+              logger.warn(`[WA][${userId}] Error enviando auto - respuesta: `, e.message);
             }
           }
         }
       }
     } catch (err) {
-      logger.error(`[WA][${userId}] Error procesando mensaje:`, err.message);
+      logger.error(`[WA][${userId}] Error procesando mensaje: `, err.message);
     }
   };
   client.on('message', onMessage);
   state.eventListeners.push({ event: 'message', handler: onMessage });
 
   const onDisconnected = async (reason) => {
-    logger.warn(`[WA][${userId}] Disconnected: ${reason}`);
+    logger.warn(`[WA][${userId}]Disconnected: ${reason} `);
     state.ready = false;
 
     // ✅ CORRECCIÓN: No reconectar en ciertos casos

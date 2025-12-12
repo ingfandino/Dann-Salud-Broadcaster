@@ -12,6 +12,12 @@ router.get('/sales-stats', requireAuth, auditCtrl.getSalesStats);
 router.get('/by-cuil/:cuil', requireAuth, auditCtrl.getAuditByCuil);
 router.get('/export', requireAuth, auditCtrl.exportByDate);
 router.get("/date-range", requireAuth, auditCtrl.getAuditsByDateRange);
+router.get('/stats/supervisors', requireAuth, auditCtrl.getSupervisorStats);
+router.get('/stats/obras-sociales', requireAuth, auditCtrl.getObraSocialStats);
+
+// ✅ Batch recalcular supervisores (ANTES de rutas con :id)
+const { permit } = require('../middlewares/roleMiddleware');
+router.post('/recalculate-supervisors', requireAuth, permit('gerencia'), auditCtrl.recalculateSupervisors);
 
 // 📌 CRUD y listados
 router.post('/', requireAuth, auditCtrl.createAudit);

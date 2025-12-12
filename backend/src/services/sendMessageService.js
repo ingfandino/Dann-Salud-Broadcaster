@@ -124,6 +124,7 @@ async function processJob(jobId) {
 
             // Emitir progreso con tiempo restante
             emitJobProgress(jobId.toString(), {
+                _id: jobId.toString(),
                 status: "descanso",
                 restBreakMinutesRemaining: remainingMinutes
             });
@@ -232,6 +233,7 @@ async function processJob(jobId) {
     let pendingLocal = Number(initialJob.stats?.pending != null ? initialJob.stats.pending : (initialJob.stats?.total || contactsToSend.length) - (sentLocal + failedLocal));
     const totalLocal = Number(initialJob.stats?.total || contactsToSend.length);
     let lastEmitTs = 0;
+    let messagesProcessed = 0; // ✅ Track actual sent/failed messages for batch breaks
 
     for (let i = startIndex; i < contactsToSend.length; i++) {
         const currentJobState = await SendJob.findById(jobId);
@@ -268,7 +270,7 @@ async function processJob(jobId) {
             if (v !== undefined && v !== null) dataMap.set(normalizeKey(k), v);
         });
 
-        const placeholderMatches = Array.from(initialJob.message.matchAll(/{{\s*(.*?)\s*}}/g));
+        const placeholderMatches = Array.from(initialJob.message.matchAll(/\[\s*(.*?)\s*\]/g));
         const placeholders = placeholderMatches.map(m => m[1]);
         const placeholdersNormalized = Array.from(new Set(placeholders.map(k => normalizeKey(k))));
         const dataKeys = Array.from(dataMap.keys());
@@ -285,18 +287,18 @@ async function processJob(jobId) {
             dataMapSample: dataMapObj // Mostrar todos los datos disponibles
         });
 
-        let rendered = initialJob.message.replace(/{{\s*(.*?)\s*}}/g, (match, key) => {
+        // Reemplazar placeholders con formato [key] (corchetes)
+        let rendered = initialJob.message.replace(/\[\s*(.*?)\s*\]/g, (match, key) => {
             const nk = normalizeKey(key);
             if (dataMap.has(nk)) {
                 return String(dataMap.get(nk));
             } else {
-                // ⚠️ Si no se encuentra, mantener el placeholder original para debugging
-                logger.warn(`⚠️ Placeholder no encontrado: "${key}" (normalizado: "${nk}")`, {
+                logger.warn(`⚠️ Placeholder no encontrado: "[${key}]" (normalizado: "${nk}")`, {
                     jobId: initialJob._id,
                     contactId: contact?._id,
                     availableKeys: dataKeys
                 });
-                return match; // Devolver {{key}} original en lugar de vacío
+                return match; // Devolver [key] original
             }
         });
         const messageText = parseSpintax(rendered);
@@ -360,8 +362,8 @@ async function processJob(jobId) {
             // ✅ CORRECCIÓN: Aplicar throttling global antes de enviar
             await throttleMessage();
 
-            // ✅ NUEVO: Sistema de reintentos con backoff exponencial (20 intentos)
-            const MAX_RETRIES = 20;
+            // ✅ NUEVO: Sistema de reintentos optimizado
+            const MAX_RETRIES = 3; // Reducido de 20 a 3
             let attempt = 0;
             let sent = false;
             let lastError = null;
@@ -373,14 +375,26 @@ async function processJob(jobId) {
                 } catch (err) {
                     attempt++;
                     lastError = err;
+                    const errMsg = (err.message || "").toLowerCase();
+
+                    // 🚨 FAIL FAST: Si el número no existe o no tiene WhatsApp, NO reintentar
+                    if (errMsg.includes("not-authorized") || errMsg.includes("no exists") || errMsg.includes("invalid jid")) {
+                        logger.warn(`🛑 FAIL FAST: Número inválido detectado (${contact.telefono}). Abortando reintentos.`);
+                        await addLog({
+                            tipo: "warning",
+                            mensaje: `Envío abortado: Número inválido o sin WhatsApp (${contact.telefono})`,
+                            metadata: { jobId: initialJob._id, error: errMsg }
+                        });
+                        break; // Salir del bucle de reintentos inmediatamente
+                    }
 
                     if (attempt < MAX_RETRIES) {
-                        // Backoff exponencial: 1s, 2s, 4s, 8s, 16s, 30s (máx)
-                        const backoffMs = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
-                        logger.warn(`⚠️ Reintento ${attempt}/${MAX_RETRIES} para ${contact.telefono} en ${Math.round(backoffMs / 1000)}s`);
+                        // Backoff exponencial: 1s, 2s, 4s
+                        const backoffMs = Math.min(10000, 1000 * Math.pow(2, attempt - 1));
+                        logger.warn(`⚠️ Reintento ${attempt}/${MAX_RETRIES} para ${contact.telefono} en ${Math.round(backoffMs / 1000)}s (Error: ${err.message})`);
                         await delay(backoffMs);
                     } else {
-                        // Fallo definitivo después de 20 intentos
+                        // Fallo definitivo después de MAX_RETRIES
                         logger.error(`❌ FALLIDO DEFINITIVO después de ${MAX_RETRIES} intentos: ${contact.telefono}`);
 
                         // Emitir notificación de fallo al usuario
@@ -460,6 +474,7 @@ async function processJob(jobId) {
 
             if (wasSent) sentLocal++; else failedLocal++;
             pendingLocal = Math.max(0, pendingLocal - 1); // Nunca negativo
+            messagesProcessed++; // ✅ Increment actual processed count
 
             const now = Date.now();
             const milestone = Math.max(1, Math.floor(totalLocal / 50));
@@ -469,6 +484,7 @@ async function processJob(jobId) {
                 const progressPercent = Math.min(100, Math.round((processed / totalLocal) * 100));
 
                 emitJobProgress(initialJob._id.toString(), {
+                    _id: initialJob._id.toString(),
                     currentIndex: i + 1,
                     total: totalLocal,
                     progress: progressPercent,
@@ -525,7 +541,8 @@ async function processJob(jobId) {
             }
         }
 
-        if ((i + 1) % jobBatchSize === 0 && i < contactsToSend.length - 1) {
+        // ✅ CORRECCIÓN: Usar mensajes realmente procesados en vez del índice del array
+        if (messagesProcessed > 0 && messagesProcessed % jobBatchSize === 0 && i < contactsToSend.length - 1) {
             // 🛡️ ANTI-DETECCIÓN: Pausa de lote con variabilidad
             const basePause = Math.max(0, pauseMinutes) * 60 * 1000;
             const variability = 0.8 + Math.random() * 0.4; // ±20%
@@ -545,6 +562,7 @@ async function processJob(jobId) {
                 const remainingMinutes = Math.ceil(pauseMs / 60000);
 
                 emitJobProgress(jobId.toString(), {
+                    _id: jobId.toString(),
                     currentIndex: i + 1,
                     total: totalLocal,
                     progress: progressPercent,
@@ -574,6 +592,7 @@ async function processJob(jobId) {
                 });
 
                 emitJobProgress(jobId.toString(), {
+                    _id: jobId.toString(),
                     currentIndex: i + 1,
                     total: totalLocal,
                     progress: progressPercent,
@@ -586,11 +605,14 @@ async function processJob(jobId) {
     }
 
     const completedJob = await SendJob.findById(jobId).populate('createdBy');
+    const completionTime = new Date();
     completedJob.status = "completado";
-    completedJob.finishedAt = new Date();
+    completedJob.finishedAt = completionTime;
+    completedJob.completedAt = completionTime; // ✅ Registrar fecha de finalización
     await completedJob.save();
 
     emitJobProgress(completedJob._id.toString(), {
+        _id: completedJob._id.toString(),
         currentIndex: contactsToSend.length,
         total: contactsToSend.length,
         progress: 100,

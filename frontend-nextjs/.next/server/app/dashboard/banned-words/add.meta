@@ -1,0 +1,17 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/dashboard/layout,_N_T_/dashboard/banned-words/layout,_N_T_/dashboard/banned-words/add/layout,_N_T_/dashboard/banned-words/add/page,_N_T_/dashboard/banned-words/add"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/dashboard/banned-words/add/__PAGE__",
+    "/dashboard/banned-words/add",
+    "/dashboard/banned-words",
+    "/dashboard",
+    "/_index",
+    "/_head"
+  ]
+}

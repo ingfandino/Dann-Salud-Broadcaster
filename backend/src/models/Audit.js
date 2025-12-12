@@ -59,9 +59,80 @@ const AuditSchema = new Schema({
         ],
         default: []
     },
+    asesorHistory: {
+        type: [
+            {
+                previousAsesor: { type: Schema.Types.ObjectId, ref: 'User' },
+                newAsesor: { type: Schema.Types.ObjectId, ref: 'User' },
+                changedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+                changedAt: { type: Date, default: Date.now }
+            }
+        ],
+        default: []
+    },
     isComplete: { type: Boolean, default: false },
+    fechaCreacionQR: { type: Date, default: null },
+
+    // ✅ Snapshot del supervisor al momento de la venta (para historial de equipos)
+    supervisorSnapshot: {
+        _id: { type: Schema.Types.ObjectId, ref: 'User' },
+        nombre: { type: String },
+        numeroEquipo: { type: String }
+    },
 
     createdAt: { type: Date, default: Date.now }
+});
+
+// ✅ Pre-save hook: Calcular supervisorSnapshot automáticamente
+AuditSchema.pre('save', async function (next) {
+    try {
+        // Solo calcular si:
+        // 1. Es un documento nuevo, O
+        // 2. El asesor cambió, O
+        // 3. fechaCreacionQR cambió, O
+        // 4. groupId cambió (para recalcular supervisor del nuevo equipo)
+        const shouldCalculate = this.isNew ||
+            this.isModified('asesor') ||
+            this.isModified('fechaCreacionQR') ||
+            this.isModified('groupId');
+
+        if (!shouldCalculate) {
+            return next();
+        }
+
+        // Si no hay asesor NI groupId, no podemos calcular supervisor
+        if (!this.asesor && !this.groupId) {
+            return next();
+        }
+
+        const { getSupervisorSnapshotForAudit } = require('../utils/supervisorHelper');
+        const User = require('./User');
+
+        // Obtener asesor con teamHistory (puede ser null si solo hay groupId)
+        let asesor = null;
+        if (this.asesor) {
+            asesor = await User.findById(this.asesor).lean();
+
+            if (!asesor) {
+                const logger = require('../utils/logger');
+                logger.warn(`[AUDIT_HOOK] Asesor ${this.asesor} no encontrado para audit ${this._id}`);
+                // Continuar sin asesor, intentará usar groupId
+            }
+        }
+
+        // Calcular snapshot (función ahora acepta asesor = null y usa groupId como fallback)
+        const snapshot = await getSupervisorSnapshotForAudit(this, asesor);
+
+        if (snapshot) {
+            this.supervisorSnapshot = snapshot;
+        }
+
+        next();
+    } catch (error) {
+        const logger = require('../utils/logger');
+        logger.error(`[AUDIT_HOOK] Error calculando supervisorSnapshot para audit ${this._id}:`, error.message);
+        next(); // Continuar sin bloquear el save
+    }
 });
 
 module.exports = mongoose.model('Audit', AuditSchema);

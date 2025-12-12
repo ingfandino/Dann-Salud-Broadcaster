@@ -1,0 +1,3 @@
+module.exports=[9007,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(36252);a.n(d("[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/node_modules/next/dist/client/components/builtin/global-error.js <module evaluation>"))},71653,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(36252);a.n(d("[project]/Documentos/Dann-Salud-Broadcaster/frontend-nextjs/node_modules/next/dist/client/components/builtin/global-error.js"))},82109,a=>{"use strict";a.i(9007);var b=a.i(71653);a.n(b)}];
+
+//# sourceMappingURL=c1a8e_next_dist_client_components_builtin_global-error_6bee360e.js.map

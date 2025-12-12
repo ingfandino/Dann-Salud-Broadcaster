@@ -7,19 +7,39 @@ exports.list = async (req, res) => {
     try {
         const now = new Date();
         const currentMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0'); // YYYY-MM
-        
+
         // ✅ NOTA: El proceso de marcar auditorías para Recovery ahora se ejecuta mediante
         // un VERDADERO cron job en /src/cron/recoveryJob.js a las 23:01 hrs diariamente
         // Este endpoint solo consulta y devuelve los datos
-        
+
         const User = require('../models/User');
-        
-        // ✅ Traer SOLO auditorías marcadas como recuperación del mes actual
-        // Permanecen visibles hasta el 05 del mes siguiente (luego se ocultan el 01)
-        const audits = await Audit.find({
-            isRecovery: true,
-            recoveryMonth: currentMonth
-        })
+
+        const { ignoreDate } = req.query;
+        console.log('🔍 Recovery Request:', { ignoreDate });
+
+        if (ignoreDate === 'true' || ignoreDate === true) {
+            // ✅ Si ignoreDate es true, NO filtramos por mes. Traemos TODO el historial.
+            // Y filtramos por los estados específicos solicitados
+            filter = {
+                status: {
+                    $in: [
+                        "Falta clave",
+                        "Falta documentación",
+                        "Falta clave y documentación",
+                        "Pendiente"
+                    ]
+                }
+            };
+            console.log('📅 Recovery: Ignorando filtro de fecha y buscando por estados (Histórico completo)');
+        } else {
+            // Default: Mes actual y flag isRecovery
+            filter.isRecovery = true;
+            filter.recoveryMonth = currentMonth;
+            console.log(`📅 Recovery: Filtrando por Mes Actual (${currentMonth})`);
+        }
+
+        // ✅ Traer auditorías
+        const audits = await Audit.find(filter)
             .populate({
                 path: 'asesor',
                 select: 'nombre name email numeroEquipo role'
@@ -31,7 +51,7 @@ exports.list = async (req, res) => {
             .populate('groupId', 'nombre name')
             .sort({ statusUpdatedAt: -1, createdAt: -1 }) // ✅ Descendente: más antiguos PRIMERO (más tiempo en estado)
             .lean();
-        
+
         // ✅ Buscar supervisores dinámicamente por numeroEquipo
         for (let audit of audits) {
             if (audit.asesor?.numeroEquipo) {
@@ -41,13 +61,13 @@ exports.list = async (req, res) => {
                     role: 'supervisor',
                     active: true
                 }).select('nombre name email numeroEquipo').lean();
-                
+
                 if (supervisor) {
                     audit.asesor.supervisor = supervisor;
                 }
             }
         }
-        
+
         // 🔍 DEBUG: Log para verificar datos
         console.log('📋 Recovery List - Total audits:', audits.length);
         if (audits.length > 0) {
@@ -57,7 +77,7 @@ exports.list = async (req, res) => {
             console.log('   - Supervisor encontrado:', audits[0].asesor?.supervisor?.nombre || audits[0].asesor?.supervisor?.name);
             console.log('   - Supervisor numeroEquipo:', audits[0].asesor?.supervisor?.numeroEquipo);
         }
-        
+
         res.json(audits);
     } catch (err) {
         logger.error('recovery.list error', err);

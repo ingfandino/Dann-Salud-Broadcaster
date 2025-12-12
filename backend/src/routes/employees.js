@@ -9,7 +9,7 @@ const uploadDNI = require('../middlewares/uploadDNIMiddleware');
 // Middleware para verificar que el usuario es Gerencia, RR.HH. o Supervisor
 const isGerenciaRRHHOrSupervisor = (req, res, next) => {
     const role = req.user?.role?.toLowerCase();
-    if (role !== 'gerencia' && role !== 'rrhh' && role !== 'supervisor') {
+    if (role !== 'gerencia' && role !== 'rr.hh' && role !== 'supervisor') {
         return res.status(403).json({ message: 'Acceso denegado. Solo Gerencia, RR.HH. o Supervisor pueden acceder a este recurso.' });
     }
     next();
@@ -20,42 +20,42 @@ const isGerenciaRRHHOrSupervisor = (req, res, next) => {
 // Supervisor: Solo puede editar/borrar empleados de su mismo numeroEquipo
 const canEditDelete = async (req, res, next) => {
     const role = req.user?.role?.toLowerCase();
-    
+
     // Gerencia y RR.HH. tienen acceso total
-    if (role === 'gerencia' || role === 'rrhh') {
+    if (role === 'gerencia' || role === 'rr.hh') {
         return next();
     }
-    
+
     // Supervisor: debe verificar que el empleado pertenezca a su equipo
     if (role === 'supervisor') {
         try {
             const Employee = require('../models/Employee');
             const User = require('../models/User');
-            
+
             const employee = await Employee.findById(req.params.id).populate('userId');
             if (!employee) {
                 return res.status(404).json({ message: 'Empleado no encontrado' });
             }
-            
+
             // Verificar que el empleado pertenezca al mismo numeroEquipo del supervisor
             const supervisorNumeroEquipo = req.user.numeroEquipo;
             const employeeNumeroEquipo = employee.userId?.numeroEquipo || employee.numeroEquipo;
-            
+
             if (supervisorNumeroEquipo && supervisorNumeroEquipo === employeeNumeroEquipo) {
                 return next();
             }
-            
-            return res.status(403).json({ 
-                message: 'Acceso denegado. Solo puedes editar/eliminar empleados de tu equipo.' 
+
+            return res.status(403).json({
+                message: 'Acceso denegado. Solo puedes editar/eliminar empleados de tu equipo.'
             });
         } catch (error) {
             console.error('Error en middleware canEditDelete:', error);
             return res.status(500).json({ message: 'Error al verificar permisos' });
         }
     }
-    
-    return res.status(403).json({ 
-        message: 'Acceso denegado. Solo Gerencia, RR.HH. o Supervisor pueden editar/eliminar empleados.' 
+
+    return res.status(403).json({
+        message: 'Acceso denegado. Solo Gerencia, RR.HH. o Supervisor pueden editar/eliminar empleados.'
     });
 };
 

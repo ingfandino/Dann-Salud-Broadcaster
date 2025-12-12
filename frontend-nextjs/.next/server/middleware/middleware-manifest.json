@@ -1,0 +1,31 @@
+{
+  "sorted_middleware": [],
+  "middleware": {
+    "/": {
+      "files": [
+        "server/edge/chunks/Documentos_Dann-Salud-Broadcaster_frontend-nextjs_edge-wrapper_aed54b48.js",
+        "server/edge/chunks/[root-of-the-server]__579e1cae._.js",
+        "server/edge/chunks/9f62b_Dann-Salud-Broadcaster_frontend-nextjs_edge-wrapper_aa02454a.js"
+      ],
+      "name": "middleware",
+      "page": "/",
+      "matchers": [
+        {
+          "regexp": "/:nextData(_next/data/[^/]{1,})?/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*){(\\\\.json)}?",
+          "originalSource": "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"
+        }
+      ],
+      "wasm": [],
+      "assets": [],
+      "env": {
+        "__NEXT_BUILD_ID": "fninUvLpnSKRic9Crzd6k",
+        "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY": "wsqM2Qzf25N3DlMBLRash2SmGWPtZwfiGIvV9P+Hc5A=",
+        "__NEXT_PREVIEW_MODE_ID": "4f4fa29f7035c9c6b07d09044c6bbc74",
+        "__NEXT_PREVIEW_MODE_ENCRYPTION_KEY": "aee8e57ab6357fd55f7d4c7c0ea7bc70432026defea66f2416d2075459f0c2a6",
+        "__NEXT_PREVIEW_MODE_SIGNING_KEY": "e18111deab5983595799dbd278d6e1c05df2d17ef02ee95e309ca78f5b9a3fcd"
+      }
+    }
+  },
+  "instrumentation": null,
+  "functions": {}
+}

@@ -9,9 +9,9 @@ const logger = require("../utils/logger");
 // 🔐 Middleware: Solo Gerencia
 exports.requireGerencia = (req, res, next) => {
     if (req.user.role !== "gerencia") {
-        return res.status(403).json({ 
-            success: false, 
-            message: "Acceso denegado. Solo usuarios de Gerencia pueden gestionar palabras prohibidas." 
+        return res.status(403).json({
+            success: false,
+            message: "Acceso denegado. Solo usuarios de Gerencia pueden gestionar palabras prohibidas."
         });
     }
     next();
@@ -30,15 +30,15 @@ exports.addBannedWord = async (req, res) => {
         }
 
         // Verificar si ya existe
-        const existing = await BannedWord.findOne({ 
-            word: word.toLowerCase().trim() 
+        const existing = await BannedWord.findOne({
+            word: word.toLowerCase().trim()
         });
 
         if (existing) {
             return res.status(400).json({
                 success: false,
-                message: existing.active 
-                    ? "Esta palabra ya está en la lista" 
+                message: existing.active
+                    ? "Esta palabra ya está en la lista"
                     : "Esta palabra existe pero está inactiva. Puede reactivarla."
             });
         }
@@ -75,7 +75,7 @@ exports.addBannedWord = async (req, res) => {
 exports.getBannedWords = async (req, res) => {
     try {
         const { active, category, search } = req.query;
-        
+
         const filter = {};
         if (active !== undefined) filter.active = active === "true";
         if (category) filter.category = category;
@@ -106,7 +106,7 @@ exports.deleteBannedWord = async (req, res) => {
         const { id } = req.params;
 
         const bannedWord = await BannedWord.findById(id);
-        
+
         if (!bannedWord) {
             return res.status(404).json({
                 success: false,
@@ -172,17 +172,17 @@ exports.detectBannedWords = async (text) => {
         if (!text || typeof text !== "string") return [];
 
         const textLower = text.toLowerCase();
-        
+
         // Obtener todas las palabras activas
         const bannedWords = await BannedWord.find({ active: true });
-        
+
         const detected = [];
-        
+
         for (const bannedWord of bannedWords) {
             // Buscar la palabra con límites de palabra para evitar falsos positivos
             const regex = new RegExp(`\\b${bannedWord.word}\\b`, "gi");
             const matches = text.match(regex);
-            
+
             if (matches) {
                 detected.push({
                     wordId: bannedWord._id,
@@ -194,7 +194,7 @@ exports.detectBannedWords = async (text) => {
                 });
             }
         }
-        
+
         return detected;
 
     } catch (error) {
@@ -228,9 +228,9 @@ exports.notifyBannedWordDetection = async (detectionData) => {
         }
 
         // 1. Obtener TODOS los usuarios de Gerencia
-        const gerenciaUsers = await User.find({ 
+        const gerenciaUsers = await User.find({
             role: "gerencia",
-            active: true 
+            active: true
         });
 
         // 2. Si el usuario es Asesor, obtener su Supervisor (mismo numeroEquipo)
@@ -267,6 +267,7 @@ exports.notifyBannedWordDetection = async (detectionData) => {
         `.trim();
 
         // Enviar notificación interna a cada usuario
+        /*
         for (const notifyUser of usersToNotify) {
             await InternalMessage.create({
                 from: null, // Sistema
@@ -292,6 +293,7 @@ exports.notifyBannedWordDetection = async (detectionData) => {
 
             logger.info(`Notificación de palabra prohibida enviada a: ${notifyUser.email}`);
         }
+        */
 
         await detection.save();
 
@@ -323,14 +325,14 @@ exports.notifyBannedWordDetection = async (detectionData) => {
 // 📊 Obtener historial de detecciones
 exports.getDetections = async (req, res) => {
     try {
-        const { 
-            userId, 
-            resolved, 
-            word, 
-            startDate, 
+        const {
+            userId,
+            resolved,
+            word,
+            startDate,
             endDate,
             page = 1,
-            limit = 50 
+            limit = 50
         } = req.query;
 
         const filter = {};

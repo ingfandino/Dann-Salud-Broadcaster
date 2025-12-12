@@ -44,23 +44,32 @@ router.post(
 router.put(
     "/:id",
     requireAuth,
-    permit("gerencia"),
+    permit("gerencia", "RR.HH"),
     updateUserValidator,
     validateRequest,
     userController.updateUser
 );
 
+// Ruta específica para actualizar solo la contraseña
+router.put(
+    "/:id/password",
+    requireAuth,
+    permit("gerencia"),
+    userController.updateUserPassword
+);
+
+
 router.get(
     "/",
     requireAuth,
-    permit("supervisor", "admin", "auditor", "gerencia", "rrhh"),
+    permit("supervisor", "administrativo", "auditor", "gerencia", "RR.HH"),
     userController.getUsers
 );
 
 router.get(
     "/:id",
     requireAuth,
-    permit("supervisor", "admin", "gerencia", "rrhh"),
+    permit("supervisor", "administrativo", "gerencia", "RR.HH"),
     userController.getUserById
 );
 
@@ -82,29 +91,51 @@ router.get(
 router.get(
     "/groups",
     requireAuth,
-    permit("gerencia", "admin", "auditor", "supervisor", "rrhh"),
+    permit("gerencia", "administrativo", "auditor", "supervisor", "RR.HH"),
     async (req, res) => {
         try {
             const User = require("../models/User");
-            const grupos = await User.distinct("numeroEquipo", { 
+            const grupos = await User.distinct("numeroEquipo", {
                 deletedAt: null,
                 numeroEquipo: { $exists: true, $ne: null, $ne: "" }
             });
-            
+
             // Ordenar y formatear como array de objetos con _id y nombre
             grupos.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-            
+
             const gruposFormateados = grupos.map(g => ({
                 _id: g, // usar el numeroEquipo como _id
                 nombre: g,
                 name: g
             }));
-            
+
             res.json(gruposFormateados);
         } catch (err) {
             res.status(500).json({ error: err.message });
         }
     }
+);
+
+// ✅ Team History Management Routes
+router.post(
+    "/:id/team-change",
+    requireAuth,
+    permit("gerencia", "administrativo", "RR.HH"),
+    userController.addTeamChange
+);
+
+router.put(
+    "/:id/team-history/:periodId",
+    requireAuth,
+    permit("gerencia", "administrativo", "RR.HH"),
+    userController.editTeamPeriod
+);
+
+router.delete(
+    "/:id/team-history/:periodId",
+    requireAuth,
+    permit("gerencia", "administrativo", "RR.HH"),
+    userController.deleteTeamPeriod
 );
 
 module.exports = router;

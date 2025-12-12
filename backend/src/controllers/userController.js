@@ -17,7 +17,7 @@ async function createUser(req, res) {
         let finalRole = "asesor";
         let finalSupervisor = supervisor || null;
 
-        if (req.user && (req.user.role === "admin" || req.user.role === "gerencia")) {
+        if (req.user && (req.user.role === "administrativo" || req.user.role === "gerencia")) {
             finalRole = role || "asesor";
             if (supervisor) {
                 const supExists = await User.findById(supervisor);
@@ -55,11 +55,15 @@ async function createUser(req, res) {
 async function getUsers(req, res) {
     try {
         let queryFilter = {};
-        const { _id, role } = req.user;
+        const { _id, role: rawRole } = req.user;
+        const role = (rawRole || "").toLowerCase();
         const { scope, includeAllAuditors } = req.query;
 
-        // Permitir a supervisores ver todos los auditores (para el dropdown de Auditor en AuditEditModal)
-        if (role === "supervisor" && includeAllAuditors === "true") {
+        logger.info(`getUsers requested by ${req.user.email} with role: ${role}`);
+
+        if (role === "administrativo" || role === "gerencia") {
+            queryFilter = { deletedAt: null };
+        } else if (role === "supervisor" && includeAllAuditors === "true") {
             // Devolver todos los usuarios sin restricción de equipo
             // El frontend filtrará solo auditores/admins/supervisors
             queryFilter = { deletedAt: null };
@@ -90,7 +94,7 @@ async function getUsers(req, res) {
         } else if (role === "asesor") {
             queryFilter = { _id: _id, deletedAt: null };
         } else {
-            // admin/auditor u otros: sin filtro especial pero sin soft-deleted
+            // otros: sin filtro especial pero sin soft-deleted
             queryFilter = { deletedAt: null };
         }
 
@@ -127,7 +131,18 @@ async function updateUser(req, res) {
             updateData.password = await bcrypt.hash(updateData.password, salt);
         }
 
-        if (!(req.user.role === "admin" || req.user.role === "gerencia")) {
+        // ✅ RR.HH restrictions: can only modify numeroEquipo
+        if (req.user.role === "RR.HH") {
+            const allowedFields = ['numeroEquipo'];
+            Object.keys(updateData).forEach(key => {
+                if (!allowedFields.includes(key)) {
+                    delete updateData[key];
+                }
+            });
+        }
+
+        // Admin and gerencia restrictions
+        if (!(req.user.role === "administrativo" || req.user.role === "gerencia")) {
             delete updateData.role;
             delete updateData.supervisor;
         }
@@ -146,7 +161,8 @@ async function deleteUserAdmin(req, res) {
     try {
         const id = req.params.id;
         logger.info("🧭 Entrando a deleteUserAdmin", { id });
-        if (req.user.role !== "gerencia") {
+        // Solo gerencia y RRHH pueden cambiar numeroEquipo
+        if (req.user.role !== "gerencia" && req.user.role !== "RR.HH") {
             return res.status(403).json({ error: "Acceso denegado" });
         }
         const user = await User.findById(id);
@@ -217,7 +233,7 @@ async function toggleActiveUser(req, res) {
 // Admin con filtros (ahora excluye soft-deleted)
 async function getUsersAdmin(req, res) {
     try {
-        if (!(req.user.role === "admin" || req.user.role === "gerencia")) {
+        if (!(req.user.role === "administrativo" || req.user.role === "gerencia")) {
             return res.status(403).json({ error: "Acceso denegado" });
         }
 
@@ -267,11 +283,12 @@ async function updateUserRole(req, res) {
         const { id } = req.params;
         const { role } = req.body;
 
-        if (!(req.user.role === "admin" || req.user.role === "gerencia")) {
+        // Solo admin, gerencia y RRHH pueden editar usuarios
+        if (!(req.user.role === "administrativo" || req.user.role === "gerencia" || req.user.role === "RR.HH")) {
             return res.status(403).json({ error: "Acceso denegado" });
         }
 
-        const validRoles = ["asesor", "supervisor", "auditor", "admin", "revendedor", "gerencia", "rrhh"];
+        const validRoles = ["asesor", "supervisor", "auditor", "administrativo", "gerencia", "RR.HH"];
         if (!validRoles.includes(role)) {
             return res.status(400).json({ error: "Rol no válido" });
         }
@@ -310,7 +327,7 @@ async function updateUserRole(req, res) {
 // 📋 Obtener lista de grupos únicos
 async function getAvailableGroups(req, res) {
     try {
-        if (!(req.user.role === "admin" || req.user.role === "gerencia")) {
+        if (!(req.user.role === "administrativo" || req.user.role === "gerencia")) {
             return res.status(403).json({ error: "Acceso denegado" });
         }
 
@@ -329,15 +346,245 @@ async function getAvailableGroups(req, res) {
     }
 }
 
+// 🔑 Actualizar solo la contraseña de un usuario
+async function updateUserPassword(req, res) {
+    try {
+        const { id } = req.params;
+        const { password } = req.body;
+
+        if (!password || password.trim() === '') {
+            return res.status(400).json({ error: 'La contraseña no puede estar vacía' });
+        }
+
+        // Hashear el password
+        const bcrypt = require('bcryptjs');
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        const updatedUser = await User.findByIdAndUpdate(
+            id,
+            { $set: { password: hashedPassword } },
+            { new: true }
+        ).select('-password');
+
+        if (!updatedUser) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        logger.info(`🔑 Contraseña actualizada para usuario: ${updatedUser.email} por ${req.user.email}`);
+
+        res.json({ message: 'Contraseña actualizada correctamente', user: updatedUser });
+    } catch (err) {
+        logger.error('❌ Error actualizando contraseña:', err);
+        res.status(500).json({ error: err.message });
+    }
+}
+
+// ✅ POST /users/:id/team-change - Agregar cambio de equipo
+async function addTeamChange(req, res) {
+    try {
+        const { id } = req.params;
+        const { nuevoEquipo, fechaInicio, notes } = req.body;
+
+        logger.info(`[TEAM_CHANGE] Request: user=${id}, nuevoEquipo=${nuevoEquipo}, fechaInicio=${fechaInicio}`);
+
+        if (!nuevoEquipo || !fechaInicio) {
+            return res.status(400).json({ error: 'nuevoEquipo y fechaInicio son requeridos' });
+        }
+
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        // Inicializar teamHistory si no existe
+        if (!user.teamHistory || !Array.isArray(user.teamHistory)) {
+            user.teamHistory = [];
+        }
+
+        const newFechaInicio = new Date(fechaInicio + 'T00:00:00.000Z');
+
+        // Buscar periodo actual abierto
+        const currentPeriodIndex = user.teamHistory.findIndex(h => !h.fechaFin);
+
+        if (currentPeriodIndex !== -1) {
+            const currentPeriod = user.teamHistory[currentPeriodIndex];
+            const currentStart = new Date(currentPeriod.fechaInicio);
+
+            // Normalizar fechas para comparación (solo día)
+            const newStartDay = newFechaInicio.toISOString().split('T')[0];
+            const currentStartDay = currentStart.toISOString().split('T')[0];
+
+            if (newStartDay === currentStartDay) {
+                // Si la fecha es la misma, reemplazar el periodo actual
+                logger.info(`[TEAM_CHANGE] Reemplazando periodo actual (misma fecha de inicio: ${newStartDay})`);
+                user.teamHistory[currentPeriodIndex] = {
+                    numeroEquipo: nuevoEquipo,
+                    fechaInicio: newFechaInicio,
+                    fechaFin: null,
+                    changedBy: req.user._id,
+                    changedAt: new Date(),
+                    notes: notes || ''
+                };
+            } else if (newFechaInicio > currentStart) {
+                // Fecha posterior: cerrar periodo anterior y crear nuevo
+                const fechaFinAnterior = new Date(newFechaInicio);
+                fechaFinAnterior.setDate(fechaFinAnterior.getDate() - 1);
+                currentPeriod.fechaFin = fechaFinAnterior;
+
+                logger.info(`[TEAM_CHANGE] Cerrando periodo ${currentPeriod.numeroEquipo}: hasta ${fechaFinAnterior.toISOString().split('T')[0]}`);
+
+                user.teamHistory.push({
+                    numeroEquipo: nuevoEquipo,
+                    fechaInicio: newFechaInicio,
+                    fechaFin: null,
+                    changedBy: req.user._id,
+                    changedAt: new Date(),
+                    notes: notes || ''
+                });
+            } else {
+                // Fecha anterior: cerrar el periodo actual al día anterior de su inicio
+                // y crear el nuevo periodo con la fecha indicada
+                const oldStart = new Date(currentPeriod.fechaInicio);
+                const fechaFinNuevo = new Date(oldStart);
+                fechaFinNuevo.setDate(fechaFinNuevo.getDate() - 1);
+
+                // Insertar nuevo periodo ANTES del actual
+                const newPeriod = {
+                    numeroEquipo: nuevoEquipo,
+                    fechaInicio: newFechaInicio,
+                    fechaFin: fechaFinNuevo,
+                    changedBy: req.user._id,
+                    changedAt: new Date(),
+                    notes: notes || ''
+                };
+
+                user.teamHistory.push(newPeriod);
+                logger.info(`[TEAM_CHANGE] Insertando periodo histórico: ${nuevoEquipo} del ${newStartDay} al ${fechaFinNuevo.toISOString().split('T')[0]}`);
+            }
+        } else {
+            // No hay periodo abierto, crear uno nuevo
+            user.teamHistory.push({
+                numeroEquipo: nuevoEquipo,
+                fechaInicio: newFechaInicio,
+                fechaFin: null,
+                changedBy: req.user._id,
+                changedAt: new Date(),
+                notes: notes || ''
+            });
+        }
+
+        // Actualizar numeroEquipo del usuario
+        user.numeroEquipo = nuevoEquipo;
+
+        await user.save();
+
+        logger.info(`[TEAM_CHANGE] User ${id} (${user.nombre}) ahora tiene equipo ${nuevoEquipo}`);
+
+        res.json({
+            message: 'Historial de equipo actualizado exitosamente',
+            teamHistory: user.teamHistory,
+            numeroEquipo: user.numeroEquipo
+        });
+
+    } catch (err) {
+        logger.error('❌ Error en addTeamChange:', err);
+        res.status(500).json({ error: err.message });
+    }
+}
+
+// ✅ PUT /users/:id/team-history/:periodId - Editar periodo existente
+async function editTeamPeriod(req, res) {
+    try {
+        const { id, periodId } = req.params;
+        const { fechaInicio, fechaFin, notes } = req.body;
+
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        const period = user.teamHistory.id(periodId);
+        if (!period) {
+            return res.status(404).json({ error: 'Periodo no encontrado' });
+        }
+
+        // Actualizar campos
+        if (fechaInicio) period.fechaInicio = new Date(fechaInicio);
+        if (fechaFin !== undefined) period.fechaFin = fechaFin ? new Date(fechaFin) : null;
+        if (notes !== undefined) period.notes = notes;
+
+        // Validar historial
+        const { validateTeamHistory } = require('../utils/supervisorHelper');
+        const validation = validateTeamHistory(user.teamHistory);
+        if (!validation.valid) {
+            return res.status(400).json({ error: 'Validación fallida', details: validation.errors });
+        }
+
+        await user.save();
+
+        logger.info(`[TEAM_EDIT] Periodo ${periodId} del user ${id} editado por ${req.user.email}`);
+
+        res.json({
+            message: 'Periodo actualizado exitosamente',
+            teamHistory: user.teamHistory
+        });
+
+    } catch (err) {
+        logger.error('❌ Error en editTeamPeriod:', err);
+        res.status(500).json({ error: err.message });
+    }
+}
+
+// ✅ DELETE /users/:id/team-history/:periodId - Eliminar periodo
+async function deleteTeamPeriod(req, res) {
+    try {
+        const { id, periodId } = req.params;
+
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        const period = user.teamHistory.id(periodId);
+        if (!period) {
+            return res.status(404).json({ error: 'Periodo no encontrado' });
+        }
+
+        // No permitir eliminar el periodo actual (abierto)
+        if (!period.fechaFin) {
+            return res.status(400).json({ error: 'No se puede eliminar el periodo actual (abierto)' });
+        }
+
+        period.remove();
+        await user.save();
+
+        logger.info(`[TEAM_DELETE] Periodo ${periodId} del user ${id} eliminado por ${req.user.email}`);
+
+        res.json({
+            message: 'Periodo eliminado exitosamente',
+            teamHistory: user.teamHistory
+        });
+
+    } catch (err) {
+        logger.error('❌ Error en deleteTeamPeriod:', err);
+        res.status(500).json({ error: err.message });
+    }
+}
+
 module.exports = {
     createUser,
     getUsers,
     getUserById,
     updateUser,
+    updateUserPassword,
     deleteUser,
     deleteUserAdmin,
     toggleActiveUser,
     getUsersAdmin,
     updateUserRole,
-    getAvailableGroups
+    getAvailableGroups,
+    addTeamChange,
+    editTeamPeriod,
+    deleteTeamPeriod
 };

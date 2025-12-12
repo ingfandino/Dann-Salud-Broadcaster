@@ -48,6 +48,7 @@ const sendJobSchema = new mongoose.Schema({
     },
     startedAt: Date,
     finishedAt: Date,
+    completedAt: Date, // Nueva: Registro de finalización de campaña
     currentIndex: {
         type: Number,
         default: 0,

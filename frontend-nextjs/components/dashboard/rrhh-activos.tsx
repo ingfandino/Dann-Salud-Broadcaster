@@ -1,0 +1,687 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { useTheme } from "./theme-provider"
+import { cn } from "@/lib/utils"
+import {
+  Users,
+  UserCheck,
+  UserX,
+  FileText,
+  Briefcase,
+  Search,
+  Filter,
+  Pencil,
+  Trash2,
+  CheckCircle,
+  X,
+  RefreshCw
+} from "lucide-react"
+import { api } from "@/lib/api"
+import { toast } from "sonner"
+import { useAuth } from "@/lib/auth"
+import { TeamHistorySection } from "./team-history-section"
+
+interface Employee {
+  _id: string
+  userId: {
+    _id: string
+    nombre: string
+    email: string
+    role: string
+    numeroEquipo?: string
+    active: boolean
+    teamHistory?: Array<{
+      _id: string
+      numeroEquipo: string
+      fechaInicio: string
+      fechaFin?: string | null
+      changedBy?: { _id: string; nombre: string }
+      changedAt: string
+      notes?: string
+    }>
+  }
+  nombreCompleto: string
+  telefonoPersonal: string
+  fechaEntrevista?: string
+  fechaIngreso: string
+  cargo: string
+  numeroEquipo: string
+  firmoContrato: boolean
+  activo: boolean
+  fotoDNI?: string
+  notas?: string
+  fechaBaja?: string
+  motivoBaja?: string
+}
+
+const cargoColors: Record<string, string> = {
+  supervisor: "#17C787",
+  auditor: "#1E88E5",
+  asesor: "#F4C04A",
+  admin: "#C62FA8",
+  ["rr.hh"]: "#C8376B",
+  gerencia: "#7C3AED"
+}
+
+export function RRHHActivos() {
+  const { theme } = useTheme()
+  const { user } = useAuth()
+  const canEdit = ['rr.hh', 'gerencia'].includes(user?.role?.toLowerCase() || '');
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busqueda, setBusqueda] = useState("")
+  const [filtroEquipo, setFiltroEquipo] = useState("")
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [selectedEmpleado, setSelectedEmpleado] = useState<Employee | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  // Edit form state
+  const [editForm, setEditForm] = useState<Partial<Employee>>({})
+
+  useEffect(() => {
+    fetchEmployees()
+  }, [])
+
+  const fetchEmployees = async () => {
+    try {
+      setLoading(true)
+      const response = await api.employees.list()
+      // Filter only active employees
+      const activeEmployees = response.data.filter((e: Employee) => e.activo)
+      setEmployees(activeEmployees)
+
+      // Update selectedEmpleado if modal is open (to refresh teamHistory)
+      if (selectedEmpleado) {
+        const updatedEmployee = activeEmployees.find((e: Employee) => e._id === selectedEmpleado._id)
+        if (updatedEmployee) {
+          setSelectedEmpleado(updatedEmployee)
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching employees:", error)
+      toast.error("Error al cargar empleados")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleEdit = (empleado: Employee) => {
+    setSelectedEmpleado(empleado)
+    setEditForm({
+      nombreCompleto: empleado.nombreCompleto,
+      telefonoPersonal: empleado.telefonoPersonal,
+      fechaEntrevista: empleado.fechaEntrevista,
+      fechaIngreso: empleado.fechaIngreso ? new Date(empleado.fechaIngreso).toISOString().split('T')[0] : '',
+      firmoContrato: empleado.firmoContrato,
+      activo: empleado.activo,
+      notas: empleado.notas,
+      fechaBaja: empleado.fechaBaja ? new Date(empleado.fechaBaja).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      motivoBaja: empleado.motivoBaja || ''
+    })
+    setEditModalOpen(true)
+  }
+
+  const handleSave = async () => {
+    if (!selectedEmpleado) return
+
+    try {
+      setSaving(true)
+      await api.employees.update(selectedEmpleado._id, editForm)
+      toast.success("Empleado actualizado correctamente")
+
+      // If deactivated, show specific message
+      if (selectedEmpleado.activo && !editForm.activo) {
+        toast.warning("Empleado desactivado. El usuario asociado también ha sido desactivado.")
+      }
+
+      setEditModalOpen(false)
+      fetchEmployees()
+    } catch (error) {
+      console.error("Error updating employee:", error)
+      toast.error("Error al actualizar empleado")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("¿Estás seguro de eliminar este empleado? Esta acción no se puede deshacer.")) return
+
+    try {
+      await api.employees.delete(id)
+      toast.success("Empleado eliminado")
+      fetchEmployees()
+    } catch (error) {
+      console.error("Error deleting employee:", error)
+      toast.error("Error al eliminar empleado")
+    }
+  }
+
+  // Filter logic
+  const filteredEmployees = employees.filter(emp => {
+    const matchesSearch =
+      emp.nombreCompleto.toLowerCase().includes(busqueda.toLowerCase()) ||
+      emp.userId?.email.toLowerCase().includes(busqueda.toLowerCase()) ||
+      emp.userId?.nombre.toLowerCase().includes(busqueda.toLowerCase())
+
+    const teamToCheck = emp.userId?.numeroEquipo || emp.numeroEquipo
+    const matchesTeam = filtroEquipo ? teamToCheck === filtroEquipo : true
+
+    return matchesSearch && matchesTeam
+  })
+
+  // Group by team (usar numeroEquipo del User, no del Employee)
+  const employeesByTeam = filteredEmployees.reduce((acc, emp) => {
+    const team = emp.userId?.numeroEquipo || emp.numeroEquipo || "Sin Equipo"
+    if (!acc[team]) acc[team] = []
+    acc[team].push(emp)
+    return acc
+  }, {} as Record<string, Employee[]>)
+
+  // Stats
+  const totalEmployees = employees.length
+  const withContract = employees.filter(e => e.firmoContrato).length
+  const uniqueRoles = new Set(employees.map(e => e.cargo)).size
+
+  const statsCards = [
+    { label: "Total Activos", value: totalEmployees, icon: UserCheck, color: "#17C787" },
+    { label: "Con Contrato", value: withContract, icon: FileText, color: "#F4C04A" },
+    { label: "Cargos Distintos", value: uniqueRoles, icon: Briefcase, color: "#C62FA8" },
+  ]
+
+  return (
+    <div className="space-y-6 animate-fade-in-up">
+      {/* Header con Stats */}
+      <div className="flex flex-wrap gap-3">
+        {statsCards.map((stat, index) => {
+          const Icon = stat.icon
+          return (
+            <div
+              key={index}
+              className={cn(
+                "flex-1 min-w-[140px] rounded-xl border p-4 flex items-center justify-between",
+                theme === "dark"
+                  ? "bg-gradient-to-br from-white/5 to-white/[0.02] border-white/10"
+                  : "bg-white border-gray-200 shadow-sm",
+              )}
+            >
+              <div>
+                <p className={cn("text-xs", theme === "dark" ? "text-gray-400" : "text-gray-500")}>{stat.label}</p>
+                <p className="text-2xl font-bold" style={{ color: stat.color }}>
+                  {stat.value}
+                </p>
+              </div>
+              <Icon className="w-6 h-6" style={{ color: stat.color }} />
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Lista de empleados activos */}
+      <div
+        className={cn(
+          "rounded-2xl border p-6",
+          theme === "dark"
+            ? "bg-gradient-to-br from-white/5 to-white/[0.02] border-white/10"
+            : "bg-white border-gray-200 shadow-sm",
+        )}
+      >
+        {/* Indicador */}
+        <div
+          className={cn(
+            "flex items-center gap-2 mb-4 px-3 py-2 rounded-lg w-fit",
+            theme === "dark" ? "bg-[#17C787]/10" : "bg-[#17C787]/10",
+          )}
+        >
+          <CheckCircle className="w-4 h-4" style={{ color: "#17C787" }} />
+          <span className="text-sm" style={{ color: "#17C787" }}>
+            Mostrando solo personal activo
+          </span>
+        </div>
+
+        {/* Búsqueda y filtros */}
+        <div className="flex flex-col md:flex-row gap-4 mb-6">
+          <div className="flex-1 relative">
+            <Search
+              className={cn(
+                "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4",
+                theme === "dark" ? "text-gray-500" : "text-gray-400",
+              )}
+            />
+            <input
+              type="text"
+              placeholder="Buscar por nombre, email..."
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              className={cn(
+                "w-full pl-10 pr-4 py-2 rounded-lg border text-sm",
+                theme === "dark"
+                  ? "bg-white/5 border-white/10 text-white placeholder-gray-500"
+                  : "bg-white border-gray-200 text-gray-800 placeholder-gray-400",
+              )}
+            />
+          </div>
+          <select
+            value={filtroEquipo}
+            onChange={(e) => setFiltroEquipo(e.target.value)}
+            className={cn(
+              "px-4 py-2 rounded-lg border text-sm min-w-[180px]",
+              theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800",
+            )}
+          >
+            <option value="">Todos los equipos</option>
+            {Object.keys(employeesByTeam).sort().map(team => (
+              <option key={team} value={team}>Equipo {team}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Loading State */}
+        {loading && (
+          <div className="flex justify-center py-12">
+            <RefreshCw className="w-8 h-8 animate-spin text-purple-500" />
+          </div>
+        )}
+
+        {/* Empty State */}
+        {!loading && employees.length === 0 && (
+          <div className="text-center py-12 text-gray-500">
+            No hay empleados activos registrados.
+          </div>
+        )}
+
+        {/* Tablas por equipo */}
+        {!loading && Object.entries(employeesByTeam).map(([team, teamEmployees]) => (
+          <div key={team} className="mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Filter className="w-4 h-4" style={{ color: "#1E88E5" }} />
+              <h3 className={cn("font-semibold", theme === "dark" ? "text-white" : "text-gray-800")}>
+                Equipo {team}
+              </h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={theme === "dark" ? "bg-white/5" : "bg-gray-50"}>
+                    {[
+                      "NOMBRE",
+                      "F. ENTREVISTA",
+                      "F. INGRESO",
+                      "CARGO",
+                      "TELÉFONO",
+                      "CONTRATO",
+                      "ACTIVO",
+                      "ACCIONES",
+                    ].map((header) => (
+                      <th
+                        key={header}
+                        className={cn(
+                          "px-3 py-2 text-left font-semibold text-xs",
+                          theme === "dark" ? "text-gray-400" : "text-gray-600",
+                        )}
+                      >
+                        {header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {teamEmployees.map((emp) => (
+                    <tr
+                      key={emp._id}
+                      className={cn(
+                        "border-t transition-colors",
+                        theme === "dark" ? "border-white/5 hover:bg-white/5" : "border-gray-100 hover:bg-gray-50",
+                      )}
+                    >
+                      <td className="px-3 py-3">
+                        <div>
+                          <p className={cn("font-medium", theme === "dark" ? "text-white" : "text-gray-800")}>
+                            {emp.nombreCompleto}
+                          </p>
+                          <p className={cn("text-xs", theme === "dark" ? "text-gray-500" : "text-gray-500")}>
+                            {emp.userId?.email}
+                          </p>
+                        </div>
+                      </td>
+                      <td className={cn("px-3 py-3", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                        {emp.fechaEntrevista ? new Date(emp.fechaEntrevista).toLocaleDateString() : "-"}
+                      </td>
+                      <td className={cn("px-3 py-3", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                        {emp.fechaIngreso ? new Date(emp.fechaIngreso).toLocaleDateString() : "-"}
+                      </td>
+                      <td className="px-3 py-3">
+                        <span
+                          className="px-2 py-1 rounded text-xs font-medium text-white capitalize"
+                          style={{ backgroundColor: cargoColors[emp.cargo] || "#6B7280" }}
+                        >
+                          {emp.cargo}
+                        </span>
+                      </td>
+                      <td className={cn("px-3 py-3", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                        {emp.telefonoPersonal || "-"}
+                      </td>
+                      <td className="px-3 py-3">
+                        <CheckCircle className="w-5 h-5" style={{ color: emp.firmoContrato ? "#17C787" : "#C8376B" }} />
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className="text-xs font-medium" style={{ color: "#17C787" }}>
+                          Sí
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-2">
+                          {canEdit && (
+                            <>
+                              <button
+                                onClick={() => handleEdit(emp)}
+                                className={cn(
+                                  "p-1 rounded hover:bg-white/10 transition-colors",
+                                  theme === "dark" ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-gray-700",
+                                )}
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(emp._id)}
+                                className="p-1 rounded hover:bg-red-500/10 text-red-400 hover:text-red-500 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editModalOpen && selectedEmpleado && (
+        <Portal>
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div
+              className={cn(
+                "w-full max-w-lg rounded-2xl border p-6 shadow-xl flex flex-col max-h-[90vh]",
+                theme === "dark" ? "bg-[#1a1333] border-white/10" : "bg-white border-gray-200",
+              )}
+            >
+              <div className="flex items-center justify-between mb-6 flex-shrink-0">
+                <h3 className={cn("text-xl font-semibold", theme === "dark" ? "text-white" : "text-gray-800")}>
+                  Editar Empleado
+                </h3>
+                <button
+                  onClick={() => setEditModalOpen(false)}
+                  className={cn(
+                    "p-1 rounded-lg transition-colors",
+                    theme === "dark" ? "hover:bg-white/10 text-gray-400" : "hover:bg-gray-100 text-gray-500",
+                  )}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4 overflow-y-auto flex-1 pr-2">
+                <div>
+                  <label
+                    className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}
+                  >
+                    Nombre Completo *
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.nombreCompleto}
+                    onChange={(e) => setEditForm({ ...editForm, nombreCompleto: e.target.value })}
+                    className={cn(
+                      "w-full px-3 py-2 rounded-lg border text-sm",
+                      theme === "dark"
+                        ? "bg-white/5 border-white/10 text-white"
+                        : "bg-white border-gray-200 text-gray-800",
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label
+                      className={cn(
+                        "block text-sm font-medium mb-1",
+                        theme === "dark" ? "text-gray-300" : "text-gray-700",
+                      )}
+                    >
+                      Teléfono Personal
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.telefonoPersonal}
+                      onChange={(e) => setEditForm({ ...editForm, telefonoPersonal: e.target.value })}
+                      className={cn(
+                        "w-full px-3 py-2 rounded-lg border text-sm",
+                        theme === "dark"
+                          ? "bg-white/5 border-white/10 text-white"
+                          : "bg-white border-gray-200 text-gray-800",
+                      )}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      className={cn(
+                        "block text-sm font-medium mb-1",
+                        theme === "dark" ? "text-gray-300" : "text-gray-700",
+                      )}
+                    >
+                      Cargo
+                    </label>
+                    <input
+                      type="text"
+                      value={selectedEmpleado.cargo}
+                      disabled
+                      className={cn(
+                        "w-full px-3 py-2 rounded-lg border text-sm capitalize",
+                        theme === "dark"
+                          ? "bg-white/10 border-white/10 text-gray-400"
+                          : "bg-gray-100 border-gray-200 text-gray-500",
+                      )}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label
+                      className={cn(
+                        "block text-sm font-medium mb-1",
+                        theme === "dark" ? "text-gray-300" : "text-gray-700",
+                      )}
+                    >
+                      Fecha de Entrevista
+                    </label>
+                    <input
+                      type="date"
+                      value={editForm.fechaEntrevista ? new Date(editForm.fechaEntrevista).toISOString().split('T')[0] : ''}
+                      onChange={(e) => setEditForm({ ...editForm, fechaEntrevista: e.target.value })}
+                      className={cn(
+                        "w-full px-3 py-2 rounded-lg border text-sm",
+                        theme === "dark"
+                          ? "bg-white/5 border-white/10 text-white"
+                          : "bg-white border-gray-200 text-gray-800",
+                      )}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      className={cn(
+                        "block text-sm font-medium mb-1",
+                        theme === "dark" ? "text-gray-300" : "text-gray-700",
+                      )}
+                    >
+                      Fecha de Ingreso
+                    </label>
+                    <input
+                      type="date"
+                      value={editForm.fechaIngreso}
+                      onChange={(e) => setEditForm({ ...editForm, fechaIngreso: e.target.value })}
+                      className={cn(
+                        "w-full px-3 py-2 rounded-lg border text-sm",
+                        theme === "dark"
+                          ? "bg-white/5 border-white/10 text-white"
+                          : "bg-white border-gray-200 text-gray-800",
+                      )}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editForm.firmoContrato}
+                      onChange={(e) => setEditForm({ ...editForm, firmoContrato: e.target.checked })}
+                      className="w-4 h-4 rounded border-gray-300 text-[#17C787] focus:ring-[#17C787]"
+                    />
+                    <span className={cn("text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                      ¿Firmó el contrato?
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editForm.activo}
+                      onChange={(e) => setEditForm({ ...editForm, activo: e.target.checked })}
+                      className="w-4 h-4 rounded border-gray-300 text-[#17C787] focus:ring-[#17C787]"
+                    />
+                    <span className={cn("text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                      ¿Activo?
+                    </span>
+                  </label>
+                </div>
+
+                {!editForm.activo && (
+                  <div className="space-y-4 animate-fade-in-up">
+                    <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-xs">
+                      ⚠️ Al desactivar el empleado, el usuario asociado también será desactivado automáticamente.
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4">
+                      <div>
+                        <label
+                          className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}
+                        >
+                          Fecha de Egreso *
+                        </label>
+                        <input
+                          type="date"
+                          value={editForm.fechaBaja}
+                          onChange={(e) => setEditForm({ ...editForm, fechaBaja: e.target.value })}
+                          className={cn(
+                            "w-full px-3 py-2 rounded-lg border text-sm",
+                            theme === "dark"
+                              ? "bg-white/5 border-white/10 text-white"
+                              : "bg-white border-gray-200 text-gray-800",
+                          )}
+                        />
+                      </div>
+                      <div>
+                        <label
+                          className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}
+                        >
+                          Motivo de Baja *
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={editForm.motivoBaja}
+                          onChange={(e) => setEditForm({ ...editForm, motivoBaja: e.target.value })}
+                          className={cn(
+                            "w-full px-3 py-2 rounded-lg border text-sm resize-none",
+                            theme === "dark"
+                              ? "bg-white/5 border-white/10 text-white placeholder-gray-500"
+                              : "bg-white border-gray-200 text-gray-800 placeholder-gray-400",
+                          )}
+                          placeholder="Indique el motivo de la baja..."
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ✅ Historial de Equipos */}
+                {selectedEmpleado.userId && (
+                  <TeamHistorySection
+                    userId={selectedEmpleado.userId._id}
+                    teamHistory={selectedEmpleado.userId.teamHistory}
+                    currentNumeroEquipo={selectedEmpleado.userId.numeroEquipo}
+                    onUpdate={fetchEmployees}
+                  />
+                )}
+
+                <div>
+                  <label
+                    className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}
+                  >
+                    Notas
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={editForm.notas}
+                    onChange={(e) => setEditForm({ ...editForm, notas: e.target.value })}
+                    className={cn(
+                      "w-full px-3 py-2 rounded-lg border text-sm resize-none",
+                      theme === "dark"
+                        ? "bg-white/5 border-white/10 text-white placeholder-gray-500"
+                        : "bg-white border-gray-200 text-gray-800 placeholder-gray-400",
+                    )}
+                    placeholder="Observaciones adicionales..."
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6 flex-shrink-0">
+                <button
+                  onClick={() => setEditModalOpen(false)}
+                  className={cn(
+                    "px-4 py-2 rounded-lg text-sm font-medium transition-colors border",
+                    theme === "dark"
+                      ? "border-white/10 text-gray-400 hover:bg-white/5"
+                      : "border-gray-200 text-gray-600 hover:bg-gray-50",
+                  )}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className={cn(
+                    "px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors flex items-center gap-2",
+                    saving ? "opacity-50 cursor-not-allowed" : "hover:opacity-90"
+                  )}
+                  style={{ backgroundColor: "#17C787" }}
+                >
+                  {saving ? "Guardando..." : "Guardar Cambios"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+    </div>
+  )
+}
+
+function Portal({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    return () => setMounted(false)
+  }, [])
+
+  if (!mounted) return null
+
+  const { createPortal } = require('react-dom')
+  return createPortal(children, document.body)
+}
