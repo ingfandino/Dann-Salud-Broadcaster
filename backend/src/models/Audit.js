@@ -1,96 +1,163 @@
-// backend/src/models/Audit.js
+/**
+ * ============================================================
+ * MODELO DE AUDITORÍA (Audit)
+ * ============================================================
+ * Representa el registro de una venta o proceso de auditoría.
+ * Almacena toda la información del afiliado vendido, el asesor que
+ * realizó la venta, el auditor asignado, y el historial completo
+ * de estados y cambios.
+ * 
+ * Ciclo de vida típico:
+ * 1. Creación (pautar venta) - Estado inicial
+ * 2. Auditoría (seguimiento por auditor)
+ * 3. Completada o Rechazada
+ * 4. Opcional: Recuperación (si aplica) o Liquidación
+ */
 
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
 
 const AuditSchema = new Schema({
+    /* ========== DATOS DEL AFILIADO ========== */
+    
+    /** Nombre completo del afiliado */
     nombre: { type: String, required: true },
-    cuil: { type: String, required: false }, // Opcional
+    /** CUIL del afiliado (opcional) */
+    cuil: { type: String, required: false },
+    /** Teléfono de contacto */
     telefono: { type: String, required: true },
+    /** Tipo de operación: alta nueva o cambio de obra social */
     tipoVenta: { type: String, enum: ['alta', 'cambio'], default: 'alta' },
+    /** Obra social de la que proviene (si es cambio) */
     obraSocialAnterior: { type: String },
+    /** Obra social a la que se afilia */
     obraSocialVendida: { type: String, enum: ['Binimed', 'Meplife', 'TURF'], required: true },
+    
+    /* ========== PROGRAMACIÓN Y ASIGNACIONES ========== */
+    
+    /** Fecha y hora programada para la auditoría */
     scheduledAt: { type: Date, required: true },
+    /** Asesor que realizó la venta */
     asesor: { type: Schema.Types.ObjectId, ref: 'User' },
-    validador: { type: Schema.Types.ObjectId, ref: 'User' }, // ✅ Usuario que valida la venta
+    /** Usuario que validó la venta */
+    validador: { type: Schema.Types.ObjectId, ref: 'User' },
+    /** Usuario que creó el registro */
     createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    /** Auditor asignado para el seguimiento */
     auditor: { type: Schema.Types.ObjectId, ref: 'User' },
-    administrador: { type: Schema.Types.ObjectId, ref: 'User' }, // ✅ Admin que realiza el QR
-    status: { type: String, default: '' },
-    statusUpdatedAt: { type: Date, default: Date.now },
-    recoveryEligibleAt: { type: Date, default: null },
-    isRecovery: { type: Boolean, default: false },
-    recoveryMovedAt: { type: Date, default: null },
-    recoveryMonth: { type: String, default: null }, // Formato: YYYY-MM (ej: 2025-11)
-    recoveryDeletedAt: { type: Date, default: null }, // Timestamp del soft-delete de Recuperación
-    isLiquidacion: { type: Boolean, default: false }, // Marcada para Liquidación
-    liquidacionMonth: { type: String, default: null }, // Formato: YYYY-MM
-    liquidacionDeletedAt: { type: Date, default: null }, // Timestamp del soft-delete de Liquidación
-    isRecuperada: { type: Boolean, default: false }, // ¿Recuperada? (solo Gerencia puede marcar)
-    followUpNotificationSent: { type: Boolean, default: false }, // Para tracking de notificaciones de seguimiento después de 12h
+    /** Administrador que realizó el QR */
+    administrador: { type: Schema.Types.ObjectId, ref: 'User' },
+    /** Grupo/equipo al que pertenece */
     groupId: { type: Schema.Types.ObjectId, ref: 'Group' },
+    
+    /* ========== ESTADO Y SEGUIMIENTO ========== */
+    
+    /** Estado actual de la auditoría */
+    status: { type: String, default: '' },
+    /** Última actualización del estado */
+    statusUpdatedAt: { type: Date, default: Date.now },
+    /** Indica si la auditoría está completa */
+    isComplete: { type: Boolean, default: false },
+    /** Fecha de creación del QR (si aplica) */
+    fechaCreacionQR: { type: Date, default: null },
+    /** Flag para notificaciones de seguimiento 12h */
+    followUpNotificationSent: { type: Boolean, default: false },
+    
+    /* ========== RECUPERACIÓN ========== */
+    
+    /** Fecha a partir de la cual es elegible para recuperación */
+    recoveryEligibleAt: { type: Date, default: null },
+    /** Indica si está en proceso de recuperación */
+    isRecovery: { type: Boolean, default: false },
+    /** Fecha en que se movió a recuperación */
+    recoveryMovedAt: { type: Date, default: null },
+    /** Mes de recuperación (formato YYYY-MM) */
+    recoveryMonth: { type: String, default: null },
+    /** Fecha de eliminación lógica de recuperación */
+    recoveryDeletedAt: { type: Date, default: null },
+    /** Indica si fue recuperada exitosamente (solo Gerencia) */
+    isRecuperada: { type: Boolean, default: false },
+    
+    /* ========== LIQUIDACIÓN ========== */
+    
+    /** Indica si está marcada para liquidación */
+    isLiquidacion: { type: Boolean, default: false },
+    /** Mes de liquidación (formato YYYY-MM) */
+    liquidacionMonth: { type: String, default: null },
+    /** Fecha de eliminación lógica de liquidación */
+    liquidacionDeletedAt: { type: Date, default: null },
 
+    /* ========== ARCHIVOS MULTIMEDIA ========== */
+    
     multimedia: {
+        /** Imágenes de documentación */
         images: { type: [String], default: [] },
+        /** Video de la auditoría */
         video: { type: String, default: null },
+        /** Clave temporal del afiliado */
         afiliadoKey: { type: String, default: null },
+        /** Clave definitiva del afiliado */
         afiliadoKeyDefinitiva: { type: String, default: null },
+        /** Audio de respaldo */
         audioBackup: { type: String, default: null }
     },
 
+    /* ========== NOTAS Y DATOS ADICIONALES ========== */
+    
+    /** Notas adicionales sobre la auditoría */
     datosExtra: { type: String, default: "" },
+    /** Historial de cambios en datosExtra */
     datosExtraHistory: {
-        type: [
-            {
-                value: { type: String, default: "" },
-                updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
-                updatedAt: { type: Date, default: Date.now }
-            }
-        ],
+        type: [{
+            value: { type: String, default: "" },
+            updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+            updatedAt: { type: Date, default: Date.now }
+        }],
         default: []
     },
+    
+    /* ========== HISTORIALES DE CAMBIOS ========== */
+    
+    /** Historial de cambios de estado */
     statusHistory: {
-        type: [
-            {
-                value: { type: String, default: "" },
-                updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
-                updatedAt: { type: Date, default: Date.now }
-            }
-        ],
+        type: [{
+            value: { type: String, default: "" },
+            updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+            updatedAt: { type: Date, default: Date.now }
+        }],
         default: []
     },
+    /** Historial de cambios de asesor */
     asesorHistory: {
-        type: [
-            {
-                previousAsesor: { type: Schema.Types.ObjectId, ref: 'User' },
-                newAsesor: { type: Schema.Types.ObjectId, ref: 'User' },
-                changedBy: { type: Schema.Types.ObjectId, ref: 'User' },
-                changedAt: { type: Date, default: Date.now }
-            }
-        ],
+        type: [{
+            previousAsesor: { type: Schema.Types.ObjectId, ref: 'User' },
+            newAsesor: { type: Schema.Types.ObjectId, ref: 'User' },
+            changedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+            changedAt: { type: Date, default: Date.now }
+        }],
         default: []
     },
-    isComplete: { type: Boolean, default: false },
-    fechaCreacionQR: { type: Date, default: null },
 
-    // ✅ Snapshot del supervisor al momento de la venta (para historial de equipos)
+    /* ========== TRAZABILIDAD DE SUPERVISOR ========== */
+    
+    /** Snapshot del supervisor al momento de la venta */
     supervisorSnapshot: {
         _id: { type: Schema.Types.ObjectId, ref: 'User' },
         nombre: { type: String },
         numeroEquipo: { type: String }
     },
 
+    /** Fecha de creación del registro */
     createdAt: { type: Date, default: Date.now }
 });
 
-// ✅ Pre-save hook: Calcular supervisorSnapshot automáticamente
+/**
+ * Middleware pre-save: Calcula automáticamente el supervisorSnapshot
+ * basándose en el asesor asignado y su historial de equipos.
+ * Se ejecuta al crear o al modificar asesor/fechaCreacionQR/groupId.
+ */
 AuditSchema.pre('save', async function (next) {
     try {
-        // Solo calcular si:
-        // 1. Es un documento nuevo, O
-        // 2. El asesor cambió, O
-        // 3. fechaCreacionQR cambió, O
-        // 4. groupId cambió (para recalcular supervisor del nuevo equipo)
         const shouldCalculate = this.isNew ||
             this.isModified('asesor') ||
             this.isModified('fechaCreacionQR') ||
@@ -100,7 +167,6 @@ AuditSchema.pre('save', async function (next) {
             return next();
         }
 
-        // Si no hay asesor NI groupId, no podemos calcular supervisor
         if (!this.asesor && !this.groupId) {
             return next();
         }
@@ -108,7 +174,6 @@ AuditSchema.pre('save', async function (next) {
         const { getSupervisorSnapshotForAudit } = require('../utils/supervisorHelper');
         const User = require('./User');
 
-        // Obtener asesor con teamHistory (puede ser null si solo hay groupId)
         let asesor = null;
         if (this.asesor) {
             asesor = await User.findById(this.asesor).lean();
@@ -116,11 +181,9 @@ AuditSchema.pre('save', async function (next) {
             if (!asesor) {
                 const logger = require('../utils/logger');
                 logger.warn(`[AUDIT_HOOK] Asesor ${this.asesor} no encontrado para audit ${this._id}`);
-                // Continuar sin asesor, intentará usar groupId
             }
         }
 
-        // Calcular snapshot (función ahora acepta asesor = null y usa groupId como fallback)
         const snapshot = await getSupervisorSnapshotForAudit(this, asesor);
 
         if (snapshot) {
@@ -131,7 +194,7 @@ AuditSchema.pre('save', async function (next) {
     } catch (error) {
         const logger = require('../utils/logger');
         logger.error(`[AUDIT_HOOK] Error calculando supervisorSnapshot para audit ${this._id}:`, error.message);
-        next(); // Continuar sin bloquear el save
+        next();
     }
 });
 

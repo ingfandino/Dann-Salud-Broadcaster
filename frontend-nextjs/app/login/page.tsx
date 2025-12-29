@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * PÁGINA DE LOGIN (app/login/page.tsx)
+ * ============================================================
+ * Formulario de inicio de sesión con validación.
+ * Incluye fondo animado y tema claro/oscuro.
+ */
+
 "use client"
 
 import type React from "react"
@@ -11,6 +19,7 @@ import { FloatingShapes } from "@/components/auth/floating-shapes"
 import { useAuth } from "@/lib/auth"
 import { toast } from "sonner"
 
+/** Página de inicio de sesión */
 export default function LoginPage() {
     const router = useRouter()
     const { login } = useAuth()
@@ -36,7 +45,7 @@ export default function LoginPage() {
             const response = await login(email, password)
             toast.success('¡Bienvenido!')
 
-            // Redirect based on role
+            /* Redirigir según rol */
             const role = response?.user?.role?.toLowerCase() || ''
 
             if (role === 'asesor') {
@@ -82,7 +91,7 @@ export default function LoginPage() {
             <AnimatedBackground theme={theme} />
             <FloatingShapes theme={theme} />
 
-            {/* Theme toggle - discreet position */}
+            {/* Botón de cambio de tema */}
             <button
                 onClick={toggleTheme}
                 className={`fixed top-4 right-4 p-2.5 rounded-full transition-all duration-300 hover:scale-110 z-50 ${theme === "dark" ? "bg-white/10 hover:bg-white/20 text-white" : "bg-black/5 hover:bg-black/10 text-gray-700"
@@ -91,10 +100,10 @@ export default function LoginPage() {
                 {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
 
-            {/* Main content */}
+            {/* Contenido principal */}
             <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
                 <div className="w-full max-w-5xl flex flex-col lg:flex-row gap-6 lg:gap-8">
-                    {/* Left card - Info */}
+                    {/* Tarjeta izquierda: Información de bienvenida */}
                     <div
                         className={`flex-1 rounded-3xl p-8 lg:p-10 backdrop-blur-xl transition-all duration-500 animate-slide-in-left ${theme === "dark"
                             ? "bg-white/5 border border-white/10 shadow-2xl shadow-purple-500/10"
@@ -154,7 +163,7 @@ export default function LoginPage() {
                             ))}
                         </ul>
 
-                        {/* Animated decoration */}
+                        {/* Elemento decorativo animado */}
                         <div className="mt-8 flex items-center gap-2">
                             <Sparkles className={`w-5 h-5 animate-pulse ${theme === "dark" ? "text-[#F4C04A]" : "text-[#F4C04A]"}`} />
                             <span className={`text-xs ${theme === "dark" ? "text-gray-500" : "text-gray-400"}`}>
@@ -163,7 +172,7 @@ export default function LoginPage() {
                         </div>
                     </div>
 
-                    {/* Right card - Form */}
+                    {/* Tarjeta derecha: Formulario de login */}
                     <div
                         className={`w-full lg:w-[400px] rounded-3xl p-8 backdrop-blur-xl transition-all duration-500 animate-fade-in-up ${theme === "dark"
                             ? "bg-white/5 border border-white/10 shadow-2xl shadow-purple-500/10"

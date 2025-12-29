@@ -1,8 +1,15 @@
-// backend/src/services/emailService.js
+/**
+ * ============================================================
+ * SERVICIO DE EMAIL (emailService.js)
+ * ============================================================
+ * Envío de correos electrónicos (recuperación de contraseña).
+ * Requiere configuración SMTP en variables de entorno.
+ */
 
 const nodemailer = require("nodemailer");
 const logger = require("../utils/logger");
 
+/** Verifica si SMTP está configurado */
 function hasSmtpConfig() {
   return (
     !!process.env.SMTP_HOST &&

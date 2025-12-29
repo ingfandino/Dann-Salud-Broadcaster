@@ -1,9 +1,15 @@
-// backend/src/controllers/sendConfigController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE CONFIGURACIÓN DE ENVÍO (sendConfigController)
+ * ============================================================
+ * Gestiona la configuración global de envío de mensajes masivos.
+ * Parámetros: delays, tamaño de lotes, pausas entre lotes.
+ */
 
 const SendConfig = require("../models/SendConfig");
 const logger = require("../utils/logger");
 
-// Obtener configuración actual (si no existe, crear con defaults)
+/** Obtiene la configuración actual (crea una por defecto si no existe) */
 exports.getConfig = async (_req, res) => {
     try {
         let config = await SendConfig.findOne();

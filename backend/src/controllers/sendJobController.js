@@ -1,4 +1,16 @@
-// backend/src/controllers/sendJobController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE TRABAJOS DE ENVÍO (sendJobController)
+ * ============================================================
+ * Gestiona las campañas de envío masivo de mensajes por WhatsApp.
+ * 
+ * Funcionalidades:
+ * - Crear, pausar, reanudar y cancelar trabajos
+ * - Monitoreo de progreso en tiempo real
+ * - Deduplicación de contactos
+ * - Exportación de reportes de respuestas
+ * - Gestión de estadísticas por campaña
+ */
 
 const mongoose = require("mongoose");
 const SendJob = require("../models/SendJob");
@@ -11,7 +23,7 @@ const logger = require("../utils/logger");
 const { processJob } = require("../services/sendMessageService");
 const { emitJobProgress, emitJobsUpdate } = require("../config/socket");
 
-// 🔹 Crear un job
+/** Crea un nuevo trabajo de envío masivo */
 exports.startJob = async (req, res) => {
     try {
         const { name, templateId, message, contacts, scheduledFor } = req.body;
@@ -353,9 +365,6 @@ exports.listJobs = async (req, res) => {
         } else if (role === "supervisor") {
             // mostrar jobs creados por usuarios del mismo numeroEquipo (incluyéndose)
             filter = {};
-        } else if (role === "revendedor") {
-            // ✅ Revendedores ven jobs creados por otros revendedores
-            filter = {};
         } else if (role === "asesor") {
             filter = { createdBy: userId };
         } else {
@@ -371,9 +380,6 @@ exports.listJobs = async (req, res) => {
         // Post-filtrado por equipo para supervisor (porque createdBy.numeroEquipo es en documento poblado)
         if (role === "supervisor") {
             jobs = jobs.filter(j => j.createdBy && j.createdBy.numeroEquipo === userEquipo);
-        } else if (role === "revendedor") {
-            // ✅ Filtrar solo jobs creados por revendedores
-            jobs = jobs.filter(j => j.createdBy && String(j.createdBy.role).toLowerCase() === "revendedor");
         }
 
         // Calcular respuestas (mensajes inbound) para cada job
@@ -382,11 +388,19 @@ exports.listJobs = async (req, res) => {
             const processed = (job.stats?.sent || 0) + (job.stats?.failed || 0);
             const progress = total > 0 ? Math.min(100, ((processed / total) * 100).toFixed(2)) : 0;
 
-            // Contar respuestas recibidas (mensajes inbound)
-            const repliesCount = await Message.countDocuments({
-                job: job._id,
-                direction: 'inbound'
-            });
+            // Contar respuestas únicas (solo primer mensaje por número de teléfono)
+            // Solo contar si la campaña fue creada en las últimas 24 horas
+            const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const campaignCreatedAt = new Date(job.createdAt);
+            let repliesCount = 0;
+            
+            if (campaignCreatedAt >= twentyFourHoursAgo) {
+                const distinctPhones = await Message.distinct('from', {
+                    job: job._id,
+                    direction: 'inbound'
+                });
+                repliesCount = distinctPhones.length;
+            }
 
             return {
                 _id: job._id,

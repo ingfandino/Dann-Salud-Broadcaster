@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * SIDEBAR DE NAVEGACIÓN (sidebar.tsx)
+ * ============================================================
+ * Menú lateral con navegación por secciones.
+ * Muestra opciones según rol del usuario.
+ */
+
 "use client"
 
 import { useState } from "react"
@@ -123,23 +131,26 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
     if (role === 'asesor') {
       return menuItems.filter(item => {
         if (item.id === 'reportes-globales' || item.id === 'mensajeria-masiva' || item.id === 'mensajeria-interna') return true
-        if (item.id === 'auditorias') {
-          // Only Seguimiento and Crear turno
-          return {
-            ...item,
-            submenu: item.submenu?.filter(sub =>
-              sub.id === 'auditorias-seguimiento' || sub.id === 'auditorias-crear-turno'
-            )
-          }
-        }
-        if (item.id === 'contactar-afiliados') return true
+        if (item.id === 'auditorias') return true // Seguimiento, Crear turno, Liquidación
+        if (item.id === 'contactar-afiliados') return true // Solo "Datos del día"
         return false
       }).map(item => {
         if (item.id === 'auditorias' && item.submenu) {
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
-              sub.id === 'auditorias-seguimiento' || sub.id === 'auditorias-crear-turno'
+              sub.id === 'auditorias-seguimiento' || 
+              sub.id === 'auditorias-crear-turno' ||
+              sub.id === 'auditorias-liquidacion' // ✅ Asesor ahora ve Liquidación
+            )
+          }
+        }
+        // Filtrar submenú de contactar-afiliados para asesor
+        if (item.id === 'contactar-afiliados' && item.submenu) {
+          return {
+            ...item,
+            submenu: item.submenu.filter(sub =>
+              sub.id === 'contactar-afiliados-datos-dia' // Solo "Datos del día"
             )
           }
         }
@@ -164,7 +175,8 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
           return {
             ...item,
             submenu: item.submenu?.filter(sub =>
-              sub.id === 'contactar-afiliados-administracion'
+              sub.id === 'contactar-afiliados-administracion' ||
+              sub.id === 'contactar-afiliados-datos-dia' // ✅ Supervisor ahora ve ambas
             )
           }
         }
@@ -211,7 +223,8 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
-              sub.id === 'contactar-afiliados-administracion'
+              sub.id === 'contactar-afiliados-administracion' ||
+              sub.id === 'contactar-afiliados-datos-dia' // ✅ Supervisor ahora ve ambas
             )
           }
         }
@@ -267,11 +280,12 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
           }
           return false;
         } else {
-          // Case 1.2: Reportes, Mensajería, Seguimiento, Crear turno
+          // Case 1.2: Reportes, Mensajería, Seguimiento, Crear turno, Contactar Afiliados
           if (item.id === 'reportes-globales') return true;
           if (item.id === 'mensajeria-masiva') return true;
           if (item.id === 'mensajeria-interna') return true;
           if (item.id === 'auditorias') return true;
+          if (item.id === 'contactar-afiliados') return true; // ✅ Auditor con equipo ve Datos del día
           return false;
         }
       }).map(item => {
@@ -281,8 +295,19 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
             // Only Seguimiento
             return { ...item, submenu: item.submenu.filter(sub => sub.id === 'auditorias-seguimiento') }
           } else {
-            // Seguimiento and Crear turno
-            return { ...item, submenu: item.submenu.filter(sub => sub.id === 'auditorias-seguimiento' || sub.id === 'auditorias-crear-turno') }
+            // Seguimiento, Crear turno y Liquidación (auditor con equipo)
+            return { ...item, submenu: item.submenu.filter(sub => 
+              sub.id === 'auditorias-seguimiento' || 
+              sub.id === 'auditorias-crear-turno' ||
+              sub.id === 'auditorias-liquidacion' // ✅ Auditor con equipo ve Liquidación
+            )}
+          }
+        }
+        // ✅ Auditor con equipo solo ve "Datos del día"
+        if (item.id === 'contactar-afiliados' && item.submenu) {
+          return {
+            ...item,
+            submenu: item.submenu.filter(sub => sub.id === 'contactar-afiliados-datos-dia')
           }
         }
         return item;
@@ -352,7 +377,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
         <X className="w-4 h-4" />
       </button>
 
-      {/* Logo Section */}
+      {/* Sección del logo */}
       <div className="p-6 items-center gap-3 hidden lg:flex">
         <div className="relative">
           <div
@@ -383,7 +408,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
         </div>
       </div>
 
-      {/* User Profile */}
+      {/* Perfil del usuario */}
       <div
         className={cn("px-6 py-4 border-t lg:border-t", theme === "dark" ? "border-white/5" : "border-[#00C794]/20")}
       >
@@ -409,7 +434,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
         </div>
       </div>
 
-      {/* Navigation */}
+      {/* Menú de navegación */}
       <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
         {filteredMenuItems.map((item) => {
           const Icon = item.icon
@@ -518,12 +543,12 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
         })}
       </nav>
 
-      {/* Theme Toggle */}
+      {/* Cambio de tema */}
       <div className={cn("px-4 py-3 border-t", theme === "dark" ? "border-white/5" : "border-purple-200/30")}>
         <ThemeToggle />
       </div>
 
-      {/* Bottom Actions */}
+      {/* Acciones inferiores */}
       <div className={cn("p-4 border-t space-y-2", theme === "dark" ? "border-white/5" : "border-purple-200/30")}>
         <button
           onClick={onLogout}

@@ -1,8 +1,15 @@
-// backend/src/services/sendMessageService.js
+/**
+ * ============================================================
+ * SERVICIO DE ENVÍO DE MENSAJES (sendMessageService.js)
+ * ============================================================
+ * Motor principal de envío masivo de mensajes por WhatsApp.
+ * Incluye delays anti-detección, manejo de errores y reintentos.
+ */
 
 const SendConfig = require("../models/SendConfig");
 const Message = require("../models/Message");
 const SendJob = require("../models/SendJob");
+const Contact = require("../models/Contact");
 const { getOrInitClient, isReady, sendMessage, USE_MULTI, USE_BAILEYS } = require("./whatsappUnified");
 const { emitJobProgress } = require("../config/socket");
 const { addLog } = require("../services/logService");
@@ -380,12 +387,16 @@ async function processJob(jobId) {
                     // 🚨 FAIL FAST: Si el número no existe o no tiene WhatsApp, NO reintentar
                     if (errMsg.includes("not-authorized") || errMsg.includes("no exists") || errMsg.includes("invalid jid")) {
                         logger.warn(`🛑 FAIL FAST: Número inválido detectado (${contact.telefono}). Abortando reintentos.`);
+                        
+                        await Contact.findByIdAndUpdate(contact._id, { noWhatsApp: true });
+                        logger.info(`📛 Contacto ${contact.telefono} marcado como noWhatsApp=true`);
+                        
                         await addLog({
                             tipo: "warning",
                             mensaje: `Envío abortado: Número inválido o sin WhatsApp (${contact.telefono})`,
                             metadata: { jobId: initialJob._id, error: errMsg }
                         });
-                        break; // Salir del bucle de reintentos inmediatamente
+                        break;
                     }
 
                     if (attempt < MAX_RETRIES) {
@@ -418,7 +429,7 @@ async function processJob(jobId) {
 
             if (existingMsg) {
                 logger.warn(`⚠️ Mensaje duplicado detectado en BD para ${contact.telefono}, omitiendo guardado pero marcando como enviado...`);
-                wasSent = true; // Contar como enviado para no afectar stats
+                wasSent = true;
             } else {
                 const newMsg = new Message({
                     contact: contact._id,
@@ -431,7 +442,9 @@ async function processJob(jobId) {
                     timestamp: new Date(),
                 });
                 await newMsg.save();
-                logger.info(`✅ Enviado a ${contact.telefono}`);
+                
+                await Contact.findByIdAndUpdate(contact._id, { massMessagedAt: new Date() });
+                logger.info(`✅ Enviado a ${contact.telefono} (marcado massMessagedAt)`);
                 wasSent = true;
             }
 
@@ -561,13 +574,18 @@ async function processJob(jobId) {
 
                 const remainingMinutes = Math.ceil(pauseMs / 60000);
 
+                // ✅ FIX: Calcular progressPercent aquí (estaba undefined fuera del scope del if anterior)
+                const processed = sentLocal + failedLocal;
+                const progressPercent = Math.min(100, Math.round((processed / totalLocal) * 100));
+
                 emitJobProgress(jobId.toString(), {
                     _id: jobId.toString(),
                     currentIndex: i + 1,
                     total: totalLocal,
                     progress: progressPercent,
                     status: "descanso",
-                    restBreakMinutesRemaining: remainingMinutes  // ✅ Incluir tiempo restante
+                    restBreakUntil: restBreakUntil,
+                    restBreakMinutesRemaining: remainingMinutes
                 });
 
                 logger.info(`😴 Pausa de lote: ${Math.round(pauseMs / 1000)}s (fin de batch ${Math.floor((i + 1) / jobBatchSize)})`);
@@ -591,6 +609,7 @@ async function processJob(jobId) {
                     }
                 });
 
+                // progressPercent ya está calculado arriba en este mismo bloque if
                 emitJobProgress(jobId.toString(), {
                     _id: jobId.toString(),
                     currentIndex: i + 1,

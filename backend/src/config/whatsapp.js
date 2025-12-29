@@ -1,28 +1,57 @@
-// backend/src/config/whatsapp.js
+/**
+ * ============================================================
+ * CLIENTE DE WHATSAPP WEB (whatsapp-web.js)
+ * ============================================================
+ * Este archivo gestiona la conexión con WhatsApp Web mediante
+ * la librería whatsapp-web.js. Maneja autenticación por QR,
+ * reconexión automática, y emisión de eventos para el frontend.
+ * 
+ * Eventos emitidos:
+ * - qr: Nuevo código QR para escanear
+ * - qr_expired: QR expiró sin ser escaneado
+ * - ready: Cliente listo para enviar mensajes
+ * - authenticated: Sesión autenticada correctamente
+ * - disconnected: Cliente desconectado
+ * - auth_failure: Falló la autenticación
+ * - message: Mensaje entrante recibido
+ */
 
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const EventEmitter = require("events");
-// Evitar warnings por listeners acumulados y permitir más suscriptores sin ruido
 EventEmitter.defaultMaxListeners = 50;
 const path = require("path");
 const logger = require("../utils/logger");
 
+/** Instancia del cliente de WhatsApp */
 let whatsappClient = null;
+
+/** Emisor de eventos para notificar cambios de estado */
 const whatsappEvents = new EventEmitter();
 whatsappEvents.setMaxListeners(50);
 
-// 🔎 Estado actual
+/** Variables de estado del cliente */
 let ready = false;
 let qrTimeout = null;
 let currentQR = null;
-let initInFlight = false; // mutex simple para evitar initialize() concurrentes
+let initInFlight = false;
 
+/**
+ * Obtiene la ruta donde se almacena la sesión de WhatsApp.
+ * @returns {string} Ruta del directorio de sesión
+ */
 function getSessionPath() {
     return process.env.WHATSAPP_SESSION_PATH || path.resolve(process.cwd(), ".wwebjs_auth");
 }
 
+/**
+ * Inicializa el cliente de WhatsApp Web.
+ * Configura Puppeteer con opciones optimizadas para entornos restringidos.
+ * Establece listeners para todos los eventos del ciclo de vida de la sesión.
+ * @returns {Promise<Client>} Instancia del cliente inicializado
+ */
 async function initWhatsappClient() {
     try {
+        /** Destruir cliente previo si existe */
         if (whatsappClient) {
             try {
                 await whatsappClient.destroy();
@@ -32,7 +61,7 @@ async function initWhatsappClient() {
             whatsappClient = null;
         }
 
-        // Construir flags de Puppeteer más robustos para entornos restringidos/containers
+        /** Configuración de Puppeteer para entornos sin interfaz gráfica */
         const puppeteerArgs = [
             "--no-sandbox",
             "--disable-setuid-sandbox",
@@ -52,6 +81,7 @@ async function initWhatsappClient() {
             puppeteerConfig.executablePath = process.env.WHATSAPP_CHROME_PATH;
         }
 
+        /** Crear nueva instancia del cliente */
         whatsappClient = new Client({
             authStrategy: new LocalAuth({
                 dataPath: getSessionPath(),
@@ -59,24 +89,23 @@ async function initWhatsappClient() {
             puppeteer: puppeteerConfig,
         });
 
-        // Eventos base
+        /** Evento: Nuevo código QR generado */
         whatsappClient.on("qr", (qr) => {
             logger.info("📡 QR recibido (emitido a frontend)");
             whatsappEvents.emit("qr", qr);
             currentQR = qr;
 
-            // Limpiar timeout anterior
             if (qrTimeout) clearTimeout(qrTimeout);
             
-            // QR expira en 60 segundos
+            /** El QR expira en 60 segundos, forzar nueva sesión si no se escanea */
             qrTimeout = setTimeout(() => {
                 logger.warn("⏰ QR expirado, generando nuevo...");
                 whatsappEvents.emit("qr_expired");
-                // Forzar nueva sesión
                 forceNewSession();
             }, 60000);
         });
 
+        /** Evento: Cliente listo para enviar mensajes */
         whatsappClient.on("ready", () => {
             if (qrTimeout) {
                 clearTimeout(qrTimeout);
@@ -88,11 +117,13 @@ async function initWhatsappClient() {
             whatsappEvents.emit("ready");
         });
 
+        /** Evento: Sesión autenticada correctamente */
         whatsappClient.on("authenticated", () => {
             logger.info("🔐 Cliente autenticado");
             whatsappEvents.emit("authenticated");
         });
 
+        /** Evento: Cliente desconectado */
         whatsappClient.on("disconnected", (reason) => {
             ready = false;
             currentQR = null;
@@ -101,6 +132,7 @@ async function initWhatsappClient() {
             whatsappEvents.emit("disconnected");
         });
 
+        /** Evento: Falló la autenticación */
         whatsappClient.on("auth_failure", (msg) => {
             ready = false;
             currentQR = null;
@@ -109,11 +141,12 @@ async function initWhatsappClient() {
             whatsappEvents.emit("auth_failure", msg);
         });
 
-        // Proxy eventos de mensajes entrantes
+        /** Reenviar mensajes entrantes al emisor de eventos */
         whatsappClient.on("message", (msg) => whatsappEvents.emit("message", msg));
 
         logger.info("⏳ Inicializando cliente de WhatsApp...");
-        // Mutex: evitar doble initialize en paralelo
+        
+        /** Mutex para evitar inicializaciones concurrentes */
         if (initInFlight) {
             logger.warn("⚠️ initialize() ya en curso; evitando llamada concurrente");
             return whatsappClient;
@@ -133,14 +166,16 @@ async function initWhatsappClient() {
     }
 }
 
+/**
+ * Fuerza el cierre de la sesión actual y reinicia el cliente.
+ * Útil cuando el QR expira o se necesita una nueva vinculación.
+ */
 async function forceNewSession() {
     logger.info("♻️ Forzando nueva sesión de WhatsApp...");
 
-    // 1. Marcar el estado como no listo inmediatamente.
     ready = false;
     currentQR = null;
 
-    // 2. Destruir el cliente existente de forma segura.
     if (whatsappClient) {
         try {
             await whatsappClient.destroy();
@@ -151,26 +186,36 @@ async function forceNewSession() {
         whatsappClient = null;
     }
 
-    // 3. Pausa breve para asegurar que los recursos se liberen.
+    /** Pausa breve para liberar recursos del navegador */
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // 4. Reinicializar el cliente (respetando el mutex para evitar carreras).
     try {
         await initWhatsappClient();
     } catch (err) {
         logger.error("❌ Error forzando nueva sesión:", err);
-        // No relanzar el error para no detener el servidor, pero el estado ya es 'no listo'.
     }
 }
 
+/**
+ * Obtiene la instancia actual del cliente de WhatsApp.
+ * @returns {Client|null} Cliente o null si no está inicializado
+ */
 function getWhatsappClient() {
     return whatsappClient;
 }
 
+/**
+ * Verifica si el cliente está listo para enviar mensajes.
+ * @returns {boolean} true si está conectado y listo
+ */
 function isReady() {
     return ready && !!whatsappClient;
 }
 
+/**
+ * Obtiene el código QR actual para vinculación.
+ * @returns {string|null} Código QR en formato texto o null
+ */
 function getCurrentQR() {
     return currentQR;
 }

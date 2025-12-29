@@ -1,10 +1,19 @@
+/**
+ * ============================================================
+ * CLIENTE API (lib/api.ts)
+ * ============================================================
+ * Cliente Axios configurado con interceptores para auth.
+ * Centraliza todas las llamadas al backend.
+ */
+
 'use client';
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
 
+/* ========== CONFIGURACIÓN BASE ========== */
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
-// Create axios instance
+/* ========== INSTANCIA AXIOS ========== */
 const apiClient: AxiosInstance = axios.create({
     baseURL: API_BASE_URL,
     headers: {
@@ -12,7 +21,7 @@ const apiClient: AxiosInstance = axios.create({
     },
 });
 
-// Request interceptor - add auth token
+/* Interceptor de request - agrega token de autenticación */
 apiClient.interceptors.request.use(
     (config) => {
         if (typeof window !== 'undefined') {
@@ -26,7 +35,7 @@ apiClient.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-// Response interceptor - handle 401
+/* Interceptor de response - maneja errores 401 */
 apiClient.interceptors.response.use(
     (response) => response,
     (error: AxiosError) => {
@@ -43,9 +52,9 @@ apiClient.interceptors.response.use(
     }
 );
 
-// API functions
+/* ========== FUNCIONES DE API ========== */
 export const api = {
-    // Send Jobs (Campaigns)
+    /* Jobs de Envío (Campañas) */
     sendJobs: {
         list: () => apiClient.get('/send-jobs'),
         get: (id: string) => apiClient.get(`/send-jobs/${id}`),
@@ -57,7 +66,7 @@ export const api = {
         exportAutoResponses: (id: string) => apiClient.get(`/send-jobs/${id}/autoresponse-report`, { responseType: 'blob' }),
     },
 
-    // Audits
+    /* Auditorías */
     audits: {
         list: (params?: any) => apiClient.get('/audits', { params }),
         getByDate: (params?: any) => apiClient.get('/audits', { params }),
@@ -83,7 +92,7 @@ export const api = {
         getObraSocialStats: () => apiClient.get('/audits/stats/obras-sociales'),
     },
 
-    // Recovery
+    /* Recuperaciones */
     recovery: {
         list: (params?: any) => apiClient.get('/recovery', { params }),
         create: (data: any) => apiClient.post('/recovery', data),
@@ -91,14 +100,14 @@ export const api = {
         delete: (id: string) => apiClient.delete(`/recovery/${id}`),
     },
 
-    // Liquidation
+    /* Liquidación */
     liquidation: {
         list: (params?: any) => apiClient.get('/liquidacion', { params }),
         export: (params?: any) => apiClient.post('/liquidacion/export', params, { responseType: 'blob' }),
         exportDirect: (params?: any) => apiClient.post('/liquidacion/export-direct', params, { responseType: 'blob' }),
     },
 
-    // Employees (RRHH)
+    /* Empleados (RR.HH.) */
     employees: {
         list: () => apiClient.get('/employees'),
         get: (id: string) => apiClient.get(`/employees/${id}`),
@@ -106,9 +115,16 @@ export const api = {
         update: (id: string, data: any) => apiClient.put(`/employees/${id}`, data),
         delete: (id: string) => apiClient.delete(`/employees/${id}`),
         toggleActive: (id: string) => apiClient.patch(`/employees/${id}/toggle-active`),
+        uploadDNI: (file: File) => {
+            const formData = new FormData();
+            formData.append('fotoDNI', file);
+            return apiClient.post('/employees/upload-dni', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+        },
     },
 
-    // Users
+    /* Usuarios */
     users: {
         list: (query?: string) => apiClient.get(`/users${query ? `?${query}` : ''}`),
         getSupervisors: () => apiClient.get('/users?role=supervisor'),
@@ -117,7 +133,7 @@ export const api = {
         update: (id: string, data: any) => apiClient.put(`/users/${id}`, data),
         delete: (id: string) => apiClient.delete(`/users/${id}`),
         changePassword: (id: string, data: any) => apiClient.put(`/users/${id}/password`, data),
-        // Team History Management
+        /* Gestión de Historial de Equipos */
         addTeamChange: (id: string, data: { nuevoEquipo: string; fechaInicio: string; notes?: string }) =>
             apiClient.post(`/users/${id}/team-change`, data),
         editTeamPeriod: (id: string, periodId: string, data: any) =>
@@ -126,7 +142,7 @@ export const api = {
             apiClient.delete(`/users/${id}/team-history/${periodId}`),
     },
 
-    // Groups
+    /* Grupos */
     groups: {
         list: () => apiClient.get('/groups'),
         get: (id: string) => apiClient.get(`/groups/${id}`),
@@ -135,7 +151,7 @@ export const api = {
         delete: (id: string) => apiClient.delete(`/groups/${id}`),
     },
 
-    // Affiliates
+    /* Afiliados */
     affiliates: {
         list: (params?: any) => apiClient.get('/affiliates', { params }),
         create: (data: any) => apiClient.post('/affiliates', data),
@@ -155,12 +171,13 @@ export const api = {
         saveExportConfig: (config: any) => apiClient.post('/affiliates/export-config', config),
         getExportConfig: () => apiClient.get('/affiliates/export-config'),
         getObrasSociales: () => apiClient.get('/affiliates/obras-sociales'),
-        // Lead Management
+        /* Gestión de Leads */
         getFreshData: (params?: any) => apiClient.get('/affiliates/fresh-data', { params }),
         getReusableData: (params?: any) => apiClient.get('/affiliates/reusable', { params }),
         getFresh: () => apiClient.get('/affiliates/fresh'),
         distribute: (data: any) => apiClient.post('/affiliates/distribute', data),
         cancelExports: (type: 'today' | 'indefinite') => apiClient.post('/affiliates/cancel-exports', { type }),
+        cleanupFresh: () => apiClient.post('/affiliates/cleanup-fresh'), // ✅ Limpiar datos frescos anteriores
         getAssigned: (params?: any) => apiClient.get('/affiliates/assigned', { params }),
         updateStatus: (id: string, data: any) => apiClient.put(`/affiliates/${id}/status`, data),
         getFailed: (params?: any) => apiClient.get('/affiliates/failed', { params }),
@@ -169,7 +186,7 @@ export const api = {
 
 
 
-    // Templates
+    /* Plantillas */
     templates: {
         list: () => apiClient.get('/templates'),
         get: (id: string) => apiClient.get(`/templates/${id}`),
@@ -178,7 +195,7 @@ export const api = {
         delete: (id: string) => apiClient.delete(`/templates/${id}`),
     },
 
-    // WhatsApp
+    /* WhatsApp */
     whatsapp: {
         status: () => apiClient.get('/whatsapp/me/status'),
         qr: () => apiClient.get('/whatsapp/me/qr'),
@@ -186,7 +203,7 @@ export const api = {
         logout: () => apiClient.post('/whatsapp/me/logout'),
     },
 
-    // Contacts
+    /* Contactos */
     contacts: {
         upload: (file: File) => {
             const formData = new FormData();
@@ -199,7 +216,7 @@ export const api = {
         downloadRejected: (logId: string) => apiClient.get(`/contacts/import-logs/${logId}/download-txt`, { responseType: 'blob' }),
     },
 
-    // Auto-responses
+    /* Auto-respuestas */
     autoResponses: {
         list: () => apiClient.get('/autoresponses'),
         create: (data: any) => apiClient.post('/autoresponses', data),
@@ -208,7 +225,7 @@ export const api = {
         toggle: (id: string) => apiClient.patch(`/autoresponses/${id}/toggle`),
     },
 
-    // Internal Messages
+    /* Mensajería Interna */
     internalMessages: {
         getInbox: (params?: any) => apiClient.get('/internal-messages/inbox', { params }),
         getSent: (params?: any) => apiClient.get('/internal-messages/sent', { params }),
@@ -227,17 +244,17 @@ export const api = {
             apiClient.get(`/internal-messages/${messageId}/attachments/${attachmentId}`, { responseType: 'blob' }),
     },
 
-    // Metrics
+    /* Métricas */
     metrics: {
         dashboard: () => apiClient.get('/metrics/dashboard'),
         campaigns: (params?: any) => apiClient.get('/metrics/campaigns', { params }),
     },
 
-    // Messages
+    /* Mensajes */
     messages: {
         preview: (data: any) => apiClient.post('/messages/preview', data),
     },
-    // Banned Words
+    /* Palabras Prohibidas */
     bannedWords: {
         list: () => apiClient.get('/banned-words'),
         stats: () => apiClient.get('/banned-words/stats'),
@@ -248,7 +265,7 @@ export const api = {
         resolveDetection: (id: string) => apiClient.put(`/banned-words/detections/${id}/resolve`),
     },
 
-    // Assignments
+    /* Asignaciones */
     assignments: {
         distribute: (data: any) => apiClient.post('/assignments/distribute', data),
         getMyLeads: () => apiClient.get('/assignments/my-leads'),
@@ -256,14 +273,15 @@ export const api = {
         logInteraction: (id: string, data: any) => apiClient.post(`/assignments/${id}/interaction`, data),
         sendWhatsApp: (id: string, data: { message: string, templateId?: string }) => apiClient.post(`/assignments/${id}/whatsapp`, data),
         reschedule: (id: string, data: { date: string, note?: string }) => apiClient.post(`/assignments/${id}/reschedule`, data),
+        reassign: (id: string, data: { supervisorId: string, note?: string, scheduledHour?: string }) => apiClient.post(`/assignments/${id}/reassign`, data),
         exportMyLeads: () => apiClient.get('/assignments/my-leads/export', { responseType: 'blob' }),
     },
 
-    // Raw client for custom requests (like blobs)
+    /* Cliente raw para requests personalizados */
     client: apiClient,
 };
 
-// Export API_URL for components that need direct URL access
+/* Exportar API_URL para componentes que necesitan acceso directo */
 export const API_URL = API_BASE_URL;
 
 export default apiClient;

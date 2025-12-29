@@ -1,10 +1,17 @@
-// backend/src/services/recoveryScheduler.js
+/**
+ * ============================================================
+ * SCHEDULER DE RECOVERY (recoveryScheduler.js)
+ * ============================================================
+ * Mueve auditorías elegibles al estado "Recuperación".
+ * Estados elegibles: Falta clave, Falta documentación, Pendiente.
+ */
 
 const Audit = require('../models/Audit');
 const logger = require('../utils/logger');
 const { notifyAuditRecovery } = require('./notificationService');
 
-const DEFAULT_INTERVAL_MS = 5 * 60 * 1000; // cada 5 minutos
+/* ========== CONFIGURACIÓN ========== */
+const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 
 async function moveEligibleToRecovery() {
   const now = new Date();
@@ -15,6 +22,7 @@ async function moveEligibleToRecovery() {
     status: { 
       $in: [
         "Falta clave",
+        "Falta clave (por ARCA)",
         "Falta documentación",
         "Falta clave y documentación",
         "Pendiente"
@@ -49,7 +57,7 @@ async function moveEligibleToRecovery() {
   if (result.modifiedCount) {
     logger.info(`RecoveryScheduler: marcadas ${result.modifiedCount} auditorías como isRecovery (solo estados: Falta clave, Falta documentación, Falta clave y documentación, Pendiente)`);
     
-    // 🔔 Enviar notificaciones a revendedores
+    // 🔔 Enviar notificaciones a auditores
     for (const audit of auditsToMove) {
       try {
         await notifyAuditRecovery({

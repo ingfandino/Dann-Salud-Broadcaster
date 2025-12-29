@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * CREAR TURNO DE AUDITORÍA (auditorias-crear-turno.tsx)
+ * ============================================================
+ * Formulario para crear nuevos turnos de auditoría.
+ * Permite carga masiva desde Excel y selección de horarios.
+ */
+
 "use client"
 
 import { useState, useEffect, useMemo, useRef } from "react"
@@ -51,7 +59,8 @@ const ARGENTINE_OBRAS_SOCIALES = [
   "OSPIC",
   "OSG (109202)",
   "OSPERYH (106500)",
-  "OSPCRA (104009)"
+  "OSPCRA (104009)",
+  "OSPMA (700108)"
 ]
 
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
@@ -62,8 +71,14 @@ export function AuditoriasCrearTurno() {
   const { user } = useAuth()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const isSupervisor = user?.role?.toLowerCase() === "supervisor"
-  const isGerenciaOrAuditor = ["gerencia", "auditor"].includes(user?.role?.toLowerCase() || "")
+  const userRole = user?.role?.toLowerCase() || ""
+  const isSupervisor = userRole === "supervisor"
+  
+  // Un auditor CON numeroEquipo es realmente un asesor que también hace auditorías
+  // Un auditor SIN numeroEquipo actúa como gerencia (puede ver todos los equipos)
+  const isAuditorConEquipo = userRole === "auditor" && !!user?.numeroEquipo
+  const isAsesor = userRole === "asesor" || isAuditorConEquipo
+  const isGerenciaOrAuditorSinEquipo = userRole === "gerencia" || (userRole === "auditor" && !user?.numeroEquipo)
 
   // Form State
   const [form, setForm] = useState({
@@ -87,6 +102,8 @@ export function AuditoriasCrearTurno() {
   const [validadores, setValidadores] = useState<any[]>([])
   const [availableSlots, setAvailableSlots] = useState<any[]>([])
   const [otroEquipo, setOtroEquipo] = useState(false)
+  const [perteneceOtroSupervisor, setPerteneceOtroSupervisor] = useState(false)
+  const [supervisorSeleccionado, setSupervisorSeleccionado] = useState("")
 
   // Loading states
   const [loading, setLoading] = useState(false)
@@ -97,31 +114,49 @@ export function AuditoriasCrearTurno() {
   const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 })
   const [rejectedRows, setRejectedRows] = useState<any[]>([])
 
-  // Load supervisors (for Gerencia/Auditor)
+  // Load supervisors (para Gerencia, Auditor sin equipo, o Supervisor con checkbox activo)
   useEffect(() => {
-    if (isGerenciaOrAuditor) {
+    if (isGerenciaOrAuditorSinEquipo || isSupervisor) {
       loadSupervisores()
     }
-  }, [isGerenciaOrAuditor])
+  }, [isGerenciaOrAuditorSinEquipo, isSupervisor])
 
-  // Load asesores when supervisor changes
+  // Load asesores when supervisor changes (para Gerencia/Auditor sin equipo)
+  // Para supervisores, cargar asesores de su equipo o del supervisor seleccionado
+  // Para asesores, NO necesitan lista de asesores (se auto-asignan)
   useEffect(() => {
-    if (form.supervisor) {
+    if (isGerenciaOrAuditorSinEquipo && form.supervisor) {
       loadAsesoresByEquipo(form.supervisor)
     } else if (isSupervisor) {
-      loadAsesores()
+      if (perteneceOtroSupervisor && supervisorSeleccionado) {
+        loadAsesoresByEquipo(supervisorSeleccionado)
+      } else {
+        loadAsesores()
+      }
     }
-  }, [form.supervisor, isSupervisor])
+  }, [form.supervisor, isSupervisor, isGerenciaOrAuditorSinEquipo, perteneceOtroSupervisor, supervisorSeleccionado])
 
   // Load validadores
   useEffect(() => {
-    console.log('Validadores useEffect triggered:', { otroEquipo, asesor: form.asesor, user: user?.nombre, numeroEquipo: user?.numeroEquipo, isSupervisor })
+    console.log('Validadores useEffect triggered:', { 
+      otroEquipo, 
+      asesor: form.asesor, 
+      user: user?.nombre, 
+      numeroEquipo: user?.numeroEquipo, 
+      isSupervisor,
+      isAsesor,
+      isGerenciaOrAuditorSinEquipo,
+      perteneceOtroSupervisor,
+      supervisorSeleccionado
+    })
     if (otroEquipo) {
       loadTodosLosValidadores()
+    } else if (isSupervisor && perteneceOtroSupervisor && supervisorSeleccionado) {
+      loadValidadoresPorSupervisor(supervisorSeleccionado)
     } else {
       loadValidadores()
     }
-  }, [otroEquipo, form.asesor, user, isSupervisor])
+  }, [otroEquipo, form.asesor, form.supervisor, user, isSupervisor, isAsesor, isGerenciaOrAuditorSinEquipo, perteneceOtroSupervisor, supervisorSeleccionado, supervisores])
 
   // Load available slots when date changes
   useEffect(() => {
@@ -154,9 +189,12 @@ export function AuditoriasCrearTurno() {
 
   const loadSupervisores = async () => {
     try {
-      const { data } = await api.users.list()
+      // Usar includeAllAuditors=true para obtener todos los usuarios sin filtro por equipo
+      const { data } = await api.users.list("includeAllAuditors=true")
       const users = Array.isArray(data) ? data : []
-      setSupervisores(users.filter((u: any) => u.role?.toLowerCase() === "supervisor" && u.active !== false))
+      const sups = users.filter((u: any) => u.role?.toLowerCase() === "supervisor" && u.active !== false)
+      console.log('loadSupervisores:', sups.length, 'supervisores encontrados')
+      setSupervisores(sups)
     } catch (err) {
       console.error(err)
     }
@@ -189,9 +227,10 @@ export function AuditoriasCrearTurno() {
 
   const loadAsesoresByEquipo = async (supervisorId: string) => {
     try {
-      // First get the supervisor to know their team
-      const { data: allUsers } = await api.users.list()
+      // Usar includeAllAuditors=true para obtener todos los usuarios
+      const { data: allUsers } = await api.users.list("includeAllAuditors=true")
       const users = Array.isArray(allUsers) ? allUsers : []
+      console.log('loadAsesoresByEquipo:', { supervisorId, totalUsers: users.length })
 
       const supervisor = users.find((u: any) => u._id === supervisorId)
       if (!supervisor?.numeroEquipo) {
@@ -222,10 +261,33 @@ export function AuditoriasCrearTurno() {
       const isActive = u.active !== false
       const hasName = u.nombre && u.nombre.trim().length > 0
       const sameTeam = String(u.numeroEquipo) === String(numeroEquipo)
-      // Exclude selected asesor if any (handled in render or selection, but good to keep in mind)
       return isActive && hasName && sameTeam
     }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
     setValidadores(filtered)
+  }
+
+  const loadValidadoresPorSupervisor = async (supervisorId: string) => {
+    try {
+      // Usar includeAllAuditors=true para obtener todos los usuarios
+      const { data: allUsers } = await api.users.list("includeAllAuditors=true")
+      const users = Array.isArray(allUsers) ? allUsers : []
+      console.log('loadValidadoresPorSupervisor:', { supervisorId, totalUsers: users.length })
+      const supervisor = users.find((u: any) => u._id === supervisorId)
+      if (!supervisor?.numeroEquipo) {
+        setValidadores([])
+        return
+      }
+      const filtered = users.filter((u: any) => {
+        const isActive = u.active !== false
+        const hasName = u.nombre && u.nombre.trim().length > 0
+        const sameTeam = String(u.numeroEquipo) === String(supervisor.numeroEquipo)
+        const notAsesor = !form.asesor || u._id !== form.asesor
+        return isActive && hasName && sameTeam && notAsesor
+      }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
+      setValidadores(filtered)
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   const loadValidadores = async () => {
@@ -233,7 +295,8 @@ export function AuditoriasCrearTurno() {
       // Determine the target team number
       let targetNumeroEquipo = user?.numeroEquipo
 
-      if (isGerenciaOrAuditor) {
+      // Para Gerencia o Auditor sin equipo: usar el equipo del supervisor seleccionado
+      if (isGerenciaOrAuditorSinEquipo) {
         if (!form.supervisor) {
           setValidadores([])
           return
@@ -248,7 +311,10 @@ export function AuditoriasCrearTurno() {
         role: user?.role,
         userTeam: user?.numeroEquipo,
         targetTeam: targetNumeroEquipo,
-        supervisor: form.supervisor
+        supervisor: form.supervisor,
+        isAsesor,
+        isSupervisor,
+        isGerenciaOrAuditorSinEquipo
       })
 
       if (!targetNumeroEquipo) {
@@ -257,17 +323,31 @@ export function AuditoriasCrearTurno() {
         return
       }
 
-      const { data } = await api.users.list("scope=group")
+      // Para asesores y supervisores: cargar todos los usuarios
+      // Usar scope=all para obtener todos los usuarios con sus campos completos
+      const { data } = await api.users.list("scope=all")
       const users = Array.isArray(data) ? data : []
+
+      // Debug: ver qué usuarios devuelve la API
+      console.log('API devuelve', users.length, 'usuarios')
+      console.log('Usuarios con numeroEquipo:', users.filter((u: any) => u.numeroEquipo).map((u: any) => ({ nombre: u.nombre, equipo: u.numeroEquipo, role: u.role })))
+      console.log('Buscando equipo:', targetNumeroEquipo, 'tipo:', typeof targetNumeroEquipo)
 
       const filtered = users.filter((u: any) => {
         const isActive = u.active !== false
         const hasName = u.nombre && u.nombre.trim().length > 0
-        const sameTeam = String(u.numeroEquipo) === String(targetNumeroEquipo)
-        const notAsesor = !form.asesor || u._id !== form.asesor
-        // If supervisor, can select self. If not, exclude self.
-        const notSelf = isSupervisor || u._id !== user?._id
-        return isActive && hasName && sameTeam && notAsesor && notSelf
+        
+        // Comparar numeroEquipo con conversión a String para evitar problemas de tipo
+        const userEquipo = u.numeroEquipo ? String(u.numeroEquipo) : null
+        const targetEquipo = targetNumeroEquipo ? String(targetNumeroEquipo) : null
+        const sameTeam = userEquipo === targetEquipo
+        
+        // Para asesores (isAsesor), excluir a sí mismos (son el asesor implícito de la venta)
+        // Para otros roles, excluir al asesor seleccionado en el form
+        const asesorIdToExclude = isAsesor ? user?._id : form.asesor
+        const notAsesor = !asesorIdToExclude || u._id !== asesorIdToExclude
+        
+        return isActive && hasName && sameTeam && notAsesor
       }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
 
       console.log('Filtered validadores:', filtered.length, 'users from team', targetNumeroEquipo)
@@ -279,14 +359,24 @@ export function AuditoriasCrearTurno() {
 
   const loadTodosLosValidadores = async () => {
     try {
+      // Cargar todos los usuarios para mostrar validadores de otros equipos
+      // Usar includeAllAuditors=true para que el backend devuelva todos los usuarios
       const { data } = await api.users.list("includeAllAuditors=true")
       const users = Array.isArray(data) ? data : []
+      
+      console.log('loadTodosLosValidadores: API devuelve', users.length, 'usuarios')
 
       const filtered = users.filter((u: any) => {
         const isActive = u.active !== false
         const hasName = u.nombre && u.nombre.trim().length > 0
+        // Solo roles que pueden validar: Supervisor, Asesor, Auditor o Gerencia
         const isCorrectRole = ["asesor", "supervisor", "auditor", "gerencia"].includes(u.role?.toLowerCase())
-        const notAsesor = !form.asesor || u._id !== form.asesor
+        
+        // Para asesores (isAsesor), excluir a sí mismos (son el asesor implícito)
+        // Para otros roles, excluir al asesor seleccionado en el form
+        const asesorIdToExclude = isAsesor ? user?._id : form.asesor
+        const notAsesor = !asesorIdToExclude || u._id !== asesorIdToExclude
+        
         return isActive && hasName && isCorrectRole && notAsesor
       }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
 
@@ -353,9 +443,10 @@ export function AuditoriasCrearTurno() {
       return "Teléfono debe tener 10 dígitos"
     if (!form.fecha) return "Fecha es requerida"
     if (!form.hora) return "Hora es requerida"
-    if (!form.asesor) return "Asesor es requerido"
+    // Para asesores, no se requiere seleccionar asesor (se auto-asigna)
+    if (!isAsesor && !form.asesor) return "Asesor es requerido"
     if (!form.validador) return "Validador es requerido"
-    if (isGerenciaOrAuditor && !form.supervisor) return "Supervisor es requerido"
+    if (isGerenciaOrAuditorSinEquipo && !form.supervisor) return "Supervisor es requerido"
     return null
   }
 
@@ -373,6 +464,10 @@ export function AuditoriasCrearTurno() {
 
       // Use browser's local timezone
       const scheduledAt = new Date(`${form.fecha}T${form.hora}:00`)
+      
+      // Para asesores, el asesor es el propio usuario. Para otros roles, usar el seleccionado.
+      const asesorId = isAsesor ? user?._id : form.asesor
+      
       const payload: any = {
         nombre: form.nombre,
         cuil: form.cuil,
@@ -381,7 +476,7 @@ export function AuditoriasCrearTurno() {
         obraSocialAnterior: form.obraSocialAnterior,
         obraSocialVendida: form.obraSocialVendida,
         scheduledAt: scheduledAt.toISOString(),
-        asesor: form.asesor,
+        asesor: asesorId,
         validador: form.validador,
         datosExtra: form.datosExtra,
         status: "Pendiente"
@@ -475,7 +570,7 @@ export function AuditoriasCrearTurno() {
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {/* Header */}
+      {/* Encabezado de la sección */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className={cn("text-xl font-semibold", theme === "dark" ? "text-white" : "text-gray-800")}>
@@ -510,7 +605,7 @@ export function AuditoriasCrearTurno() {
         </div>
       </div>
 
-      {/* Rejected Rows Alert */}
+      {/* Alerta de filas rechazadas */}
       {rejectedRows.length > 0 && (
         <div className={cn(
           "rounded-xl border p-4",
@@ -543,7 +638,7 @@ export function AuditoriasCrearTurno() {
         </div>
       )}
 
-      {/* Form */}
+      {/* Formulario de creación de turno */}
       <div className={cn(
         "rounded-2xl border p-6 backdrop-blur-sm max-w-2xl mx-auto",
         theme === "dark"
@@ -551,7 +646,7 @@ export function AuditoriasCrearTurno() {
           : "bg-white border-gray-200 shadow-sm"
       )}>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Nombre */}
+          {/* Campo: Nombre del afiliado */}
           <div>
             <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
               Nombre de afiliado <span className="text-red-500">*</span>
@@ -570,7 +665,7 @@ export function AuditoriasCrearTurno() {
             />
           </div>
 
-          {/* CUIL */}
+          {/* Campo: CUIL */}
           <div>
             <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
               CUIL <span className="text-red-500">*</span>
@@ -591,7 +686,7 @@ export function AuditoriasCrearTurno() {
             />
           </div>
 
-          {/* Teléfono */}
+          {/* Campo: Teléfono */}
           <div>
             <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
               Teléfono
@@ -609,7 +704,7 @@ export function AuditoriasCrearTurno() {
             />
           </div>
 
-          {/* Tipo de venta & Obra Social Vendida */}
+          {/* Tipo de venta y Obra Social vendida */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -643,7 +738,7 @@ export function AuditoriasCrearTurno() {
             </div>
           </div>
 
-          {/* Obra social anterior */}
+          {/* Campo: Obra social anterior */}
           <div>
             <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
               Obra social anterior
@@ -661,7 +756,7 @@ export function AuditoriasCrearTurno() {
             </select>
           </div>
 
-          {/* Fecha & Hora */}
+          {/* Fecha y hora del turno */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -702,8 +797,56 @@ export function AuditoriasCrearTurno() {
             </div>
           </div>
 
-          {/* Supervisor (only for Gerencia/Auditor) */}
-          {isGerenciaOrAuditor && (
+          {/* Checkbox "Pertenece a otro supervisor" - solo para Supervisores */}
+          {isSupervisor && (
+            <div className={cn(
+              "p-3 rounded-lg border",
+              theme === "dark" ? "bg-purple-500/10 border-purple-500/30" : "bg-purple-50 border-purple-200"
+            )}>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="perteneceOtroSupervisor"
+                  checked={perteneceOtroSupervisor}
+                  onChange={(e) => {
+                    setPerteneceOtroSupervisor(e.target.checked)
+                    if (!e.target.checked) {
+                      setSupervisorSeleccionado("")
+                      setForm(prev => ({ ...prev, asesor: "", validador: "" }))
+                    }
+                  }}
+                  className="w-4 h-4 rounded"
+                />
+                <label htmlFor="perteneceOtroSupervisor" className={cn("text-sm font-medium", theme === "dark" ? "text-purple-400" : "text-purple-700")}>
+                  Pertenece a otro supervisor
+                </label>
+              </div>
+              {perteneceOtroSupervisor && (
+                <div className="mt-3">
+                  <label className={cn("block text-xs font-medium mb-1", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                    Seleccionar supervisor
+                  </label>
+                  <select
+                    value={supervisorSeleccionado}
+                    onChange={(e) => {
+                      setSupervisorSeleccionado(e.target.value)
+                      setForm(prev => ({ ...prev, asesor: "", validador: "" }))
+                    }}
+                    className={cn(
+                      "w-full px-3 py-2 rounded-lg border text-sm",
+                      theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                    )}
+                  >
+                    <option value="">-- Seleccionar --</option>
+                    {supervisores.filter(s => s._id !== user?._id).map(s => <option key={s._id} value={s._id}>{s.nombre}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Supervisor (solo para Gerencia o Auditor sin equipo) */}
+          {isGerenciaOrAuditorSinEquipo && (
             <div>
               <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
                 Supervisor <span className="text-red-500">*</span>
@@ -723,31 +866,49 @@ export function AuditoriasCrearTurno() {
             </div>
           )}
 
-          {/* Asesor */}
-          <div>
-            <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
-              Asesor <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={form.asesor}
-              onChange={(e) => handleChange("asesor", e.target.value)}
-              className={cn(
-                "w-full px-3 py-2 rounded-lg border text-sm",
-                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+          {/* Campo: Asesor asignado (solo para Supervisor y Gerencia/Auditor sin equipo) */}
+          {/* Para asesores (y auditores con equipo), la venta se asigna automáticamente a ellos */}
+          {!isAsesor && (
+            <div>
+              <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                Asesor <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={form.asesor}
+                onChange={(e) => handleChange("asesor", e.target.value)}
+                className={cn(
+                  "w-full px-3 py-2 rounded-lg border text-sm",
+                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                )}
+                required
+              >
+                <option value="">-- Seleccionar asesor --</option>
+                {asesores.map(a => <option key={a._id} value={a._id}>{a.nombre} ({a.role})</option>)}
+              </select>
+              {isGerenciaOrAuditorSinEquipo && !form.supervisor && (
+                <p className={cn("text-xs mt-1", theme === "dark" ? "text-cyan-400" : "text-cyan-600")}>
+                  Primero selecciona un supervisor
+                </p>
               )}
-              required
-            >
-              <option value="">-- Seleccionar asesor --</option>
-              {asesores.map(a => <option key={a._id} value={a._id}>{a.nombre} ({a.role})</option>)}
-            </select>
-            {isGerenciaOrAuditor && !form.supervisor && (
-              <p className={cn("text-xs mt-1", theme === "dark" ? "text-cyan-400" : "text-cyan-600")}>
-                Primero selecciona un supervisor
-              </p>
-            )}
-          </div>
+            </div>
+          )}
 
-          {/* Validador */}
+          {/* Indicador para asesores: la venta se asigna a ellos automáticamente */}
+          {isAsesor && (
+            <div className={cn(
+              "p-3 rounded-lg border",
+              theme === "dark" ? "bg-cyan-500/10 border-cyan-500/30" : "bg-cyan-50 border-cyan-200"
+            )}>
+              <p className={cn("text-sm", theme === "dark" ? "text-cyan-400" : "text-cyan-700")}>
+                👤 <strong>Asesor:</strong> {user?.nombre || "Tu usuario"}
+              </p>
+              <p className={cn("text-xs mt-1", theme === "dark" ? "text-cyan-400/70" : "text-cyan-600")}>
+                La venta se registrará automáticamente a tu nombre
+              </p>
+            </div>
+          )}
+
+          {/* Campo: Validador asignado */}
           <div>
             <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
               Validador <span className="text-red-500">*</span>
@@ -765,7 +926,7 @@ export function AuditoriasCrearTurno() {
               {validadores.map(v => <option key={v._id} value={v._id}>{v.nombre} ({v.role})</option>)}
             </select>
 
-            {/* Checkbox otro equipo */}
+            {/* Checkbox para ver auditores de otros equipos */}
             <div className="flex items-center gap-2 mt-2">
               <input
                 type="checkbox"
@@ -783,7 +944,7 @@ export function AuditoriasCrearTurno() {
             </p>
           </div>
 
-          {/* Datos extra */}
+          {/* Campo: Datos adicionales */}
           <div>
             <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
               Datos extra (opcional)
@@ -802,7 +963,7 @@ export function AuditoriasCrearTurno() {
             />
           </div>
 
-          {/* Submit button */}
+          {/* Botón de envío */}
           <button
             type="submit"
             disabled={loading}

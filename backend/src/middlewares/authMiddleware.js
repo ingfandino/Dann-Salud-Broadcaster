@@ -1,11 +1,17 @@
-// backend/src/middlewares/authMiddleware.js
+/**
+ * ============================================================
+ * MIDDLEWARE DE AUTENTICACIÓN (authMiddleware.js)
+ * ============================================================
+ * Valida tokens JWT y adjunta el usuario al request.
+ * Protege rutas que requieren autenticación.
+ */
 
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const logger = require("../utils/logger");
 const { verifyToken } = require("../utils/jwt");
 
-// Middleware para proteger rutas
+/** Middleware que protege rutas requiriendo JWT válido */
 exports.requireAuth = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) {

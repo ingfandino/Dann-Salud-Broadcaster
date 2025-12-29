@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * MODAL DE AUTO-RESPUESTAS (auto-respuestas-modal.tsx)
+ * ============================================================
+ * Configuración de respuestas automáticas de WhatsApp.
+ * Permite crear, editar y eliminar reglas de auto-respuesta.
+ */
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -134,7 +142,7 @@ export function AutoRespuestasModal({ isOpen, onClose }: AutoRespuestasModalProp
 
   return (
     <div className="fixed top-24 right-4 z-50 w-full max-w-2xl animate-in slide-in-from-right-10 fade-in duration-300">
-      {/* Modal Window */}
+      {/* Ventana del modal */}
       <div
         className={cn(
           "w-full overflow-hidden rounded-2xl border shadow-2xl",
@@ -143,7 +151,7 @@ export function AutoRespuestasModal({ isOpen, onClose }: AutoRespuestasModalProp
             : "bg-white/95 backdrop-blur-md border-purple-200/50 shadow-purple-500/10",
         )}
       >
-        {/* Header */}
+        {/* Encabezado del modal */}
         <div
           className={cn(
             "flex items-center justify-between p-4 border-b",
@@ -164,9 +172,9 @@ export function AutoRespuestasModal({ isOpen, onClose }: AutoRespuestasModalProp
           </button>
         </div>
 
-        {/* Content */}
+        {/* Contenido principal */}
         <div className="p-4 overflow-y-auto max-h-[calc(90vh-60px)]">
-          {/* Info Alert */}
+          {/* Alerta informativa */}
           <div
             className={cn(
               "flex gap-3 p-3 rounded-xl mb-4 border",
@@ -186,7 +194,7 @@ export function AutoRespuestasModal({ isOpen, onClose }: AutoRespuestasModalProp
             </div>
           </div>
 
-          {/* Form */}
+          {/* Formulario de auto-respuesta */}
           <div className={cn(
             "space-y-3 mb-6 p-4 rounded-xl border",
             theme === "dark" ? "bg-white/5 border-white/10" : "bg-purple-50/50 border-purple-100"
@@ -280,7 +288,7 @@ export function AutoRespuestasModal({ isOpen, onClose }: AutoRespuestasModalProp
             </div>
           </div>
 
-          {/* Table */}
+          {/* Tabla de auto-respuestas */}
           <div className="overflow-x-auto rounded-xl border overflow-hidden">
             <table className={cn("w-full text-xs", theme === "dark" ? "border-white/10" : "border-purple-100")}>
               <thead>

@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * DETALLE DE MENSAJE (message-detail.tsx)
+ * ============================================================
+ * Vista de detalle de un mensaje interno.
+ * Muestra contenido, adjuntos y acciones (responder, reenviar).
+ */
+
 "use client"
 
 import { InternalMessage } from "@/types/internal-message"
@@ -38,7 +46,7 @@ export function MessageDetail({ message, onBack, onReply, onForward, onDelete, o
 
     return (
         <div className="flex flex-col h-full">
-            {/* Toolbar */}
+            {/* Barra de herramientas */}
             <div className={cn(
                 "flex items-center justify-between px-4 py-3 border-b",
                 theme === "dark" ? "border-white/10" : "border-gray-200"
@@ -67,9 +75,9 @@ export function MessageDetail({ message, onBack, onReply, onForward, onDelete, o
                 </Button>
             </div>
 
-            {/* Content */}
+            {/* Contenido del mensaje */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                {/* Header */}
+                {/* Encabezado del mensaje */}
                 <div className="space-y-4">
                     <h1 className={cn("text-2xl font-bold", theme === "dark" ? "text-white" : "text-gray-900")}>
                         {message.subject}
@@ -100,7 +108,7 @@ export function MessageDetail({ message, onBack, onReply, onForward, onDelete, o
 
                 <hr className={cn(theme === "dark" ? "border-white/10" : "border-gray-200")} />
 
-                {/* Body */}
+                {/* Cuerpo del mensaje */}
                 <div className={cn(
                     "whitespace-pre-wrap leading-relaxed",
                     theme === "dark" ? "text-gray-200" : "text-gray-800"
@@ -108,7 +116,7 @@ export function MessageDetail({ message, onBack, onReply, onForward, onDelete, o
                     {message.content}
                 </div>
 
-                {/* Attachments */}
+                {/* Archivos adjuntos */}
                 {message.attachments.length > 0 && (
                     <div className="pt-6">
                         <h3 className={cn("text-sm font-medium mb-3 flex items-center gap-2", theme === "dark" ? "text-gray-300" : "text-gray-700")}>

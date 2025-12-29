@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * CARGAR AUDITORÍAS (auditorias-cargar.tsx)
+ * ============================================================
+ * Formulario para cargar auditorías (ventas) individuales.
+ * Permite ingresar datos del afiliado y programar turnos.
+ */
+
 "use client"
 
 import { useState, useEffect, useRef } from "react"
@@ -12,7 +20,7 @@ import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import * as XLSX from "xlsx"
 
-// Constants
+/* Constantes: Obras sociales argentinas */
 const ARGENTINE_OBRAS_SOCIALES = [
     "OSDE",
     "OSDEPYM",
@@ -56,7 +64,8 @@ const ARGENTINE_OBRAS_SOCIALES = [
     "OSPIC",
     "OSG (109202)",
     "OSPERYH (106500)",
-    "OSPCRA (104009)"
+    "OSPCRA (104009)",
+    "OSPMA (700108)"
 ]
 
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
@@ -341,7 +350,7 @@ export function AuditoriasCargar() {
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-6">
-                    {/* Role-based selection */}
+                    {/* Selección según rol del usuario */}
                     {(isGerenciaOrAuditor || isSupervisor) && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-gray-50 dark:bg-white/5">
                             {isGerenciaOrAuditor && (
@@ -382,7 +391,7 @@ export function AuditoriasCargar() {
                         </div>
                     )}
 
-                    {/* Main Form */}
+                    {/* Formulario principal */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         <div>
                             <label className="block text-sm font-medium mb-1">Nombre y Apellido</label>

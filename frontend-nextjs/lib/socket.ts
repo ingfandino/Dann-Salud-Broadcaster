@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * CLIENTE SOCKET.IO (lib/socket.ts)
+ * ============================================================
+ * Conexión WebSocket para eventos en tiempo real.
+ * Maneja reconexiones y autenticación automática.
+ */
+
 'use client';
 
 import { io, Socket } from 'socket.io-client';
@@ -10,17 +18,17 @@ export function getSocket(): Socket {
     if (!socket) {
         socket = io(SOCKET_URL, {
             autoConnect: false,
-            transports: ['polling', 'websocket'],  // ✅ Polling first for reliability
-            upgrade: true,  // Allow upgrade to WebSocket after polling establishes
+            transports: ['polling', 'websocket'],  /* Polling primero para mayor confiabilidad */
+            upgrade: true,  /* Permite upgrade a WebSocket después de establecer polling */
             timeout: 10000,
             reconnection: true,
             reconnectionAttempts: 10,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            // Auth will be set when connecting, not here
+            /* Auth se configura al conectar, no aquí */
         });
 
-        // ✅ Comprehensive debug logs
+        /* Logs de depuración */
         socket.on('connect', () => {
             console.log('✅ Socket conectado:', socket?.id);
             console.log('[Socket] Transport:', socket?.io?.engine?.transport?.name);
@@ -67,7 +75,7 @@ export function getSocket(): Socket {
 export function connectSocket(): Socket {
     const socket = getSocket();
     if (!socket.connected) {
-        // ✅ Set auth token before connecting
+        /* Configurar token de auth antes de conectar */
         const token = localStorage.getItem('token');
         if (token) {
             socket.auth = { token };
@@ -86,8 +94,7 @@ export function disconnectSocket(): void {
     }
 }
 
-// Export socket instance for direct use
-// Export socket instance for direct use
+/* Exportar instancia de socket para uso directo */
 export { socket };
 
 import { useEffect, useState } from 'react';

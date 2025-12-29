@@ -1,4 +1,10 @@
-// backend/src/utils/logger.js
+/**
+ * ============================================================
+ * LOGGER (logger.js)
+ * ============================================================
+ * Sistema de logging basado en Winston.
+ * Logs a consola con colores y a archivos rotativos diarios.
+ */
 
 const { createLogger, format, transports } = require("winston");
 const DailyRotateFile = require("winston-daily-rotate-file");

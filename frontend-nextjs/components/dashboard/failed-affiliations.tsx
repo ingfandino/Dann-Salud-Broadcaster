@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * AFILIACIONES FALLIDAS (failed-affiliations.tsx)
+ * ============================================================
+ * Vista de afiliaciones que no se concretaron.
+ * Permite filtrar, exportar y ver detalles de fallas.
+ */
+
 "use client"
 
 import { useState, useEffect, useRef } from "react"
@@ -10,7 +18,7 @@ import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 import * as XLSX from "xlsx"
 
-// Interfaces
+/* Interfaces */
 interface FailedAffiliation {
     _id: string
     nombre: string
@@ -299,7 +307,7 @@ export function FailedAffiliations() {
 
     return (
         <div className="space-y-6 animate-fade-in-up">
-            {/* Header */}
+            {/* Encabezado de afiliaciones fallidas */}
             <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
                 <div>
                     <h2 className={cn("text-2xl font-bold flex items-center gap-2", theme === "dark" ? "text-white" : "text-gray-800")}>
@@ -329,7 +337,7 @@ export function FailedAffiliations() {
                 </div>
             </div>
 
-            {/* Filters */}
+            {/* Sección de filtros */}
             <div className={cn(
                 "rounded-2xl border p-4 transition-all duration-300",
                 theme === "dark" ? "bg-[#1a1333]/50 border-white/5" : "bg-white border-gray-100 shadow-sm"
@@ -349,7 +357,7 @@ export function FailedAffiliations() {
 
                 {filtersExpanded && (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        {/* Asesor Filter */}
+                        {/* Filtro de asesor */}
                         <div className="relative" ref={asesorFilterRef}>
                             <label className="text-xs font-medium mb-1.5 block text-gray-500">Asesor</label>
                             <div
@@ -401,7 +409,7 @@ export function FailedAffiliations() {
                             )}
                         </div>
 
-                        {/* Supervisor Filter */}
+                        {/* Filtro de supervisor */}
                         <div className="relative" ref={supervisorFilterRef}>
                             <label className="text-xs font-medium mb-1.5 block text-gray-500">Supervisor</label>
                             <div
@@ -453,7 +461,7 @@ export function FailedAffiliations() {
                             )}
                         </div>
 
-                        {/* CUIL Filter */}
+                        {/* Filtro de CUIL */}
                         <div>
                             <label className="text-xs font-medium mb-1.5 block text-gray-500">CUIL</label>
                             <div className="relative">
@@ -473,7 +481,7 @@ export function FailedAffiliations() {
                             </div>
                         </div>
 
-                        {/* Date Range Filter */}
+                        {/* Filtro de rango de fechas */}
                         <div className="flex gap-2">
                             <div className="flex-1">
                                 <label className="text-xs font-medium mb-1.5 block text-gray-500">Desde</label>
@@ -533,7 +541,7 @@ export function FailedAffiliations() {
                 </div>
             </div>
 
-            {/* Table */}
+            {/* Tabla de afiliaciones fallidas */}
             <div className={cn(
                 "rounded-2xl border overflow-hidden",
                 theme === "dark" ? "bg-[#1a1333]/50 border-white/5" : "bg-white border-gray-100 shadow-sm"
@@ -624,7 +632,7 @@ export function FailedAffiliations() {
                 </div>
             </div>
 
-            {/* Motivo Modal */}
+            {/* Modal de motivo de rechazo */}
             {motivoModalOpen && createPortal(
                 <div
                     className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-in fade-in duration-200"

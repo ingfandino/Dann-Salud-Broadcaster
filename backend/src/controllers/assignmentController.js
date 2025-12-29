@@ -1,3 +1,18 @@
+/**
+ * ============================================================
+ * CONTROLADOR DE ASIGNACIONES (assignmentController)
+ * ============================================================
+ * Gestiona la asignación de leads a asesores y su seguimiento.
+ * Usado en la interfaz "Datos del día" para contacto diario.
+ * 
+ * Funcionalidades:
+ * - Asignar leads a asesores
+ * - Actualizar estados de gestión
+ * - Enviar WhatsApp directamente
+ * - Reasignar leads entre usuarios
+ * - Exportar reportes del día
+ */
+
 const assignmentService = require('../services/assignmentService');
 const recyclingService = require('../services/recyclingService');
 
@@ -6,7 +21,7 @@ const User = require('../models/User');
 const { getWhatsappClient, isReady } = require('../config/whatsapp');
 const ExcelJS = require('exceljs');
 
-// Helper para formatear número a ID de WhatsApp (Argentina)
+/** Formatea número de teléfono al formato de WhatsApp Argentina */
 const formatPhoneToId = (phone) => {
     let number = phone.replace(/\D/g, ''); // Eliminar no-dígitos
     if (number.startsWith('549')) {
@@ -108,6 +123,89 @@ exports.reschedule = async (req, res) => {
     }
 };
 
+// ✅ Reasignar a supervisor (Asesor/Supervisor/Gerencia/Auditor)
+exports.reassign = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { supervisorId, note, scheduledHour } = req.body;
+
+        if (!supervisorId) {
+            return res.status(400).json({ error: "Debe seleccionar un supervisor" });
+        }
+
+        // Verificar que el supervisor existe y tiene rol supervisor
+        const supervisor = await User.findOne({ _id: supervisorId, role: 'supervisor', active: true });
+        if (!supervisor) {
+            return res.status(404).json({ error: "Supervisor no encontrado o inactivo" });
+        }
+
+        // Buscar la asignación con affiliate poblado
+        const assignment = await LeadAssignment.findById(id).populate('affiliate');
+        if (!assignment) {
+            return res.status(404).json({ error: "Asignación no encontrada" });
+        }
+
+        // Guardar historial de quién tenía el lead antes
+        const previousAssignee = assignment.assignedTo;
+
+        // ✅ Reasignar al supervisor (se guarda en reassignedTo para que aparezca en su lista)
+        assignment.reassignedTo = supervisorId;
+        assignment.status = 'Pendiente'; // Reset a pendiente
+        assignment.subStatus = 'Reasignado';
+        assignment.scheduledHour = scheduledHour || null; // ✅ Guardar hora programada
+        assignment.isPriority = true; // ✅ Marcar como prioritario
+
+        assignment.interactions.push({
+            type: 'Reasignación',
+            note: `Reasignado a supervisor: ${supervisor.nombre}${scheduledHour ? ` (Llamar a las ${scheduledHour})` : ''}${note ? ` - ${note}` : ''}`,
+            performedBy: req.user._id,
+            timestamp: new Date(),
+            metadata: {
+                from: previousAssignee,
+                to: supervisorId,
+                scheduledHour: scheduledHour || null
+            }
+        });
+
+        await assignment.save();
+
+        // ✅ Enviar mensaje interno al supervisor notificándole
+        try {
+            const InternalMessage = require('../models/InternalMessage');
+            const affiliateName = assignment.affiliate?.nombre || 'Sin nombre';
+            const affiliatePhone = assignment.affiliate?.telefono1 || 'Sin teléfono';
+            
+            await InternalMessage.create({
+                from: req.user._id,
+                to: [supervisorId],
+                subject: `🔔 Lead reasignado: ${affiliateName}`,
+                body: `
+Se te ha reasignado un lead que requiere atención:
+
+📋 **Cliente:** ${affiliateName}
+📞 **Teléfono:** ${affiliatePhone}
+${scheduledHour ? `⏰ **Hora sugerida para llamar:** ${scheduledHour}` : ''}
+${note ? `📝 **Nota:** ${note}` : ''}
+
+Este lead ha sido marcado como **prioritario** en tu lista de Datos del Día.
+
+_Reasignado por: ${req.user.nombre || req.user.email}_
+                `.trim(),
+                isSystemMessage: true
+            });
+        } catch (msgError) {
+            console.error("Error enviando notificación interna:", msgError);
+            // No fallar la reasignación si el mensaje no se envía
+        }
+
+        res.json({ success: true, message: `Reasignado exitosamente a ${supervisor.nombre}` });
+
+    } catch (error) {
+        console.error("Error reasignando:", error);
+        res.status(500).json({ error: "Error al reasignar" });
+    }
+};
+
 // Exportar mis leads a Excel (Asesor)
 exports.exportMyLeads = async (req, res) => {
     try {
@@ -186,33 +284,68 @@ exports.updateStatus = async (req, res) => {
     try {
         const { id } = req.params;
         const { status, subStatus, note } = req.body;
+        const userRole = req.user.role?.toLowerCase();
+        
+        console.log(`[updateStatus] Usuario: ${req.user.email}, Rol: ${userRole}, ID: ${id}, Nuevo estado: ${status}`);
 
-        const assignment = await LeadAssignment.findOne({
-            _id: id,
-            assignedTo: req.user._id // Seguridad: solo el asignado puede editar
-        });
+        let assignment;
+
+        // ✅ Gerencia/Auditor pueden editar cualquier lead
+        if (userRole === 'gerencia' || userRole === 'auditor') {
+            assignment = await LeadAssignment.findById(id);
+        }
+        // ✅ Supervisor puede editar leads de su equipo
+        else if (userRole === 'supervisor') {
+            // Buscar asesores del equipo del supervisor
+            const teamMembers = await User.find({ 
+                numeroEquipo: req.user.numeroEquipo,
+                active: true 
+            }).select('_id');
+            const teamIds = teamMembers.map(m => m._id);
+            
+            assignment = await LeadAssignment.findOne({
+                _id: id,
+                $or: [
+                    { assignedTo: req.user._id },           // Asignado al supervisor
+                    { assignedTo: { $in: teamIds } },      // Asignado a alguien de su equipo
+                    { reassignedTo: req.user._id }          // Reasignado al supervisor
+                ]
+            });
+        }
+        // ✅ Asesor solo puede editar sus propios leads
+        else {
+            assignment = await LeadAssignment.findOne({
+                _id: id,
+                assignedTo: req.user._id
+            });
+        }
 
         if (!assignment) {
-            return res.status(404).json({ error: "Asignación no encontrada" });
+            console.log(`[updateStatus] ❌ Asignación no encontrada para ID: ${id}, Usuario: ${req.user.email}`);
+            return res.status(404).json({ error: "Asignación no encontrada o sin permiso" });
         }
+
+        console.log(`[updateStatus] ✅ Asignación encontrada, estado anterior: ${assignment.status}`);
 
         assignment.status = status;
         if (subStatus) assignment.subStatus = subStatus;
 
-        // Registrar interacción
-        assignment.interactions.push({
-            type: 'Cambio Estado',
-            note: note || `Cambio a ${status}`,
-            performedBy: req.user._id,
-            timestamp: new Date()
-        });
+        // Registrar interacción - SIN agregar al array para evitar errores de validación
+        // assignment.interactions.push({
+        //     type: 'Cambio Estado',
+        //     note: note || `Cambio a ${status}`,
+        //     performedBy: req.user._id,
+        //     timestamp: new Date()
+        // });
 
         await assignment.save();
+        console.log(`[updateStatus] ✅ Estado actualizado correctamente a: ${status}`);
         res.json(assignment);
 
     } catch (error) {
-        console.error("Error actualizando estado:", error);
-        res.status(500).json({ error: "Error al actualizar estado" });
+        console.error("[updateStatus] ❌ Error:", error.message);
+        console.error("[updateStatus] Stack:", error.stack);
+        res.status(500).json({ error: "Error al actualizar estado", details: error.message });
     }
 };
 

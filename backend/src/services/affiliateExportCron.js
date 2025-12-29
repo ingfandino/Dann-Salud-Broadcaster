@@ -1,4 +1,10 @@
-// backend/src/services/affiliateExportCron.js
+/**
+ * ============================================================
+ * CRON DE EXPORTACIÓN DE AFILIADOS (affiliateExportCron.js)
+ * ============================================================
+ * Ejecuta exportaciones programadas de afiliados.
+ * Verifica cada minuto si es hora de exportar.
+ */
 
 const cron = require("node-cron");
 const logger = require("../utils/logger");
@@ -6,10 +12,7 @@ const { generateAndSendAffiliateCSVs } = require("./affiliateExportService");
 
 let cronJob = null;
 
-/**
- * Iniciar cron job para exportación programada de afiliados
- * Se ejecuta cada minuto para verificar si es hora de enviar
- */
+/** Inicia el cron job de exportación */
 function startAffiliateExportCron() {
     if (cronJob) {
         logger.warn("⚠️ Cron de exportación de afiliados ya está activo");

@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * PALABRAS PROHIBIDAS (palabras-prohibidas.tsx)
+ * ============================================================
+ * Gestión de palabras prohibidas en mensajes.
+ * Detecta y alerta sobre mensajes con contenido restringido.
+ */
+
 "use client"
 
 import { useState } from "react"
@@ -79,7 +87,7 @@ export function PalabrasProhibidas() {
 
   return (
     <div className="animate-fade-in-up space-y-6">
-      {/* Header */}
+      {/* Encabezado de palabras prohibidas */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <div
@@ -101,7 +109,7 @@ export function PalabrasProhibidas() {
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {/* Tarjetas de estadísticas */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {statsData.map((stat, index) => {
           const Icon = stat.icon
@@ -127,7 +135,7 @@ export function PalabrasProhibidas() {
         })}
       </div>
 
-      {/* Content Area */}
+      {/* Área de contenido */}
       <div
         className={cn(
           "rounded-2xl border p-6",
@@ -137,7 +145,7 @@ export function PalabrasProhibidas() {
         )}
       >
         <div className="space-y-4 animate-fade-in-up">
-          {/* Search and Filters */}
+          {/* Búsqueda y filtros */}
           <div className="flex flex-col lg:flex-row gap-3">
             <div className="flex-1 relative">
               <Search
@@ -195,7 +203,7 @@ export function PalabrasProhibidas() {
             </label>
           </div>
 
-          {/* Words List */}
+          {/* Lista de palabras */}
           <div className="space-y-2">
             {palabrasData.map((palabra) => (
               <div

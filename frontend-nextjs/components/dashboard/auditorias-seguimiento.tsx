@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * SEGUIMIENTO DE AUDITORÍAS (auditorias-seguimiento.tsx)
+ * ============================================================
+ * Vista principal para seguimiento de auditorías.
+ * Permite filtrar, buscar, editar y exportar auditorías.
+ */
+
 "use client"
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react"
@@ -15,7 +23,7 @@ import * as XLSX from "xlsx"
 import { AuditEditModal } from "./audit-edit-modal"
 import { connectSocket, getSocket } from "@/lib/socket"
 
-// Constants
+/* Constantes: Obras sociales argentinas */
 const ARGENTINE_OBRAS_SOCIALES = [
   "OSDE",
   "OSDEPYM",
@@ -59,7 +67,8 @@ const ARGENTINE_OBRAS_SOCIALES = [
   "OSPIC",
   "OSG (109202)",
   "OSPERYH (106500)",
-  "OSPCRA (104009)"
+  "OSPCRA (104009)",
+  "OSPMA (700108)"
 ]
 
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
@@ -71,6 +80,7 @@ const STATUS_OPTIONS = [
   "Rechazada",
   "Falta documentación",
   "Falta clave",
+  "Falta clave (por ARCA)",
   "Reprogramada",
   "Reprogramada (falta confirmar hora)",
   "Completa",
@@ -93,11 +103,7 @@ const STATUS_OPTIONS = [
   "Cargada",
   "Aprobada",
   "Aprobada, pero no reconoce clave",
-  "Rehacer vídeo",
-  "Rechazada",
-  "Falta documentación",
-  "Falta clave",
-  "Falta clave y documentación"
+  "El afiliado cambió la clave"
 ]
 
 const TIPO_VENTA = ["Alta", "Cambio"]
@@ -161,12 +167,12 @@ interface Group {
   numeroEquipo: string
 }
 
-// Helper functions
+/* Funciones auxiliares */
 const formatDateTime = (value: string) => {
   if (!value) return "-"
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "-"
-  // Use browser's local timezone for consistency
+  /* Usar zona horaria local del navegador para consistencia */
   const formattedDate = date.toLocaleDateString("es-AR")
   const formattedTime = date.toLocaleTimeString("es-AR", {
     hour: "2-digit",
@@ -179,7 +185,7 @@ const formatDateTime = (value: string) => {
 // ✅ Para fechas puras (sin hora específica) - evita problemas de zona horaria
 const formatDateOnly = (value: string) => {
   if (!value) return "-"
-  // Extraer solo la parte de fecha del ISO string para evitar conversión de zona horaria
+  /* Extraer solo la parte de fecha del ISO string para evitar conversión de zona horaria */
   const dateStr = value.split('T')[0]
   if (!dateStr) return "-"
   const [year, month, day] = dateStr.split('-')
@@ -212,6 +218,7 @@ const getStatusColor = (status: string, theme: string) => {
     "en videollamada": { light: "bg-blue-600 text-white", dark: "bg-blue-500/30 text-blue-300" },
     "falta documentación": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
     "falta clave": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
+    "falta clave (por arca)": { light: "bg-indigo-100 text-indigo-800", dark: "bg-indigo-500/20 text-indigo-400" },
     reprogramada: { light: "bg-violet-100 text-violet-800", dark: "bg-violet-500/20 text-violet-400" },
     "reprogramada (falta confirmar hora)": { light: "bg-violet-100 text-violet-800", dark: "bg-violet-500/20 text-violet-400" },
     completa: { light: "bg-lime-600 text-white", dark: "bg-lime-500/30 text-lime-300" },
@@ -262,8 +269,8 @@ const getSupervisorColor = (supervisorName: string, theme: string) => {
 
   const nombreLower = supervisorName.toLowerCase()
 
-  // Specific supervisor colors (matching old frontend)
-  // RED - 4 supervisors
+  /* Colores específicos por supervisor */
+  /* ROJO - 4 supervisores */
   if ((nombreLower.includes('nahuel') && nombreLower.includes('sanchez')) ||
     (nombreLower.includes('nahia') && nombreLower.includes('avellaneda')) ||
     (nombreLower.includes('santiago') && nombreLower.includes('goldsztein')) ||
@@ -271,58 +278,58 @@ const getSupervisorColor = (supervisorName: string, theme: string) => {
     return theme === "dark" ? "bg-red-900 text-red-200" : "bg-red-100 text-red-800"
   }
 
-  // FUCHSIA - Abigail Vera
+  /* FUCSIA - Abigail Vera */
   if (nombreLower.includes('abigail') && nombreLower.includes('vera')) {
     return theme === "dark" ? "bg-fuchsia-900 text-fuchsia-200" : "bg-fuchsia-100 text-fuchsia-800"
   }
 
-  // BLUE - Mateo Viera
+  /* AZUL - Mateo Viera */
   if (nombreLower.includes('mateo') && nombreLower.includes('viera')) {
     return theme === "dark" ? "bg-blue-900 text-blue-200" : "bg-blue-100 text-blue-800"
   }
 
-  // PURPLE - Belen Salaverry
+  /* PÚRPURA - Belen Salaverry */
   if (nombreLower.includes('belen') && nombreLower.includes('salaverry')) {
     return theme === "dark" ? "bg-purple-900 text-purple-200" : "bg-purple-100 text-purple-800"
   }
 
-  // PINK - Analia Suarez
+  /* ROSA - Analia Suarez */
   if (nombreLower.includes('analia') && nombreLower.includes('suarez')) {
     return theme === "dark" ? "bg-pink-900 text-pink-200" : "bg-pink-100 text-pink-800"
   }
 
-  // GREEN - Erika Cardozo
+  /* VERDE - Erika Cardozo */
   if (nombreLower.includes('erika') && nombreLower.includes('cardozo')) {
     return theme === "dark" ? "bg-green-900 text-green-200" : "bg-green-100 text-green-800"
   }
 
-  // YELLOW - Aryel Puiggros
+  /* AMARILLO - Aryel Puiggros */
   if (nombreLower.includes('aryel') && nombreLower.includes('puiggros')) {
     return theme === "dark" ? "bg-yellow-900 text-yellow-200" : "bg-yellow-100 text-yellow-800"
   }
 
-  // VIOLET - Joaquín Valdez
+  /* VIOLETA - Joaquín Valdez */
   if ((nombreLower.includes('joaquin') && nombreLower.includes('valdez')) ||
     (nombreLower.includes('joquin') && nombreLower.includes('valdez'))) {
     return theme === "dark" ? "bg-violet-900 text-violet-200" : "bg-violet-100 text-violet-800"
   }
 
-  // GRAY - Luciano Carugno
+  /* GRIS - Luciano Carugno */
   if (nombreLower.includes('luciano') && nombreLower.includes('carugno')) {
     return theme === "dark" ? "bg-gray-700 text-gray-200" : "bg-gray-200 text-gray-800"
   }
 
-  // AMBER - Alejandro Mejail
+  /* ÁMBAR - Alejandro Mejail */
   if (nombreLower.includes('alejandro') && nombreLower.includes('mejail')) {
     return theme === "dark" ? "bg-amber-900 text-amber-200" : "bg-amber-100 text-amber-800"
   }
 
-  // ORANGE - Gaston Sarmiento
+  /* NARANJA - Gaston Sarmiento */
   if (nombreLower.includes('gaston') && nombreLower.includes('sarmiento')) {
     return theme === "dark" ? "bg-orange-900 text-orange-200" : "bg-orange-100 text-orange-800"
   }
 
-  // Fallback colors for other supervisors
+  /* Colores por defecto para otros supervisores */
   const colors = [
     { light: "bg-teal-100 text-teal-800", dark: "bg-teal-900 text-teal-200" },
     { light: "bg-cyan-100 text-cyan-800", dark: "bg-cyan-900 text-cyan-200" },
@@ -346,12 +353,13 @@ const getRowBackgroundByStatus = (status: string, theme: string) => {
 
   const statusLower = status.toLowerCase()
 
-  // Row background colors by status (matching old frontend)
+  /* Colores de fila por estado */
   const colorMap: Record<string, { light: string; dark: string }> = {
     "mensaje enviado": { light: "bg-cyan-50 hover:bg-cyan-100", dark: "bg-cyan-900/20 hover:bg-cyan-900/30" },
     "en videollamada": { light: "bg-blue-100 hover:bg-blue-200", dark: "bg-blue-900/30 hover:bg-blue-900/40" },
     "falta documentación": { light: "bg-orange-50 hover:bg-orange-100", dark: "bg-orange-900/20 hover:bg-orange-900/30" },
     "falta clave": { light: "bg-orange-50 hover:bg-orange-100", dark: "bg-orange-900/20 hover:bg-orange-900/30" },
+    "falta clave (por arca)": { light: "bg-indigo-50 hover:bg-indigo-100", dark: "bg-indigo-900/20 hover:bg-indigo-900/30" },
     "reprogramada": { light: "bg-violet-50 hover:bg-violet-100", dark: "bg-violet-900/20 hover:bg-violet-900/30" },
     "reprogramada (falta confirmar hora)": { light: "bg-violet-50 hover:bg-violet-100", dark: "bg-violet-900/20 hover:bg-violet-900/30" },
     "completa": { light: "bg-lime-100 hover:bg-lime-200", dark: "bg-lime-900/30 hover:bg-lime-900/40" },
@@ -381,12 +389,12 @@ export function AuditoriasSeguimiento() {
   const { theme } = useTheme()
   const { user } = useAuth()
 
-  // State
+  /* Estado principal */
   const [audits, setAudits] = useState<Audit[]>([])
   const [loading, setLoading] = useState(false)
   const [filtersExpanded, setFiltersExpanded] = useState(true)
 
-  // Filter states
+  /* Estados de filtros */
   const [filters, setFilters] = useState({
     afiliado: "",
     cuil: "",
@@ -404,7 +412,7 @@ export function AuditoriasSeguimiento() {
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
 
-  // Multi-select states
+  /* Estados de selección múltiple */
   const [selectedGroups, setSelectedGroups] = useState<string[]>([])
   const [selectedEstados, setSelectedEstados] = useState<string[]>([])
   const [selectedAsesores, setSelectedAsesores] = useState<string[]>([])
@@ -412,7 +420,7 @@ export function AuditoriasSeguimiento() {
   const [selectedSupervisores, setSelectedSupervisores] = useState<string[]>([])
   const [selectedAdministradores, setSelectedAdministradores] = useState<string[]>([])
 
-  // Dropdown states
+  /* Estados de dropdowns */
   const [isGroupDropdownOpen, setIsGroupDropdownOpen] = useState(false)
   const [isEstadoDropdownOpen, setIsEstadoDropdownOpen] = useState(false)
   const [isAsesorDropdownOpen, setIsAsesorDropdownOpen] = useState(false)
@@ -420,30 +428,41 @@ export function AuditoriasSeguimiento() {
   const [isSupervisorDropdownOpen, setIsSupervisorDropdownOpen] = useState(false)
   const [isAdministradorDropdownOpen, setIsAdministradorDropdownOpen] = useState(false)
 
-  // Lists for dropdowns
+  /* Listas para dropdowns */
   const [asesoresList, setAsesoresList] = useState<User[]>([])
   const [gruposList, setGruposList] = useState<Group[]>([])
   const [auditoresList, setAuditoresList] = useState<User[]>([])
   const [supervisoresList, setSupervisoresList] = useState<User[]>([])
   const [administradoresList, setAdministradoresList] = useState<User[]>([])
 
-  // Modal states
+  const filteredAsesoresList = useMemo(() => {
+    if (selectedSupervisores.length === 0) return asesoresList
+    const equiposSupervisores = new Set<string>()
+    selectedSupervisores.forEach(supName => {
+      const sup = supervisoresList.find(s => s.nombre === supName)
+      if (sup?.numeroEquipo) equiposSupervisores.add(sup.numeroEquipo)
+    })
+    if (equiposSupervisores.size === 0) return asesoresList
+    return asesoresList.filter(a => a.numeroEquipo && equiposSupervisores.has(a.numeroEquipo))
+  }, [asesoresList, selectedSupervisores, supervisoresList])
+
+  /* Estados de modales */
   const [selectedAudit, setSelectedAudit] = useState<Audit | null>(null)
   const [editModalOpen, setEditModalOpen] = useState(false)
 
-  // Turnos modal states
+  /* Estados del modal de turnos */
   const [showSlotsModal, setShowSlotsModal] = useState(false)
   const [availableSlots, setAvailableSlots] = useState<any[]>([])
   const [loadingSlots, setLoadingSlots] = useState(false)
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
 
-  // Estadísticas modal states
+  /* Estados del modal de estadísticas */
   const [showStatsModal, setShowStatsModal] = useState(false)
   const [salesStats, setSalesStats] = useState<any[]>([])
   const [loadingStats, setLoadingStats] = useState(false)
   const [statsDate, setStatsDate] = useState(new Date().toISOString().split('T')[0])
 
-  // Refs for click outside
+  /* Referencias para detectar clicks externos */
   const groupFilterRef = useRef<HTMLDivElement>(null)
   const estadoFilterRef = useRef<HTMLDivElement>(null)
   const asesorFilterRef = useRef<HTMLDivElement>(null)
@@ -451,7 +470,7 @@ export function AuditoriasSeguimiento() {
   const supervisorFilterRef = useRef<HTMLDivElement>(null)
   const administradorFilterRef = useRef<HTMLDivElement>(null)
 
-  // Get current user role
+  /* Obtener rol del usuario actual */
   const getCurrentUserRole = () => {
     try {
       const token = localStorage.getItem("token")
@@ -469,8 +488,9 @@ export function AuditoriasSeguimiento() {
   const isGerencia = currentRole === "gerencia" || currentRole === "Gerencia"
   const isAuditor = currentRole === "auditor" || currentRole === "Auditor"
   const isAsesor = currentRole === "asesor" || currentRole === "Asesor"
+  const isAdministrativo = currentRole === "administrativo" || currentRole === "Administrativo"
 
-  // Helper functions
+  /* Funciones auxiliares de selección */
   const toggleSelection = (value: string, setFn: React.Dispatch<React.SetStateAction<string[]>>) => {
     const normalized = (value || "").trim()
     if (!normalized) return
@@ -492,8 +512,8 @@ export function AuditoriasSeguimiento() {
     const params: any = { ...filters }
 
     if (selectedEstados.length > 0) {
-      // If "Sin estado" is selected, we must fetch ALL records from backend (don't filter by status server-side)
-      // and then filter client-side. Otherwise, backend won't return records with empty status if we filter by others.
+      /* Si "Sin estado" está seleccionado, debemos obtener TODOS los registros del backend
+         y filtrar del lado del cliente */
       if (!selectedEstados.includes("Sin estado")) {
         params.estado = selectedEstados.map((e) => e.trim()).join(",")
       }
@@ -519,13 +539,13 @@ export function AuditoriasSeguimiento() {
       params.grupo = selectedGroups.map((g) => g.trim()).filter(Boolean).join(",")
     }
 
-    // ✅ CUIL Filter Logic: If CUIL is present, ignore ALL date filters
+    /* Lógica de filtro CUIL: Si CUIL está presente, ignorar filtros de fecha */
     if (filters.cuil && filters.cuil.trim() !== "") {
       delete params.dateFrom
       delete params.dateTo
       delete params.date
     } else {
-      // Standard date logic only if CUIL is NOT present
+      /* Lógica de fecha estándar solo si CUIL NO está presente */
       if (dateFrom && dateTo) {
         params.dateFrom = dateFrom
         params.dateTo = dateTo
@@ -552,7 +572,7 @@ export function AuditoriasSeguimiento() {
 
       let normalizedFilteredAudits = auditsArray
 
-      // Client-side filtering for "Sin estado" logic
+      /* Filtrado del lado del cliente para lógica "Sin estado" */
       if (selectedEstados.length > 0) {
         if (selectedEstados.includes("Sin estado")) {
           normalizedFilteredAudits = auditsArray.filter((audit: Audit) => {
@@ -560,16 +580,15 @@ export function AuditoriasSeguimiento() {
             const isNoStatus = !status || status === "Seleccione" || status === "Seleccionar estado..."
             const isSelectedStatus = selectedEstados.includes(status)
 
-            // Return true if it has no status OR if it matches one of the other selected statuses
+            /* Retornar true si no tiene estado O si coincide con uno de los estados seleccionados */
             return isNoStatus || isSelectedStatus
           })
         } else {
-          // If "Sin estado" is NOT selected, backend should have filtered, but we can double check or just use data
-          // Backend filtering is preferred for performance, so we trust auditsArray here (which is filtered by backend)
+          /* Si "Sin estado" NO está seleccionado, el backend ya filtró los datos */
           normalizedFilteredAudits = auditsArray
         }
       } else {
-        // Default behavior: hide "cargada" and "aprobada" if no status filter is active
+        /* Comportamiento por defecto: ocultar "cargada" y "aprobada" si no hay filtro de estado activo */
         const statusesToHide = ["cargada", "aprobada"]
         normalizedFilteredAudits = auditsArray.filter((audit: Audit) => {
           const status = (audit.status || "").toLowerCase()
@@ -589,11 +608,9 @@ export function AuditoriasSeguimiento() {
 
   const fetchFilterOptions = async () => {
     try {
-      // Fetch asesores
-      const asesoresRes = await api.users.list()
+      const asesoresRes = await api.users.list("includeAllAuditors=true")
       const asesoresData = Array.isArray(asesoresRes.data) ? asesoresRes.data : []
 
-      // Asesor filter: Include asesores + auditores with numeroEquipo
       const asesoresFiltered = asesoresData
         .filter((u: User) => {
           const isActive = u?.active !== false
@@ -604,7 +621,7 @@ export function AuditoriasSeguimiento() {
         .sort((a: User, b: User) => a.nombre.localeCompare(b.nombre))
       setAsesoresList(asesoresFiltered)
 
-      // Fetch auditores
+      /* Obtener auditores */
       const auditoresData = asesoresData
         .filter((u: User) => {
           const isActive = u?.active !== false
@@ -623,13 +640,13 @@ export function AuditoriasSeguimiento() {
         .sort((a: User, b: User) => a.nombre.localeCompare(b.nombre))
       setAuditoresList(auditoresData)
 
-      // Fetch groups
+      /* Obtener grupos */
       const gruposRes = await api.groups.list()
       const gruposData = Array.isArray(gruposRes.data) ? gruposRes.data : []
-      // Supervisors and Gerencia see all groups
+      /* Supervisores y Gerencia ven todos los grupos */
       setGruposList(gruposData.sort((a: Group, b: Group) => (a.nombre || "").localeCompare(b.nombre || "")))
 
-      // Fetch supervisores
+      /* Obtener supervisores */
       const supervisoresData = asesoresData
         .filter((u: User) => {
           const isActive = u?.active !== false
@@ -638,11 +655,12 @@ export function AuditoriasSeguimiento() {
         .sort((a: User, b: User) => a.nombre.localeCompare(b.nombre))
       setSupervisoresList(supervisoresData)
 
-      // Fetch administradores
+      /* Obtener administradores (rol: administrativo) */
       const administradoresData = asesoresData
         .filter((u: User) => {
           const isActive = u?.active !== false
-          return isActive && (u.role === "admin" || u.role === "Admin") && u.nombre
+          const roleLower = (u.role || "").toLowerCase()
+          return isActive && roleLower === "administrativo" && u.nombre
         })
         .sort((a: User, b: User) => a.nombre.localeCompare(b.nombre))
       setAdministradoresList(administradoresData)
@@ -744,7 +762,7 @@ export function AuditoriasSeguimiento() {
     setEditModalOpen(true)
   }
 
-  // Turnos modal functions
+  /* Funciones del modal de turnos */
   const fetchAvailableSlots = async (date: string) => {
     setLoadingSlots(true)
     try {
@@ -776,7 +794,7 @@ export function AuditoriasSeguimiento() {
     return 'bg-green-100 text-green-800 border-green-300'
   }
 
-  // Estadísticas modal functions
+  /* Funciones del modal de estadísticas */
   const fetchSalesStats = async (date: string) => {
     setLoadingStats(true)
     try {
@@ -800,63 +818,60 @@ export function AuditoriasSeguimiento() {
     fetchSalesStats(newDate)
   }
 
-  // Effects
+  /* Efectos */
   useEffect(() => {
     fetchAudits()
     fetchFilterOptions()
 
-    // ✅ SMART REAL-TIME UPDATES via Socket
+    /* Actualizaciones en tiempo real via Socket */
     const socket = connectSocket()
 
-    // Subscribe to audits room
+    /* Suscribirse a la sala de auditorías */
     socket.emit("audits:subscribeAll")
     console.log("[Seguimiento] Subscribed to audits_all room")
 
-    // Handler for new audits - add if visible in current view
+    /* Manejador para nuevas auditorías - agregar si es visible en la vista actual */
     const handleNewAudit = (newAudit: Audit) => {
       console.log("[Socket] New audit received:", newAudit._id)
 
-      // Add to list - filtering will be handled by the existing client-side logic
-      // Only add if we're on the default date range (today or no date filter)
+      /* Agregar a la lista - el filtrado se maneja por la lógica existente del cliente */
       setAudits(prev => {
-        // Check if already exists (avoid duplicates)
+        /* Verificar si ya existe (evitar duplicados) */
         if (prev.some(a => a._id === newAudit._id)) return prev
 
-        // Add at the beginning (newest first)
+        /* Agregar al inicio (más reciente primero) */
         const updated = [newAudit, ...prev]
 
-        // Show subtle notification
+        /* Mostrar notificación sutil */
         toast.info(`Nueva auditoría: ${newAudit.nombre}`, { duration: 3000 })
 
         return updated
       })
     }
 
-    // Handler for updated audits - update in place
+    /* Manejador para auditorías actualizadas - actualizar en su lugar */
     const handleAuditUpdate = (updatedAudit: Audit & { updatedBy?: string }) => {
-      console.log("[Socket] Audit update received:", updatedAudit._id)
+      console.log("[Socket] Actualización de auditoría recibida:", updatedAudit._id)
 
       setAudits(prev => {
         const index = prev.findIndex(a => a._id === updatedAudit._id)
         if (index === -1) {
-          // Audit not in current list - might need to add if it now matches filters
-          // For simplicity, we'll just not add it (user can refresh filters)
+          // Auditoría no está en la lista actual - el usuario puede refrescar filtros
           return prev
         }
 
-        // Update in place, preserving position
+        /* Actualizar en su lugar, preservando posición */
         const updated = [...prev]
         updated[index] = { ...prev[index], ...updatedAudit }
         return updated
       })
 
-      // If user is editing this audit, update the selected audit too
+      /* Si el usuario está editando esta auditoría, actualizar también */
       setSelectedAudit(prev => {
         if (prev && prev._id === updatedAudit._id) {
-          // Don't auto-update if modal is open to avoid disrupting user
-          // Instead, show a warning ONLY if updated by someone else
+          /* No auto-actualizar si el modal está abierto para no interrumpir al usuario */
           if (editModalOpen) {
-            // ✅ Check if update was made by current user
+            /* Verificar si la actualización fue hecha por el usuario actual */
             const isSelfUpdate = updatedAudit.updatedBy === user?._id
 
             if (!isSelfUpdate) {
@@ -869,13 +884,13 @@ export function AuditoriasSeguimiento() {
       })
     }
 
-    // Handler for deleted audits - remove from list
+    /* Manejador para auditorías eliminadas - quitar de la lista */
     const handleAuditDeleted = (data: { _id: string }) => {
       console.log("[Socket] Audit deleted:", data._id)
 
       setAudits(prev => prev.filter(a => a._id !== data._id))
 
-      // If user is editing this deleted audit, close modal
+      /* Si el usuario está editando esta auditoría eliminada, cerrar modal */
       if (selectedAudit && selectedAudit._id === data._id) {
         setEditModalOpen(false)
         setSelectedAudit(null)
@@ -883,12 +898,12 @@ export function AuditoriasSeguimiento() {
       }
     }
 
-    // Register event listeners
+    /* Registrar listeners de eventos */
     socket.on("audits:new", handleNewAudit)
     socket.on("audit:update", handleAuditUpdate)
     socket.on("audit:deleted", handleAuditDeleted)
 
-    // Cleanup on unmount
+    /* Limpiar al desmontar */
     return () => {
       socket.off("audits:new", handleNewAudit)
       socket.off("audit:update", handleAuditUpdate)
@@ -938,7 +953,7 @@ export function AuditoriasSeguimiento() {
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {/* Filters Section */}
+      {/* Sección de filtros */}
       <div
         className={cn(
           "rounded-2xl border p-6 backdrop-blur-sm relative z-20",
@@ -952,7 +967,7 @@ export function AuditoriasSeguimiento() {
           <h3 className={cn("font-semibold", theme === "dark" ? "text-white" : "text-gray-800")}>Filtros</h3>
         </div>
 
-        {/* Row 1 */}
+        {/* Fila 1: Filtros principales */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-3">
           <input
             type="text"
@@ -1005,7 +1020,7 @@ export function AuditoriasSeguimiento() {
             ))}
           </select>
 
-          {/* Estado Multi-select */}
+          {/* Filtro multi-selección de estado */}
           <div className="relative" ref={estadoFilterRef}>
             <button
               onClick={() => setIsEstadoDropdownOpen(!isEstadoDropdownOpen)}
@@ -1067,9 +1082,9 @@ export function AuditoriasSeguimiento() {
           </select>
         </div>
 
-        {/* Row 2 */}
+        {/* Fila 2: Filtros de personal */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-3">
-          {/* Asesor Multi-select */}
+          {/* Filtro multi-selección de asesor */}
           <div className="relative" ref={asesorFilterRef}>
             <button
               onClick={() => setIsAsesorDropdownOpen(!isAsesorDropdownOpen)}
@@ -1086,7 +1101,7 @@ export function AuditoriasSeguimiento() {
                 <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
                   <button
                     type="button"
-                    onClick={() => setSelectedAsesores(asesoresList.map(a => a.nombre))}
+                    onClick={() => setSelectedAsesores(filteredAsesoresList.map(a => a.nombre))}
                     className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
                   >
                     Seleccionar todos
@@ -1101,7 +1116,7 @@ export function AuditoriasSeguimiento() {
                     </button>
                   )}
                 </div>
-                {asesoresList.map((a) => (
+                {filteredAsesoresList.map((a) => (
                   <label key={a._id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
                     <input
                       type="checkbox"
@@ -1116,54 +1131,7 @@ export function AuditoriasSeguimiento() {
             )}
           </div>
 
-          {/* Grupo Multi-select */}
-          <div className="relative" ref={groupFilterRef}>
-            <button
-              onClick={() => setIsGroupDropdownOpen(!isGroupDropdownOpen)}
-              className={cn(
-                "w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm",
-                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800",
-              )}
-            >
-              <span className="truncate">{formatMultiLabel(selectedGroups, "Grupo", "grupos")}</span>
-              <ChevronDown className="w-4 h-4" />
-            </button>
-            {isGroupDropdownOpen && (
-              <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
-                <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedGroups(gruposList.map(g => g.nombre))}
-                    className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                  >
-                    Seleccionar todos
-                  </button>
-                  {selectedGroups.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedGroups([])}
-                      className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                    >
-                      Limpiar
-                    </button>
-                  )}
-                </div>
-                {gruposList.map((g) => (
-                  <label key={g._id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selectedGroups.includes(g.nombre)}
-                      onChange={() => toggleSelection(g.nombre, setSelectedGroups)}
-                      className="accent-blue-600"
-                    />
-                    <span className="dark:text-gray-200">{g.nombre}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Auditor Multi-select */}
+          {/* Filtro multi-selección de auditor */}
           <div className="relative" ref={auditorFilterRef}>
             <button
               onClick={() => setIsAuditorDropdownOpen(!isAuditorDropdownOpen)}
@@ -1210,8 +1178,8 @@ export function AuditoriasSeguimiento() {
             )}
           </div>
 
-          {/* Supervisor Multi-select */}
-          {(isAuditor || isGerencia || isAdmin) && (
+          {/* Filtro multi-selección de supervisor */}
+          {(isAuditor || isGerencia || isAdmin || isSupervisor || isAsesor || isAdministrativo) && (
             <div className="relative" ref={supervisorFilterRef}>
               <button
                 onClick={() => setIsSupervisorDropdownOpen(!isSupervisorDropdownOpen)}
@@ -1259,7 +1227,7 @@ export function AuditoriasSeguimiento() {
             </div>
           )}
 
-          {/* Administrador Multi-select */}
+          {/* Filtro multi-selección de administrador */}
           <div className="relative" ref={administradorFilterRef}>
             <button
               onClick={() => setIsAdministradorDropdownOpen(!isAdministradorDropdownOpen)}
@@ -1268,7 +1236,7 @@ export function AuditoriasSeguimiento() {
                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800",
               )}
             >
-              <span className="truncate">{formatMultiLabel(selectedAdministradores, "Admin", "admins")}</span>
+              <span className="truncate">{formatMultiLabel(selectedAdministradores, "Administrativos", "administrativos")}</span>
               <ChevronDown className="w-4 h-4" />
             </button>
             {isAdministradorDropdownOpen && (
@@ -1307,7 +1275,7 @@ export function AuditoriasSeguimiento() {
           </div>
         </div>
 
-        {/* Row 3: Dates and buttons */}
+        {/* Fila 3: Fechas y botones de acción */}
         <div className="flex flex-wrap items-end gap-3">
           <div>
             <span className={cn("text-xs block mb-1", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
@@ -1395,7 +1363,7 @@ export function AuditoriasSeguimiento() {
         </div>
       </div>
 
-      {/* Status Summary Box */}
+      {/* Resumen de estados */}
       {audits.length > 0 && (() => {
         const estadosCount: Record<string, number> = {}
         let recuperadasCount = 0
@@ -1440,7 +1408,7 @@ export function AuditoriasSeguimiento() {
         )
       })()}
 
-      {/* Table */}
+      {/* Tabla de auditorías */}
       <div
         className={cn(
           "rounded-2xl border overflow-hidden",
@@ -1608,7 +1576,7 @@ export function AuditoriasSeguimiento() {
         </div>
       </div>
 
-      {/* Edit Modal - Using Portal for floating behavior */}
+      {/* Modal de edición - Portal flotante */}
       {selectedAudit && editModalOpen && typeof window !== "undefined" && createPortal(
         <AuditEditModal
           isOpen={editModalOpen}
@@ -1626,7 +1594,7 @@ export function AuditoriasSeguimiento() {
         document.body
       )}
 
-      {/* Turnos Modal */}
+      {/* Modal de turnos disponibles */}
       {showSlotsModal && (
         <div className="fixed inset-0 z-[100] flex items-start justify-center pt-20 p-4 bg-black/50 backdrop-blur-sm">
           <div className={cn(
@@ -1747,7 +1715,7 @@ export function AuditoriasSeguimiento() {
         </div>
       )}
 
-      {/* Estadísticas Modal */}
+      {/* Modal de estadísticas */}
       {showStatsModal && (
         <div className="fixed inset-0 z-[100] flex items-start justify-center pt-20 p-4 bg-black/50 backdrop-blur-sm">
           <div className={cn(

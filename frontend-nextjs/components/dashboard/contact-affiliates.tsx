@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * CONTACTAR AFILIADOS (contact-affiliates.tsx)
+ * ============================================================
+ * Vista de afiliados para contactar por WhatsApp.
+ * Muestra lista con estados y botones de acción.
+ */
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -86,7 +94,7 @@ export function ContactAffiliates() {
 
     return (
         <div className="space-y-6 p-6 animate-fade-in-up">
-            {/* Header */}
+            {/* Encabezado de la sección */}
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className={cn("text-2xl font-bold", theme === "dark" ? "text-white" : "text-gray-900")}>
@@ -122,7 +130,7 @@ export function ContactAffiliates() {
                 </div>
             </div>
 
-            {/* Grid */}
+            {/* Grilla de tarjetas */}
             {loading ? (
                 <div className="text-center py-12 text-gray-500">Cargando asignaciones...</div>
             ) : affiliates.length === 0 ? (
@@ -137,7 +145,7 @@ export function ContactAffiliates() {
                             "rounded-xl border p-5 transition-all hover:shadow-lg",
                             theme === "dark" ? "bg-[#1a1333] border-white/10 hover:border-purple-500/50" : "bg-white border-gray-200 hover:border-purple-200"
                         )}>
-                            {/* Card Header */}
+                            {/* Encabezado de tarjeta */}
                             <div className="flex justify-between items-start mb-4">
                                 <div>
                                     <h3 className={cn("font-bold text-lg", theme === "dark" ? "text-white" : "text-gray-900")}>
@@ -162,7 +170,7 @@ export function ContactAffiliates() {
                                 </div>
                             </div>
 
-                            {/* Info */}
+                            {/* Información del contacto */}
                             <div className="space-y-3 mb-6">
                                 <div className="flex items-center gap-3 text-sm">
                                     <Phone className="w-4 h-4 text-gray-400" />
@@ -184,7 +192,7 @@ export function ContactAffiliates() {
                                 </div>
                             </div>
 
-                            {/* Actions */}
+                            {/* Botones de acción */}
                             <div className="grid grid-cols-2 gap-2">
                                 <button
                                     onClick={() => handleStatusUpdate(item._id, 'Venta')}

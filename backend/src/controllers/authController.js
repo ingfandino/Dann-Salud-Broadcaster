@@ -1,4 +1,13 @@
-// backend/src/controllers/authController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE AUTENTICACIÓN (authController)
+ * ============================================================
+ * Maneja todas las operaciones relacionadas con la autenticación:
+ * - Registro de nuevos usuarios
+ * - Login y generación de tokens JWT
+ * - Recuperación de contraseña
+ * - Obtención del perfil del usuario actual
+ */
 
 const User = require("../models/User");
 const { envConfig } = require("../config");
@@ -9,7 +18,10 @@ const { signToken } = require("../utils/jwt");
 const crypto = require("crypto");
 const { hasSmtpConfig, sendPasswordResetEmail } = require("../services/emailService");
 
-// Registro
+/**
+ * Registra un nuevo usuario en el sistema.
+ * El usuario queda inactivo hasta que un administrador lo active.
+ */
 exports.register = async (req, res) => {
   try {
 
@@ -55,8 +67,11 @@ exports.register = async (req, res) => {
   }
 };
 
-// Solicitar recuperación de contraseña
-// POST /api/auth/forgot-password { email }
+/**
+ * Solicita recuperación de contraseña.
+ * Genera un token temporal y opcionalmente envía email.
+ * POST /api/auth/forgot-password { email }
+ */
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body || {};
@@ -102,8 +117,10 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-// Resetear contraseña
-// POST /api/auth/reset-password { token, password }
+/**
+ * Resetea la contraseña usando un token válido.
+ * POST /api/auth/reset-password { token, password }
+ */
 exports.resetPassword = async (req, res) => {
   try {
     const { token, password } = req.body || {};
@@ -132,7 +149,10 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
-// Login
+/**
+ * Autentica al usuario y devuelve un token JWT.
+ * Verifica credenciales y estado de cuenta activa.
+ */
 exports.login = async (req, res) => {
   try {
 
@@ -184,7 +204,10 @@ exports.login = async (req, res) => {
   }
 };
 
-// Perfil
+/**
+ * Obtiene el perfil del usuario autenticado.
+ * Requiere token JWT válido en el header.
+ */
 exports.me = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate(

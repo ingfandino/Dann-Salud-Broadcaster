@@ -1,4 +1,9 @@
-// backend/src/routes/autoresponseRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE AUTO-RESPUESTAS (autoresponseRoutes.js)
+ * ============================================================
+ * CRUD de reglas de respuesta automática para mensajes entrantes.
+ */
 
 const express = require("express");
 const router = express.Router();
@@ -6,7 +11,7 @@ const { validationResult } = require("express-validator");
 const { createAutoresponseValidator, updateAutoresponseValidator } = require("../validators/autoresponseValidator");
 const autoresponseController = require("../controllers/autoresponseController");
 
-// CRUD
+/* ========== CRUD DE AUTO-RESPUESTAS ========== */
 router.post("/", createAutoresponseValidator, (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {

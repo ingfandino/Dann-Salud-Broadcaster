@@ -1,9 +1,14 @@
-// src/services/whatsappUnified.js
-// Wrapper unificado para whatsapp-web.js y Baileys
+/**
+ * ============================================================
+ * WRAPPER UNIFICADO DE WHATSAPP (whatsappUnified.js)
+ * ============================================================
+ * Abstrae la implementación de WhatsApp (whatsapp-web.js o Baileys).
+ * Permite cambiar de motor sin modificar el código de la aplicación.
+ */
 
 const logger = require('../utils/logger');
 
-// Determinar qué implementación usar
+/* ========== CONFIGURACIÓN ========== */
 const USE_BAILEYS = process.env.USE_BAILEYS === 'true';
 const USE_MULTI = process.env.USE_MULTI_SESSION !== 'false';
 

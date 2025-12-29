@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * LISTA DE AFILIADOS (base-afiliados-lista.tsx)
+ * ============================================================
+ * Tabla de búsqueda y visualización de afiliados.
+ * Permite filtrar, buscar y eliminar registros.
+ */
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -63,7 +71,7 @@ export function BaseAfiliadosLista() {
 
   return (
     <div className="animate-fade-in-up space-y-4">
-      {/* Filters */}
+      {/* Filtros de búsqueda */}
       <div
         className={cn(
           "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -127,7 +135,7 @@ export function BaseAfiliadosLista() {
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Contador de resultados */}
       <div className={cn(
         "rounded-xl p-4 text-sm",
         theme === "dark" ? "bg-blue-500/10 text-blue-300" : "bg-blue-50 text-blue-700"
@@ -135,7 +143,7 @@ export function BaseAfiliadosLista() {
         Mostrando {afiliados.length} afiliados
       </div>
 
-      {/* Table */}
+      {/* Tabla de afiliados */}
       <div
         className={cn(
           "rounded-2xl border backdrop-blur-sm overflow-hidden",

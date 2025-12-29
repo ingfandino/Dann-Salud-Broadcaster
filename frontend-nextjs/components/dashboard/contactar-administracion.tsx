@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * ADMINISTRACIÓN DE CONTACTOS (contactar-administracion.tsx)
+ * ============================================================
+ * Panel de administración para asignación de leads.
+ * Permite configurar distribución de datos a asesores.
+ */
+
 "use client"
 
 import { Settings, Users, Package, Plus, Trash2, Save } from "lucide-react"
@@ -52,11 +60,14 @@ export function ContactarAdministracion() {
                         )
                     )
                 } else if (user?.role === 'supervisor') {
-                    // Supervisor: ve solo los de su mismo grupo activos
+                    // Supervisor: ve los de su mismo grupo activos + puede auto-asignarse
                     filteredUsers = allUsers.filter(u =>
-                        u.active === true &&
-                        (u.role === 'asesor' || u.role === 'auditor') &&
-                        u.numeroEquipo === user.numeroEquipo
+                        u.active === true && (
+                            // Asesores y auditores del mismo equipo
+                            ((u.role === 'asesor' || u.role === 'auditor') && u.numeroEquipo === user.numeroEquipo) ||
+                            // ✅ El supervisor mismo puede auto-asignarse
+                            u._id === user._id
+                        )
                     )
                 }
 
@@ -183,7 +194,7 @@ export function ContactarAdministracion() {
 
     return (
         <div className="animate-fade-in-up space-y-4">
-            {/* Header */}
+            {/* Encabezado de la sección */}
             <div
                 className={cn(
                     "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -206,10 +217,10 @@ export function ContactarAdministracion() {
                 </p>
             </div>
 
-            {/* Supervisor Stats Dashboard */}
+            {/* Panel de estadísticas para supervisor */}
             {user?.role === 'supervisor' && (
                 <div className="space-y-6">
-                    {/* Stats Card */}
+                    {/* Tarjeta de estadísticas */}
                     <div className={cn(
                         "rounded-2xl border p-6 backdrop-blur-sm",
                         theme === "dark"
@@ -217,12 +228,12 @@ export function ContactarAdministracion() {
                             : "bg-gradient-to-br from-white to-[#FAF7F2]/80 border-purple-200/30 shadow-lg shadow-purple-100/30"
                     )}>
                         <h2 className={cn("text-xl font-semibold flex items-center gap-2 mb-6", theme === "dark" ? "text-white" : "text-gray-800")}>
-                            {/* Using Settings icon as fallback since Database isn't imported yet, will fix imports next */}
+                            {/* Icono de disponibilidad de datos */}
                             Disponibilidad de Datos
                         </h2>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Fresh Data */}
+                            {/* Datos frescos */}
                             <div className={cn(
                                 "p-6 rounded-2xl border transition-all duration-300",
                                 theme === "dark"
@@ -245,7 +256,7 @@ export function ContactarAdministracion() {
                                 </p>
                             </div>
 
-                            {/* Reusable Data */}
+                            {/* Datos reutilizables */}
                             <div className={cn(
                                 "p-6 rounded-2xl border transition-all duration-300",
                                 theme === "dark"
@@ -256,7 +267,7 @@ export function ContactarAdministracion() {
                                     <span className={cn("text-sm font-medium", theme === "dark" ? "text-blue-300" : "text-blue-700")}>
                                         Datos Reutilizables
                                     </span>
-                                    {/* Using Package as fallback for BarChart3 */}
+                                    {/* Icono de paquete */}
                                     <div className={cn("p-2 rounded-lg", theme === "dark" ? "bg-blue-500/20" : "bg-blue-200")}>
                                         <Package className={cn("w-5 h-5", theme === "dark" ? "text-blue-400" : "text-blue-600")} />
                                     </div>
@@ -271,7 +282,7 @@ export function ContactarAdministracion() {
                         </div>
                     </div>
 
-                    {/* Obra Social Breakdown */}
+                    {/* Desglose por Obra Social */}
                     <div className={cn(
                         "rounded-2xl border p-6 backdrop-blur-sm",
                         theme === "dark"
@@ -309,7 +320,7 @@ export function ContactarAdministracion() {
                 </div>
             )}
 
-            {/* Configuration Panel */}
+            {/* Panel de configuración */}
             <div
                 className={cn(
                     "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -342,7 +353,7 @@ export function ContactarAdministracion() {
                     </button>
                 </div>
 
-                {/* List of Advisors */}
+                {/* Lista de asesores */}
                 <div className="space-y-3">
                     {distribution.length === 0 && (
                         <div className={cn("text-center py-8 text-sm", theme === "dark" ? "text-gray-500" : "text-gray-400")}>
@@ -371,7 +382,7 @@ export function ContactarAdministracion() {
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
-                                {/* Selector Asesor */}
+                                {/* Selector de asesor */}
                                 <div className="lg:col-span-4">
                                     <label className={cn("text-xs mb-1 block", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
                                         Asesor
@@ -395,7 +406,7 @@ export function ContactarAdministracion() {
                                     </select>
                                 </div>
 
-                                {/* Cantidad */}
+                                {/* Campo cantidad */}
                                 <div className="lg:col-span-2">
                                     <label className={cn("text-xs mb-1 block", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
                                         Cantidad
@@ -413,7 +424,7 @@ export function ContactarAdministracion() {
                                     />
                                 </div>
 
-                                {/* Mezcla (Slider simple) */}
+                                {/* Control de mezcla Fresh/Reusable */}
                                 <div className="lg:col-span-6">
                                     <label className={cn("text-xs mb-1 block flex justify-between", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
                                         <span>Mezcla: {item.mix.freshPercentage}% Frescos</span>
@@ -435,7 +446,7 @@ export function ContactarAdministracion() {
                 </div>
             </div>
 
-            {/* Save Button */}
+            {/* Botón guardar */}
             <button
                 onClick={handleSave}
                 disabled={loading || distribution.length === 0}

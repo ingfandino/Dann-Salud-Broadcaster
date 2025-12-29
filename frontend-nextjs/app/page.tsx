@@ -1,9 +1,17 @@
+/**
+ * ============================================================
+ * PÁGINA PRINCIPAL (app/page.tsx)
+ * ============================================================
+ * Punto de entrada. Redirige a /dashboard o /login según auth.
+ */
+
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 
+/** Página raíz con redirección automática */
 export default function HomePage() {
   const router = useRouter();
   const { isAuthenticated } = useAuth();

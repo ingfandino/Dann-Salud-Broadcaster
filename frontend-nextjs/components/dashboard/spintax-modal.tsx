@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * MODAL DE SPINTAX (spintax-modal.tsx)
+ * ============================================================
+ * Generador de variaciones de texto con sintaxis Spintax.
+ * Permite crear múltiples versiones de un mensaje.
+ */
+
 "use client"
 
 import { useState } from "react"
@@ -60,7 +68,7 @@ export function SpintaxModal({ isOpen, onClose, onInsert }: SpintaxModalProps) {
                         : "bg-white border-purple-200"
                 )}
             >
-                {/* Header */}
+                {/* Encabezado del modal */}
                 <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                         <div
@@ -86,7 +94,7 @@ export function SpintaxModal({ isOpen, onClose, onInsert }: SpintaxModalProps) {
                     </button>
                 </div>
 
-                {/* Explanation */}
+                {/* Explicación de Spintax */}
                 <div
                     className={cn(
                         "mb-4 p-3 rounded-lg text-sm",
@@ -100,7 +108,7 @@ export function SpintaxModal({ isOpen, onClose, onInsert }: SpintaxModalProps) {
                     </p>
                 </div>
 
-                {/* Options */}
+                {/* Lista de opciones */}
                 <div className="space-y-3 mb-4 max-h-[300px] overflow-y-auto">
                     {options.map((option, index) => (
                         <div key={index} className="flex items-center gap-2">
@@ -142,7 +150,7 @@ export function SpintaxModal({ isOpen, onClose, onInsert }: SpintaxModalProps) {
                     ))}
                 </div>
 
-                {/* Add Option Button */}
+                {/* Botón agregar opción */}
                 <button
                     onClick={handleAddOption}
                     className={cn(
@@ -156,7 +164,7 @@ export function SpintaxModal({ isOpen, onClose, onInsert }: SpintaxModalProps) {
                     Agregar opción
                 </button>
 
-                {/* Preview */}
+                {/* Vista previa */}
                 {options.filter(opt => opt.trim() !== "").length >= 2 && (
                     <div
                         className={cn(
@@ -173,7 +181,7 @@ export function SpintaxModal({ isOpen, onClose, onInsert }: SpintaxModalProps) {
                     </div>
                 )}
 
-                {/* Actions */}
+                {/* Botones de acción */}
                 <div className="flex gap-3">
                     <button
                         onClick={handleClose}

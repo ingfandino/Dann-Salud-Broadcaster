@@ -1,10 +1,15 @@
-// backend/src/routes/messageRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE MENSAJES (messageRoutes.js)
+ * ============================================================
+ * CRUD de mensajes de WhatsApp y previsualización.
+ */
 
 const express = require("express");
 const router = express.Router();
 const messageController = require("../controllers/messageController");
 
-// Vista previa
+/* ========== VISTA PREVIA ========== */
 router.post("/preview", messageController.previewMessage);
 router.post("/preview/import", messageController.previewMessageFromImport);
 

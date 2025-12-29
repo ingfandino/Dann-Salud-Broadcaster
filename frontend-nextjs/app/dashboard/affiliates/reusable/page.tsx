@@ -1,3 +1,4 @@
+/** Página: Datos Reutilizables (Afiliados Reciclados) */
 'use client';
 
 import { DashboardContent } from '@/components/dashboard/dashboard-content';

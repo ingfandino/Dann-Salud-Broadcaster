@@ -1,4 +1,9 @@
-// backend/src/routes/messagePreviewRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE VISTA PREVIA DE MENSAJES (messagePreviewRoutes.js)
+ * ============================================================
+ * Previsualización de mensajes con variables y spintax.
+ */
 
 const express = require("express");
 const router = express.Router();

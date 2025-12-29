@@ -85,7 +85,7 @@ export function ReusableData() {
 
     return (
         <div className="space-y-6 animate-fade-in-up">
-            {/* Header */}
+            {/* Encabezado de datos reutilizables */}
             <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
                 <div>
                     <h2 className={cn("text-2xl font-bold flex items-center gap-2", theme === "dark" ? "text-white" : "text-gray-800")}>
@@ -131,7 +131,7 @@ export function ReusableData() {
                 </div>
             </div>
 
-            {/* Stats */}
+            {/* Estadísticas de distribución */}
             <div className={cn(
                 "rounded-2xl border p-6",
                 theme === "dark" ? "bg-[#1a1333]/50 border-white/5" : "bg-white border-gray-100 shadow-sm"
@@ -154,7 +154,7 @@ export function ReusableData() {
                 </div>
             </div>
 
-            {/* Table */}
+            {/* Tabla de datos reutilizables */}
             <div className={cn(
                 "rounded-2xl border overflow-hidden",
                 theme === "dark" ? "bg-[#1a1333]/50 border-white/5" : "bg-white border-gray-100 shadow-sm"

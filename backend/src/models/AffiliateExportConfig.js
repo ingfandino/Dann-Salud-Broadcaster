@@ -1,25 +1,37 @@
-// backend/src/models/AffiliateExportConfig.js
+/**
+ * ============================================================
+ * MODELO DE CONFIGURACIÓN DE EXPORTACIÓN DE AFILIADOS
+ * ============================================================
+ * Define las reglas para la exportación automática diaria de afiliados
+ * a supervisores. Permite configurar cantidad, distribución por obra social,
+ * y mezcla de datos frescos vs reutilizables.
+ * 
+ * Tipos de envío:
+ * - masivo: Misma configuración para todos los supervisores
+ * - avanzado: Configuración individualizada por supervisor
+ */
 
 const mongoose = require("mongoose");
 
 const affiliateExportConfigSchema = new mongoose.Schema(
     {
-        // Usuario que configuró (debe ser gerencia)
+        /** Usuario que creó la configuración (gerencia) */
         configuredBy: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
             required: true
         },
 
-        // Tipo de envío: "masivo" o "avanzado"
+        /** Tipo de distribución: masivo (igual para todos) o avanzado (personalizado) */
         sendType: {
             type: String,
             enum: ["masivo", "avanzado"],
             default: "masivo"
         },
 
-        // ========== CONFIGURACIÓN MASIVA ==========
-        // Cantidad de afiliados por archivo (solo para envío masivo)
+        /* ========== CONFIGURACIÓN MASIVA ========== */
+        
+        /** Cantidad de afiliados por archivo */
         affiliatesPerFile: {
             type: Number,
             min: 1,
@@ -27,15 +39,15 @@ const affiliateExportConfigSchema = new mongoose.Schema(
             default: 100
         },
 
-        // Distribución por obra social (para envío masivo)
-        // Ej: [{ obraSocial: "OSDE", cantidad: 100 }, { obraSocial: "Medifé", cantidad: 50 }]
+        /** Distribución por obra social */
         obraSocialDistribution: [{
             obraSocial: String,
             cantidad: Number
         }],
 
-        // ========== CONFIGURACIÓN AVANZADA ==========
-        // Configuraciones individuales por supervisor (para envío avanzado)
+        /* ========== CONFIGURACIÓN AVANZADA ========== */
+        
+        /** Configuración individual por supervisor */
         supervisorConfigs: [{
             supervisorId: {
                 type: mongoose.Schema.Types.ObjectId,
@@ -46,29 +58,17 @@ const affiliateExportConfigSchema = new mongoose.Schema(
                 min: 1,
                 max: 10000
             },
-            // Distribución de obras sociales específica para este supervisor
             obraSocialDistribution: [{
                 obraSocial: String,
                 cantidad: Number
             }],
-            // Mezcla de datos personalizada para este supervisor
             dataSourceMix: {
-                freshPercentage: {
-                    type: Number,
-                    min: 0,
-                    max: 100,
-                    default: 50
-                },
-                reusablePercentage: {
-                    type: Number,
-                    min: 0,
-                    max: 100,
-                    default: 50
-                }
+                freshPercentage: { type: Number, min: 0, max: 100, default: 50 },
+                reusablePercentage: { type: Number, min: 0, max: 100, default: 50 }
             }
         }],
 
-        // Hora de envío diario (formato HH:mm, ej: "09:00")
+        /** Hora de ejecución diaria (formato HH:mm) */
         scheduledTime: {
             type: String,
             required: true,
@@ -80,36 +80,25 @@ const affiliateExportConfigSchema = new mongoose.Schema(
             }
         },
 
-        // Filtros opcionales para la generación (aplicados globalmente)
+        /** Filtros opcionales para la selección de afiliados */
         filters: {
             localidad: String,
             minAge: Number,
             maxAge: Number
         },
 
-        // ========== MEZCLA DE FUENTES DE DATOS ==========
-        // Configuración para mezclar datos frescos y reutilizables
+        /* ========== MEZCLA DE FUENTES DE DATOS ========== */
+        
+        /** Configuración global de proporción frescos/reutilizables */
         dataSourceMix: {
-            enabled: {
-                type: Boolean,
-                default: true
-            },
-            freshPercentage: {
-                type: Number,
-                min: 0,
-                max: 100,
-                default: 50
-            },
-            reusablePercentage: {
-                type: Number,
-                min: 0,
-                max: 100,
-                default: 50
-            }
+            enabled: { type: Boolean, default: true },
+            freshPercentage: { type: Number, min: 0, max: 100, default: 50 },
+            reusablePercentage: { type: Number, min: 0, max: 100, default: 50 }
         },
 
-        // ========== SISTEMA DE CANCELACIÓN ==========
-        // Control de cancelación de envíos programados
+        /* ========== SISTEMA DE CANCELACIÓN ========== */
+        
+        /** Control de pausas en la exportación automática */
         cancellation: {
             type: {
                 type: String,
@@ -117,35 +106,23 @@ const affiliateExportConfigSchema = new mongoose.Schema(
                 default: 'none'
             },
             cancelledAt: Date,
-            cancelledBy: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'User'
-            },
-            skipDate: Date // Para cancelación "solo por hoy"
+            cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+            skipDate: Date
         },
 
-        // Estado
-        active: {
-            type: Boolean,
-            default: true
-        },
-
-        // Última ejecución
-        lastExecuted: {
-            type: Date
-        },
-
-        // Próxima ejecución programada
-        nextExecution: {
-            type: Date
-        }
+        /** Estado activo de la configuración */
+        active: { type: Boolean, default: true },
+        /** Fecha de última ejecución */
+        lastExecuted: { type: Date },
+        /** Próxima ejecución programada */
+        nextExecution: { type: Date }
     },
     {
         timestamps: true
     }
 );
 
-// Solo puede haber una configuración activa a la vez
+/** Solo puede existir una configuración activa */
 affiliateExportConfigSchema.index({ active: 1 }, { unique: true, partialFilterExpression: { active: true } });
 
 module.exports = mongoose.model("AffiliateExportConfig", affiliateExportConfigSchema);

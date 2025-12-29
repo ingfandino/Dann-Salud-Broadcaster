@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * FONDO ANIMADO (animated-background.tsx)
+ * ============================================================
+ * Canvas con partículas animadas para páginas de auth.
+ * Crea efecto visual dinámico de conexiones.
+ */
+
 "use client"
 
 import { useEffect, useRef } from "react"
@@ -21,7 +29,7 @@ interface AnimatedBackgroundProps {
 export function AnimatedBackground({ theme }: AnimatedBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const particlesRef = useRef<Particle[]>([])
-  const animationRef = useRef<number>()
+  const animationRef = useRef<number | null>(null)
   const mouseRef = useRef({ x: 0, y: 0 })
 
   useEffect(() => {

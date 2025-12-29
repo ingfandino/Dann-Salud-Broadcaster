@@ -1,16 +1,21 @@
-// backend/src/services/auditFollowUpScheduler.js
+/**
+ * ============================================================
+ * SCHEDULER DE SEGUIMIENTO (auditFollowUpScheduler.js)
+ * ============================================================
+ * Notifica auditorías sin respuesta después de 12 horas.
+ * Alerta a asesor y supervisor por mensajería interna.
+ */
 
 const Audit = require('../models/Audit');
 const User = require('../models/User');
 const InternalMessage = require('../models/InternalMessage');
 const logger = require('../utils/logger');
 
-const CHECK_INTERVAL_MS = 60 * 60 * 1000; // Verificar cada 1 hora
-const FOLLOW_UP_THRESHOLD_MS = 12 * 60 * 60 * 1000; // 12 horas
+/* ========== CONFIGURACIÓN ========== */
+const CHECK_INTERVAL_MS = 60 * 60 * 1000;
+const FOLLOW_UP_THRESHOLD_MS = 12 * 60 * 60 * 1000;
 
-/**
- * Enviar notificación de seguimiento al asesor y supervisor
- */
+/** Envía notificación de seguimiento */
 async function sendFollowUpNotification(audit, asesor, supervisor) {
     try {
         // Obtener usuario del sistema para enviar
@@ -23,7 +28,7 @@ async function sendFollowUpNotification(audit, asesor, supervisor) {
         
         // Como último recurso, usar admin
         if (!systemUser) {
-            const admins = await User.find({ role: "admin", active: true }).limit(1);
+            const admins = await User.find({ role: "administrativo", active: true }).limit(1);
             systemUser = admins[0];
         }
 

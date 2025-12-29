@@ -1,13 +1,21 @@
-// src/services/baileys/baileysClient.js
+/**
+ * ============================================================
+ * CLIENTE BAILEYS (baileysClient.js)
+ * ============================================================
+ * Implementación de cliente WhatsApp usando Baileys.
+ * Maneja conexión, QR, reconexión y envío de mensajes.
+ */
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const path = require('path');
 const fs = require('fs');
+const mongoose = require('mongoose');
 const logger = require('../../utils/logger');
 const { getIO } = require('../../config/socket');
 
+/** Cliente de WhatsApp usando Baileys */
 class BaileysClient {
   constructor(userId) {
     this.userId = String(userId);
@@ -204,13 +212,15 @@ class BaileysClient {
           const phoneNumber = from.split('@')[0];
           const searchJid = `${phoneNumber}@c.us`; // Formato de BD
 
-          // Verificar si este contacto recibió mensajes de campaña
-          // ✅ MEJORA: Buscar el mensaje outbound MÁS RECIENTE para asociar job correctamente
+          const userObjectId = new mongoose.Types.ObjectId(this.userId);
+          const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          
           const enviado = await Message.findOne({
             to: searchJid,
             direction: "outbound",
-            createdBy: this.userId
-          }).sort({ timestamp: -1 });  // Más reciente primero
+            createdBy: userObjectId,
+            timestamp: { $gte: twentyFourHoursAgo }
+          }).sort({ timestamp: -1 });
 
           if (!enviado) {
             logger.debug(`[Baileys][${this.userId}] Mensaje ignorado (no corresponde a campaña): ${from}`);
@@ -226,9 +236,8 @@ class BaileysClient {
             continue;
           }
 
-          // Marcar que el contacto respondió
           await Message.updateMany(
-            { to: searchJid, direction: "outbound", createdBy: this.userId },
+            { to: searchJid, direction: "outbound", createdBy: userObjectId },
             { $set: { respondio: true } }
           );
           logger.info(`[Baileys][${this.userId}] ✓ Contacto ${phoneNumber} marcado como respondido`);
@@ -243,14 +252,13 @@ class BaileysClient {
               direction: 'inbound',
               status: 'recibido',
               timestamp: new Date(),
-              to: searchJid,
-              from: this.userId
+              to: this.userId,
+              from: searchJid
             });
             logger.info(`[Baileys][${this.userId}] Mensaje inbound registrado de ${phoneNumber} (job: ${enviado.job})`);
 
-            // ✅ Emitir evento de respuesta de campaña para actualizar métricas
             try {
-              getIO().to(`user_${this.userId}`).emit('campaign:reply', {
+              getIO().to('jobs').emit('campaign:reply', {
                 campaignId: enviado.job,
                 jobId: enviado.job,
                 contact: enviado.contact,
@@ -263,8 +271,7 @@ class BaileysClient {
             logger.error(`[Baileys][${this.userId}] Error registrando mensaje inbound:`, e.message);
           }
 
-          // Cargar reglas de auto-respuesta activas
-          const reglas = await Autoresponse.find({ createdBy: this.userId, active: true });
+          const reglas = await Autoresponse.find({ createdBy: userObjectId, active: true });
 
           if (reglas.length > 0) {
             const normalize = (s) => (s || "").toLowerCase().trim();
@@ -286,7 +293,7 @@ class BaileysClient {
               const since = new Date(Date.now() - windowMinutes * 60 * 1000);
 
               const recent = await AutoResponseLog.findOne({
-                createdBy: this.userId,
+                createdBy: userObjectId,
                 chatId: searchJid,
                 respondedAt: { $gte: since },
               }).sort({ respondedAt: -1 }).lean();
@@ -297,13 +304,11 @@ class BaileysClient {
                   await this.sendMessage(from, rule.response);
                   logger.info(`[Baileys][${this.userId}] 🤖 Auto-respuesta enviada (${rule.keyword || "fallback"})`);
 
-                  // Registrar en log con detalles completos
                   await AutoResponseLog.create({
-                    createdBy: this.userId,
+                    createdBy: userObjectId,
                     chatId: searchJid,
                     ruleId: rule._id,
                     respondedAt: new Date(),
-                    // ✅ MEJORA 3: Datos adicionales para reporte
                     job: enviado.job,
                     contact: enviado.contact,
                     keyword: rule.keyword || null,

@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * NOTIFICACIÓN CONTACTOS RECHAZADOS (rejected-contacts-notification.tsx)
+ * ============================================================
+ * Alerta de contactos rechazados durante importación.
+ * Permite descargar reporte de rechazados.
+ */
+
 "use client"
 
 import { AlertTriangle, X, Download, FileWarning } from "lucide-react"
@@ -27,7 +35,7 @@ export function RejectedContactsNotification({
                         : "bg-gradient-to-br from-yellow-50 to-orange-50 border-yellow-400"
                 )}
             >
-                {/* Header */}
+                {/* Encabezado de notificación */}
                 <div className="flex items-start gap-3 mb-3">
                     <div
                         className={cn(
@@ -57,7 +65,7 @@ export function RejectedContactsNotification({
                     </button>
                 </div>
 
-                {/* Message */}
+                {/* Mensaje de alerta */}
                 <div
                     className={cn(
                         "p-3 rounded-lg mb-4 text-sm",
@@ -77,7 +85,7 @@ export function RejectedContactsNotification({
                     </ul>
                 </div>
 
-                {/* Action Button */}
+                {/* Botón de acción */}
                 <button
                     onClick={onDownload}
                     className={cn(

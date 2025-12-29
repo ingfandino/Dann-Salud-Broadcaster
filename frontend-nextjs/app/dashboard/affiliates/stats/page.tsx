@@ -1,3 +1,4 @@
+/** Página: Estadísticas de Base de Afiliados */
 'use client';
 
 import { DashboardContent } from '@/components/dashboard/dashboard-content';

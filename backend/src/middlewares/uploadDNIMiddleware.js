@@ -1,10 +1,16 @@
-// backend/src/middlewares/uploadDNIMiddleware.js
+/**
+ * ============================================================
+ * MIDDLEWARE DE UPLOAD DNI (uploadDNIMiddleware.js)
+ * ============================================================
+ * Configuración de multer para subir fotos de DNI.
+ * Usado en el módulo de RR.HH para empleados.
+ */
 
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Directorio donde guardamos fotos de DNI
+/* ========== CONFIGURACIÓN DE DIRECTORIO ========== */
 const uploadDir = path.join(__dirname, '../../uploads/dni');
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });

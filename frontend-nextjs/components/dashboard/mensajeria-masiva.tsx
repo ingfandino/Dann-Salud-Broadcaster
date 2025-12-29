@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * MENSAJERÍA MASIVA (mensajeria-masiva.tsx)
+ * ============================================================
+ * Sistema de campañas masivas por WhatsApp.
+ * Permite crear, gestionar y monitorear envíos masivos.
+ */
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -105,8 +113,8 @@ const getStatusStyles = (estado: string, theme: string) => {
       text: theme === "dark" ? "text-red-400" : "text-red-600",
     },
     descanso: {
-      bg: theme === "dark" ? "bg-blue-500/20" : "bg-blue-100",
-      text: theme === "dark" ? "text-blue-400" : "text-blue-600",
+      bg: theme === "dark" ? "bg-yellow-500/20" : "bg-yellow-100",
+      text: theme === "dark" ? "text-yellow-400" : "text-yellow-600",
     },
   }
   return styles[estado.toLowerCase()] || { bg: theme === "dark" ? "bg-gray-500/20" : "bg-gray-100", text: theme === "dark" ? "text-gray-400" : "text-gray-600" }
@@ -173,10 +181,10 @@ export function MensajeriaMasiva() {
   ]
 
   useEffect(() => {
-    // Get socket instance (already initialized in layout)
+    /* Obtener instancia de socket (ya inicializada en layout) */
     const socket = connectSocket()
 
-    // Check initial WhatsApp connection status
+    /* Verificar estado inicial de conexión WhatsApp */
     const checkWhatsAppConnection = async () => {
       try {
         const response = await api.whatsapp.status()
@@ -196,7 +204,7 @@ export function MensajeriaMasiva() {
 
     checkWhatsAppConnection()
 
-    // Listen for WhatsApp disconnection events
+    /* Escuchar eventos de desconexión de WhatsApp */
     socket.on('whatsapp:disconnected', (data) => {
       console.log('[MensajeriaMasiva] WhatsApp disconnected:', data)
       setIsWhatsAppConnected(false)
@@ -211,22 +219,22 @@ export function MensajeriaMasiva() {
       console.log('[MensajeriaMasiva] Job update received:', updatedJob)
 
       setCampaigns(prevCampaigns => {
-        // Case 1: Job deleted/cancelled
+        /* Caso 1: Job eliminado/cancelado */
         if (updatedJob.deleted || (updatedJob.status === 'cancelado' && !prevCampaigns.find(c => c._id === updatedJob._id))) {
           return prevCampaigns.filter(c => c._id !== updatedJob._id)
         }
 
-        // Case 2: Update existing job
+        /* Caso 2: Actualizar job existente */
         const exists = prevCampaigns.some(c => c._id === updatedJob._id)
         if (exists) {
           return prevCampaigns.map(c => c._id === updatedJob._id ? { ...c, ...updatedJob } : c)
         }
 
-        // Case 3: New job
+        /* Caso 3: Nuevo job */
         return [updatedJob, ...prevCampaigns]
       })
 
-      // Also refresh metrics if job status changes
+      /* También refrescar métricas si cambia el estado del job */
       fetchMetrics()
     })
 
@@ -234,7 +242,7 @@ export function MensajeriaMasiva() {
     socket.on('auto_response:sent', (data) => {
       console.log('[MensajeriaMasiva] Auto-response sent:', data)
       setAutoResponseNotification(data)
-      // Auto-dismiss after 5 seconds
+      /* Auto-descartar después de 5 segundos */
       setTimeout(() => setAutoResponseNotification(null), 5000)
     })
 
@@ -243,7 +251,7 @@ export function MensajeriaMasiva() {
       console.log('[MensajeriaMasiva] Job progress received:', progressData)
 
       setCampaigns(prevCampaigns => {
-        // Find if the job exists in our list - try multiple ID formats
+        /* Buscar si el job existe en nuestra lista - probar múltiples formatos de ID */
         const jobId = progressData._id || progressData.jobId
         if (!jobId) {
           console.warn('[MensajeriaMasiva] Progress data missing job ID:', progressData)
@@ -256,18 +264,18 @@ export function MensajeriaMasiva() {
           return prevCampaigns
         }
 
-        // Create a new array to trigger re-render
+        /* Crear nuevo array para forzar re-render */
         const newCampaigns = [...prevCampaigns]
         const campaign = newCampaigns[index]
 
         console.log('[MensajeriaMasiva] Updating campaign:', campaign.name, 'Progress:', progressData.stats)
 
-        // Calculate delta for metrics update
+        /* Calcular delta para actualización de métricas */
         const oldSent = campaign.stats?.sent || 0
         const newSent = progressData.stats?.sent ?? oldSent
         const sentDelta = newSent - oldSent
 
-        // Update global metrics if there's a change
+        /* Actualizar métricas globales si hay cambio */
         if (sentDelta > 0) {
           console.log('[MensajeriaMasiva] Updating global metrics. Delta:', sentDelta)
           setMetrics(prev => ({
@@ -276,7 +284,7 @@ export function MensajeriaMasiva() {
           }))
         }
 
-        // Update stats and status with proper fallbacks
+        /* Actualizar stats y estado con fallbacks apropiados */
         newCampaigns[index] = {
           ...campaign,
           status: progressData.status || campaign.status,
@@ -284,6 +292,7 @@ export function MensajeriaMasiva() {
           failedCount: progressData.stats?.failed ?? campaign.failedCount,
           pendingCount: progressData.stats?.pending ?? campaign.pendingCount,
           repliesCount: progressData.repliesCount ?? campaign.repliesCount,
+          restBreakUntil: progressData.restBreakUntil ?? campaign.restBreakUntil,
           stats: {
             sent: newSent,
             failed: progressData.stats?.failed ?? campaign.stats?.failed ?? 0,
@@ -373,7 +382,7 @@ export function MensajeriaMasiva() {
       if (response.data) {
         const { contacts, resumen, rejectedFileId, headers } = response.data
 
-        // Guardar contactos y estadísticas
+        /* Guardar contactos y estadísticas */
         setUploadedContacts(contacts || [])
         setUploadStats(resumen)
         setRejectedFileId(rejectedFileId)
@@ -383,14 +392,14 @@ export function MensajeriaMasiva() {
           console.log("[MensajeriaMasiva] Headers from backend:", headers)
           setImportHeaders(headers)
         } else if (contacts && contacts.length > 0) {
-          // Fallback: extract headers from first contact's extraData
+          /* Fallback: extraer headers del extraData del primer contacto */
           const firstContact = contacts[0]
           const extractedHeaders = Object.keys(firstContact.extraData || {})
           console.log("[MensajeriaMasiva] Headers from first contact:", extractedHeaders)
           setImportHeaders(extractedHeaders)
         }
 
-        // Mostrar mensaje de éxito con estadísticas
+        /* Mostrar mensaje de éxito con estadísticas */
         const accepted = resumen?.accepted || 0
         const rejected = resumen?.rejected || 0
 
@@ -449,7 +458,7 @@ export function MensajeriaMasiva() {
 
     setMessage(newText)
 
-    // Restore cursor position
+    /* Restaurar posición del cursor */
     setTimeout(() => {
       textarea.focus()
       const newCursorPos = start + before.length + selectedText.length + after.length
@@ -483,11 +492,11 @@ export function MensajeriaMasiva() {
 
     try {
       if (template) {
-        // Update existing template
+        /* Actualizar plantilla existente */
         await api.templates.update(template, { nombre, contenido: message })
         toast.success("Plantilla actualizada")
       } else {
-        // Create new template
+        /* Crear nueva plantilla */
         await api.templates.create({ nombre, contenido: message })
         toast.success("Plantilla guardada")
       }
@@ -544,13 +553,13 @@ export function MensajeriaMasiva() {
         delayMin: parseInt(tiempoMin),
         delayMax: parseInt(tiempoMax),
         batchSize: parseInt(tamanoLote),
-        batchDelay: parseInt(descanso) * 60,
+        pauseBetweenBatches: parseInt(descanso),
         scheduledAt: fechaEnvio || undefined
       })
 
       toast.success("Campaña iniciada exitosamente")
 
-      // Reset form
+      /* Resetear formulario */
       setCampaignName("")
       setTemplate("")
       setMessage("")
@@ -658,9 +667,9 @@ export function MensajeriaMasiva() {
       console.log('[Preview] Import headers:', importHeaders)
       console.log('[Preview] Original message:', message)
 
-      // Replace [placeholders] with actual contact data
+      /* Reemplazar [placeholders] con datos reales del contacto */
       importHeaders.forEach(header => {
-        // Try multiple sources: direct field, extraData, case variations
+        /* Probar múltiples fuentes: campo directo, extraData, variaciones */
         const value =
           firstContact[header] ||
           firstContact.extraData?.[header] ||
@@ -670,13 +679,12 @@ export function MensajeriaMasiva() {
 
         console.log(`[Preview] Replacing [${header}] with:`, value)
 
-        // Create case-insensitive regex for [header]
+        /* Crear regex case-insensitive para [header] */
         const regex = new RegExp(`\\[${header}\\]`, 'gi')
         previewMessage = previewMessage.replace(regex, String(value))
       })
 
-      // Also replace any remaining [field] that might not be in importHeaders
-      // This handles all possible extraData fields
+      /* Reemplazar campos restantes que no estén en importHeaders */
       if (firstContact.extraData) {
         Object.keys(firstContact.extraData).forEach(key => {
           const value = firstContact.extraData[key]
@@ -687,7 +695,7 @@ export function MensajeriaMasiva() {
 
       console.log('[Preview] After replacement:', previewMessage)
 
-      // Process Spintax - select first option for preview
+      /* Procesar Spintax - seleccionar primera opción para preview */
       previewMessage = previewMessage.replace(/{([^}]+)}/g, (match, options) => {
         const opts = options.split('|').map((o: string) => o.trim())
         return opts[0] || match
@@ -726,7 +734,7 @@ export function MensajeriaMasiva() {
     return campaignDate === filterDate
   })
 
-  // Show loading while checking connection
+  /* Mostrar loading mientras se verifica conexión */
   if (checkingConnection) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-200px)]">
@@ -746,14 +754,14 @@ export function MensajeriaMasiva() {
     )
   }
 
-  // Show QR linking if WhatsApp is not connected
+  /* Mostrar vinculación QR si WhatsApp no está conectado */
   if (isWhatsAppConnected === false) {
     return (
       <VincularQR
         onSuccess={() => {
           setIsWhatsAppConnected(true)
           toast.success("WhatsApp vinculado correctamente")
-          // Reload campaigns after successful connection
+          /* Recargar campañas después de conexión exitosa */
           fetchCampaigns()
         }}
       />
@@ -762,9 +770,9 @@ export function MensajeriaMasiva() {
 
   return (
     <div className="animate-fade-in-up space-y-4 lg:space-y-6">
-      {/* Metrics Cards */}
+      {/* Tarjetas de métricas */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Mensajes Hoy - Primary (Cyan) */}
+        {/* Tarjeta: Mensajes Hoy */}
         <div
           className={cn(
             "p-4 rounded-2xl border shadow-sm transition-all duration-300 hover:shadow-lg relative overflow-hidden group",
@@ -774,7 +782,7 @@ export function MensajeriaMasiva() {
           )}
           style={{ animationDelay: '0ms' }}
         >
-          {/* Glow effect for light mode */}
+          {/* Efecto de brillo en modo claro */}
           {theme !== "dark" && (
             <div className={cn(
               "absolute -top-10 -right-10 w-24 h-24 rounded-full blur-3xl opacity-30 group-hover:opacity-50 transition-opacity",
@@ -801,7 +809,7 @@ export function MensajeriaMasiva() {
           </div>
         </div>
 
-        {/* Usuarios Activos - Secondary (Slate) */}
+        {/* Tarjeta: Usuarios Activos */}
         <div
           className={cn(
             "p-4 rounded-2xl border shadow-sm transition-all duration-300 hover:shadow-lg relative overflow-hidden group",
@@ -811,7 +819,7 @@ export function MensajeriaMasiva() {
           )}
           style={{ animationDelay: '100ms' }}
         >
-          {/* Glow effect for light mode */}
+          {/* Efecto de brillo en modo claro */}
           {theme !== "dark" && (
             <div className={cn(
               "absolute -top-10 -right-10 w-24 h-24 rounded-full blur-3xl opacity-30 group-hover:opacity-50 transition-opacity",
@@ -838,7 +846,7 @@ export function MensajeriaMasiva() {
           </div>
         </div>
 
-        {/* Contactos Cargados - Accent (Teal) */}
+        {/* Tarjeta: Contactos Cargados */}
         <div className={cn(
           "p-4 rounded-2xl border shadow-sm transition-all duration-300 hover:shadow-lg relative overflow-hidden group",
           theme === "dark"
@@ -847,7 +855,7 @@ export function MensajeriaMasiva() {
         )}
           style={{ animationDelay: '200ms' }}
         >
-          {/* Glow effect for light mode */}
+          {/* Efecto de brillo en modo claro */}
           {theme !== "dark" && (
             <div className={cn(
               "absolute -top-10 -right-10 w-24 h-24 rounded-full blur-3xl opacity-30 group-hover:opacity-50 transition-opacity",
@@ -875,7 +883,7 @@ export function MensajeriaMasiva() {
         </div>
       </div>
 
-      {/* Action Buttons */}
+      {/* Botones de acción */}
       <div className="flex flex-wrap gap-2">
         <label
           className={cn(
@@ -918,10 +926,10 @@ export function MensajeriaMasiva() {
         </button>
       </div>
 
-      {/* Upload Status */}
+      {/* Estado de carga de archivo */}
       {uploadStats && (
         <div className="space-y-2">
-          {/* Success Status */}
+          {/* Estado de éxito */}
           {uploadStats.accepted > 0 && (
             <div
               className={cn(
@@ -935,7 +943,7 @@ export function MensajeriaMasiva() {
             </div>
           )}
 
-          {/* Rejected Status with Download */}
+          {/* Estado de rechazados con descarga */}
           {uploadStats.rejected > 0 && rejectedFileId && (
             <div
               className={cn(
@@ -963,7 +971,7 @@ export function MensajeriaMasiva() {
         </div>
       )}
 
-      {/* Campaign Form */}
+      {/* Formulario de campaña */}
       <div
         className={cn(
           "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -973,9 +981,9 @@ export function MensajeriaMasiva() {
         )}
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Left Column - Campaign Setup */}
+          {/* Columna izquierda - Configuración */}
           <div className="space-y-4">
-            {/* Campaign Name */}
+            {/* Nombre de campaña */}
             <div>
               <label
                 className={cn("block text-xs font-medium mb-1.5", theme === "dark" ? "text-gray-400" : "text-gray-600")}
@@ -996,7 +1004,7 @@ export function MensajeriaMasiva() {
               />
             </div>
 
-            {/* Template Selector */}
+            {/* Selector de plantilla */}
             <div>
               <label
                 className={cn("block text-xs font-medium mb-1.5", theme === "dark" ? "text-gray-400" : "text-gray-600")}
@@ -1022,7 +1030,7 @@ export function MensajeriaMasiva() {
               </select>
             </div>
 
-            {/* Template Actions */}
+            {/* Acciones de plantilla */}
             <div className="flex gap-2">
               <button
                 onClick={handleSaveTemplate}
@@ -1051,21 +1059,21 @@ export function MensajeriaMasiva() {
             </div>
           </div>
 
-          {/* Right Column - Message */}
+          {/* Columna derecha - Mensaje */}
           <div className="space-y-2">
             <label
               className={cn("block text-xs font-medium mb-1.5", theme === "dark" ? "text-gray-400" : "text-gray-600")}
             >
               Mensaje
             </label>
-            {/* Text Editor Toolbar */}
+            {/* Barra de herramientas del editor */}
             <div
               className={cn(
                 "flex items-center gap-1 px-2 py-1.5 rounded-t-lg border-b relative",
                 theme === "dark" ? "bg-white/5 border-white/10" : "bg-purple-50 border-purple-100",
               )}
             >
-              {/* Bold button */}
+              {/* Botón negrita */}
               <button
                 type="button"
                 onClick={() => insertAtCursor("*", "*")}
@@ -1077,7 +1085,7 @@ export function MensajeriaMasiva() {
               >
                 <Bold className="w-3.5 h-3.5" />
               </button>
-              {/* Italic button */}
+              {/* Botón cursiva */}
               <button
                 type="button"
                 onClick={() => insertAtCursor("_", "_")}
@@ -1089,7 +1097,7 @@ export function MensajeriaMasiva() {
               >
                 <Italic className="w-3.5 h-3.5" />
               </button>
-              {/* Emoji picker button */}
+              {/* Botón selector de emojis */}
               <button
                 type="button"
                 onClick={() => setShowEmojiPicker(!showEmojiPicker)}
@@ -1102,7 +1110,7 @@ export function MensajeriaMasiva() {
                 <Smile className="w-3.5 h-3.5" />
               </button>
 
-              {/* Emoji picker dropdown */}
+              {/* Desplegable de emojis */}
               {showEmojiPicker && (
                 <div className={cn(
                   "absolute top-full left-0 mt-1 p-2 rounded-lg shadow-lg border grid grid-cols-10 gap-1 z-20",
@@ -1128,7 +1136,7 @@ export function MensajeriaMasiva() {
 
               <div className={cn("w-px h-4 mx-1", theme === "dark" ? "bg-white/10" : "bg-purple-200")} />
 
-              {/* Spintax button - opens modal */}
+              {/* Botón Spintax - abre modal */}
               <button
                 type="button"
                 onClick={() => setShowSpintaxModal(true)}
@@ -1141,7 +1149,7 @@ export function MensajeriaMasiva() {
                 Spintax
               </button>
 
-              {/* Dynamic field buttons */}
+              {/* Botones de campos dinámicos */}
               {fieldButtons.length > 0 && (
                 <>
                   <div className={cn("w-px h-4 mx-1", theme === "dark" ? "bg-white/10" : "bg-purple-200")} />
@@ -1192,7 +1200,7 @@ export function MensajeriaMasiva() {
           </div>
         </div>
 
-        {/* Configuration Row */}
+        {/* Fila de configuración */}
         <div
           className={cn(
             "grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t",
@@ -1302,7 +1310,7 @@ export function MensajeriaMasiva() {
           </div>
         </div>
 
-        {/* Send Button */}
+        {/* Botón de envío */}
         <button
           onClick={handleStartCampaign}
           disabled={loading}
@@ -1318,7 +1326,7 @@ export function MensajeriaMasiva() {
         </button>
       </div>
 
-      {/* Campaigns Table */}
+      {/* Tabla de campañas */}
       <div
         className={cn(
           "rounded-2xl border backdrop-blur-sm overflow-hidden",
@@ -1327,7 +1335,7 @@ export function MensajeriaMasiva() {
             : "bg-gradient-to-br from-white to-[#FAF7F2]/80 border-purple-200/30 shadow-lg shadow-purple-100/30",
         )}
       >
-        {/* Table Header */}
+        {/* Encabezado de tabla */}
         <div
           className={cn(
             "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 border-b",
@@ -1353,7 +1361,7 @@ export function MensajeriaMasiva() {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Tabla */}
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
@@ -1476,7 +1484,7 @@ export function MensajeriaMasiva() {
                         <span className={cn("text-[10px]", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
                           {progress}%
                         </span>
-                        {/* Support both English and Spanish status for compatibility */}
+                        {/* Soporta estados en inglés y español por compatibilidad */}
                         {(campaign.status === "resting" || campaign.status === "descanso") && campaign.restBreakUntil && (
                           <Countdown targetDate={campaign.restBreakUntil} />
                         )}
@@ -1528,7 +1536,7 @@ export function MensajeriaMasiva() {
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-center gap-1">
-                        {/* Show Pause button for running/pending campaigns (hide only for completed/failed/paused) */}
+                        {/* Mostrar botón pausar para campañas activas/pendientes */}
                         {!['paused', 'pausado', 'completado', 'completed', 'fallida', 'failed'].includes(campaign.status?.toLowerCase() || '') && (
                           <button
                             onClick={() => handlePauseCampaign(campaign._id)}
@@ -1543,7 +1551,7 @@ export function MensajeriaMasiva() {
                             <Pause className="w-3 h-3" />
                           </button>
                         )}
-                        {/* Show Resume button only for paused campaigns */}
+                        {/* Mostrar botón reanudar solo para campañas pausadas */}
                         {(campaign.status === 'paused' || campaign.status === 'pausado') && (
                           <button
                             onClick={() => handleResumeCampaign(campaign._id)}
@@ -1593,7 +1601,7 @@ export function MensajeriaMasiva() {
       </div>
 
 
-      {/* Simplified Preview Modal */}
+      {/* Modal de vista previa */}
       {showPreview && previewData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
           <div
@@ -1604,7 +1612,7 @@ export function MensajeriaMasiva() {
                 : "bg-white border-gray-200"
             )}
           >
-            {/* Header */}
+            {/* Encabezado del modal */}
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className={cn("text-lg font-bold", theme === "dark" ? "text-white" : "text-gray-800")}>
@@ -1625,7 +1633,7 @@ export function MensajeriaMasiva() {
               </button>
             </div>
 
-            {/* WhatsApp-style Message Bubble */}
+            {/* Burbuja de mensaje estilo WhatsApp */}
             <div className="mb-6">
               <div className="flex justify-end">
                 <div
@@ -1649,7 +1657,7 @@ export function MensajeriaMasiva() {
               </div>
             </div>
 
-            {/* Close Button */}
+            {/* Botón cerrar */}
             <button
               onClick={() => setShowPreview(false)}
               className={cn(
@@ -1665,7 +1673,7 @@ export function MensajeriaMasiva() {
         </div>
       )}
 
-      {/* VincularQR Component - Real QR from WhatsApp */}
+      {/* Componente VincularQR - QR real de WhatsApp */}
       {showVincularQR && (
         <VincularQR
           onSuccess={() => {
@@ -1676,10 +1684,10 @@ export function MensajeriaMasiva() {
         />
       )}
 
-      {/* AutoRespuestasModal */}
+      {/* Modal de auto-respuestas */}
       <AutoRespuestasModal isOpen={isAutoRespuestasOpen} onClose={() => setIsAutoRespuestasOpen(false)} />
 
-      {/* SpintaxModal */}
+      {/* Modal de Spintax */}
       <SpintaxModal
         isOpen={showSpintaxModal}
         onClose={() => setShowSpintaxModal(false)}
@@ -1689,7 +1697,7 @@ export function MensajeriaMasiva() {
         }}
       />
 
-      {/* WhatsApp Disconnect Notification */}
+      {/* Notificación de desconexión WhatsApp */}
       {showDisconnectNotification && (
         <WhatsAppDisconnectNotification
           onDismiss={() => setShowDisconnectNotification(false)}
@@ -1700,7 +1708,7 @@ export function MensajeriaMasiva() {
         />
       )}
 
-      {/* Rejected Contacts Notification */}
+      {/* Notificación de contactos rechazados */}
       {showRejectedAlert && (
         <RejectedContactsNotification
           count={rejectedCount}
@@ -1709,7 +1717,7 @@ export function MensajeriaMasiva() {
         />
       )}
 
-      {/* Auto Response Notification */}
+      {/* Notificación de auto-respuesta */}
       {autoResponseNotification && (
         <AutoResponseNotification
           data={autoResponseNotification}

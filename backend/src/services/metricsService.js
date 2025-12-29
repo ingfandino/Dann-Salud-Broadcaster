@@ -1,10 +1,16 @@
-// backend/src/services/metricsService.js
+/**
+ * ============================================================
+ * SERVICIO DE MÉTRICAS (metricsService.js)
+ * ============================================================
+ * Recolecta y emite métricas de mensajería en tiempo real.
+ */
 
 const Message = require("../models/Message");
 const SendJob = require("../models/SendJob");
 const { emitMetrics } = require("../config/socket");
 const logger = require("../utils/logger");
 
+/** Recolecta métricas de mensajes y jobs */
 async function collectMetrics() {
     // Mensajes
     const totalEnviados = await Message.countDocuments({ status: "enviado" });

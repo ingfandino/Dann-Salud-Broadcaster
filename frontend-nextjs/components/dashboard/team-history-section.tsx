@@ -23,10 +23,11 @@ interface TeamHistoryProps {
     userId: string
     teamHistory?: TeamPeriod[]
     currentNumeroEquipo?: string
+    userCreatedAt?: string
     onUpdate: () => void
 }
 
-export function TeamHistorySection({ userId, teamHistory = [], currentNumeroEquipo, onUpdate }: TeamHistoryProps) {
+export function TeamHistorySection({ userId, teamHistory = [], currentNumeroEquipo, userCreatedAt, onUpdate }: TeamHistoryProps) {
     const { theme } = useTheme()
     const { user } = useAuth()
     const role = user?.role?.toLowerCase() || ''
@@ -82,13 +83,55 @@ export function TeamHistorySection({ userId, teamHistory = [], currentNumeroEqui
                 )}
             </div>
 
-            {teamHistory.length === 0 ? (
+            {teamHistory.length === 0 && !currentNumeroEquipo ? (
                 <div className={cn(
                     "p-4 rounded-lg border text-center text-sm",
                     theme === "dark" ? "bg-white/5 border-white/10 text-gray-400" : "bg-gray-50 border-gray-200 text-gray-500"
                 )}>
                     <AlertCircle className="w-5 h-5 mx-auto mb-2 opacity-50" />
                     No hay historial de equipos registrado
+                </div>
+            ) : teamHistory.length === 0 && currentNumeroEquipo ? (
+                <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                        <thead>
+                            <tr className={theme === "dark" ? "bg-white/5" : "bg-gray-50"}>
+                                <th className={cn("px-2 py-2 text-left font-semibold", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                                    Equipo
+                                </th>
+                                <th className={cn("px-2 py-2 text-left font-semibold", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                                    Desde
+                                </th>
+                                <th className={cn("px-2 py-2 text-left font-semibold", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                                    Hasta
+                                </th>
+                                <th className={cn("px-2 py-2 text-left font-semibold", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                                    Notas
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr className={cn(
+                                "border-t",
+                                theme === "dark" ? "border-white/5" : "border-gray-200"
+                            )}>
+                                <td className="px-2 py-2">
+                                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-500/20 text-green-600">
+                                        {currentNumeroEquipo} (Actual)
+                                    </span>
+                                </td>
+                                <td className={cn("px-2 py-2", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                                    {userCreatedAt ? new Date(userCreatedAt).toLocaleDateString('es-AR') : 'Desde creación'}
+                                </td>
+                                <td className={cn("px-2 py-2", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                                    -
+                                </td>
+                                <td className={cn("px-2 py-2", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                                    Equipo asignado al crear la cuenta
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             ) : (
                 <div className="overflow-x-auto">

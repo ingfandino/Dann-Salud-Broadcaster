@@ -1,3 +1,4 @@
+/** Página: Datos Frescos (Afiliados Nuevos) */
 'use client';
 
 import { DashboardContent } from '@/components/dashboard/dashboard-content';

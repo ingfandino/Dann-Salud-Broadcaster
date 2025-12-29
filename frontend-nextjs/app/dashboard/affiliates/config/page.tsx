@@ -1,3 +1,4 @@
+/** Página: Configuración de Exportación de Afiliados */
 'use client';
 
 import { DashboardContent } from '@/components/dashboard/dashboard-content';

@@ -1,13 +1,17 @@
-// backend/src/utils/controllerUtils.js
+/**
+ * ============================================================
+ * UTILIDADES DE CONTROLADORES (controllerUtils.js)
+ * ============================================================
+ * Funciones helper para manejo de errores en controladores.
+ * Genera traceId y respuestas estructuradas.
+ */
+
 const { v4: uuidv4 } = require('uuid');
 const logger = require('./logger');
 
 /**
- * Utilidad para manejar errores en controladores de forma consistente
- * @param {Error} error - El error capturado
- * @param {Object} res - Objeto de respuesta Express
- * @param {string} operacion - Descripción de la operación que falló
- * @param {number} statusCode - Código de estado HTTP (opcional, default 500)
+ * Maneja errores en controladores de forma consistente.
+ * Detecta errores de MongoDB y devuelve respuestas apropiadas.
  */
 exports.handleControllerError = (error, res, operacion, statusCode = 500) => {
   const traceId = uuidv4();

@@ -1,4 +1,16 @@
-// src/controllers/contactController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE CONTACTOS (contactController)
+ * ============================================================
+ * Gestiona la importación masiva de contactos desde archivos
+ * CSV/XLSX para campañas de mensajería por WhatsApp.
+ * 
+ * Funcionalidades principales:
+ * - Importación masiva con validación de datos
+ * - Detección de duplicados y contactos ya contactados
+ * - Generación de reportes de rechazados
+ * - Normalización automática de números de teléfono
+ */
 
 const Contact = require("../models/Contact");
 const Message = require("../models/Message");
@@ -7,13 +19,13 @@ const ImportLog = require("../models/ImportLog");
 const fs = require("fs");
 const logger = require("../utils/logger");
 
-// 🔹 Validador de teléfono flexible (8–15 dígitos) para admitir formatos internacionales
+/** Valida teléfono (8-15 dígitos) para formatos internacionales */
 const isValidPhone = (v) => {
     const digits = String(v || "").replace(/\D/g, "");
     return /^\d{8,15}$/.test(digits);
 };
 
-// 🔹 Normalizar headers
+/** Normaliza headers removiendo acentos, espacios y BOM */
 const normalizeHeader = (header) => {
     return header
         .toString()
@@ -77,10 +89,18 @@ exports.importContacts = async (req, res) => {
         }
 
         const MAX_ROWS = Number(process.env.CONTACTS_IMPORT_MAX_ROWS || 5000);
+        const MAX_PER_CAMPAIGN = 50;
         let truncated = 0;
+        let exceededCampaignLimit = 0;
+        
         if (effectiveRows.length > MAX_ROWS) {
             truncated = effectiveRows.length - MAX_ROWS;
             effectiveRows.splice(MAX_ROWS);
+        }
+        
+        if (effectiveRows.length > MAX_PER_CAMPAIGN) {
+            exceededCampaignLimit = effectiveRows.length - MAX_PER_CAMPAIGN;
+            effectiveRows.splice(MAX_PER_CAMPAIGN);
         }
 
         // Guardamos los headers para el endpoint dinámico
@@ -186,14 +206,33 @@ exports.importContacts = async (req, res) => {
             const existing = existingByPhone.get(String(normalizedPhone)) || null;
 
             if (existing) {
-                // ✅ CORRECCIÓN: Verificar si el contacto ya recibió mensajes exitosos
+                if (existing.noWhatsApp === true) {
+                    warnings.push({
+                        telefono: normalizedPhone,
+                        tipo: "sin_whatsapp",
+                        detalle: `El contacto fue marcado como SIN WhatsApp en una campaña anterior`
+                    });
+                    invalid++;
+                    continue;
+                }
+                
+                if (existing.massMessagedAt) {
+                    const fechaEnvio = new Date(existing.massMessagedAt).toLocaleDateString('es-AR');
+                    warnings.push({
+                        telefono: normalizedPhone,
+                        tipo: "ya_contactado_campaña",
+                        detalle: `El contacto ya recibió mensaje de campaña masiva el ${fechaEnvio}`
+                    });
+                    invalid++;
+                    continue;
+                }
+                
                 const hasSuccessfulMessages = await Message.countDocuments({
                     contact: existing._id,
                     status: "enviado"
                 });
 
                 if (hasSuccessfulMessages > 0) {
-                    // Contacto ya recibió mensajes → Rechazar como duplicado legítimo
                     warnings.push({
                         telefono: normalizedPhone,
                         tipo: "duplicado_con_mensajes",
@@ -202,17 +241,14 @@ exports.importContacts = async (req, res) => {
                     invalid++;
                     continue;
                 } else {
-                    // Contacto existe pero NO recibió mensajes → Eliminar y permitir recarga
                     logger.info(`🔄 Eliminando contacto sin mensajes exitosos: ${normalizedPhone} (ID: ${existing._id})`);
                     await Contact.findByIdAndDelete(existing._id);
 
-                    // Eliminar también cualquier mensaje fallido asociado para limpiar
                     const deletedMessages = await Message.deleteMany({ contact: existing._id });
                     if (deletedMessages.deletedCount > 0) {
                         logger.info(`🗑️ Eliminados ${deletedMessages.deletedCount} mensaje(s) fallido(s) asociado(s)`);
                     }
 
-                    // Remover del Map para evitar re-detección
                     existingByPhone.delete(String(normalizedPhone));
 
                     warnings.push({
@@ -220,9 +256,6 @@ exports.importContacts = async (req, res) => {
                         tipo: "reemplazado",
                         detalle: `Contacto anterior sin mensajes exitosos fue eliminado y será reemplazado`
                     });
-
-                    // Continuar con la inserción del nuevo contacto
-                    // (no hacer continue aquí, seguir el flujo normal)
                 }
             }
 
@@ -259,6 +292,15 @@ exports.importContacts = async (req, res) => {
         }
 
         fs.unlinkSync(req.file.path);
+
+        if (exceededCampaignLimit > 0) {
+            warnings.push({
+                telefono: "N/A",
+                tipo: "limite_campaña_excedido",
+                detalle: `Se excluyeron ${exceededCampaignLimit} contacto(s) por superar el límite de ${MAX_PER_CAMPAIGN} contactos por campaña`
+            });
+            invalid += exceededCampaignLimit;
+        }
 
         logger.info(`📊 Importación completada: Insertados=${inserted}, Inválidos=${invalid}, Warnings=${warnings.length}`);
 

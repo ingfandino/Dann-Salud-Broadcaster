@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * EXPORTACIONES DE AFILIADOS (base-afiliados-exportaciones.tsx)
+ * ============================================================
+ * Historial de exportaciones de afiliados a supervisores.
+ * Permite descargar archivos exportados previamente.
+ */
+
 "use client"
 
 import { useEffect, useState } from "react"
@@ -86,7 +94,7 @@ export function BaseAfiliadosExportaciones() {
 
   return (
     <div className="animate-fade-in-up space-y-4">
-      {/* Header */}
+      {/* Encabezado de exportaciones */}
       <div
         className={cn(
           "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -106,7 +114,7 @@ export function BaseAfiliadosExportaciones() {
         </h2>
       </div>
 
-      {/* Loading State */}
+      {/* Estado de carga */}
       {loading && (
         <div
           className={cn(
@@ -122,7 +130,7 @@ export function BaseAfiliadosExportaciones() {
         </div>
       )}
 
-      {/* Empty State */}
+      {/* Estado vacío */}
       {!loading && exportedFiles.length === 0 && (
         <div
           className={cn(
@@ -138,7 +146,7 @@ export function BaseAfiliadosExportaciones() {
         </div>
       )}
 
-      {/* Files List */}
+      {/* Lista de archivos exportados */}
       {!loading && exportedFiles.length > 0 && (
         <div className="space-y-3">
           {exportedFiles.map((file, index) => (
@@ -153,7 +161,7 @@ export function BaseAfiliadosExportaciones() {
               style={{ animationDelay: `${index * 50}ms` }}
             >
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                {/* File Info */}
+                {/* Información del archivo */}
                 <div className="flex-1 min-w-0">
                   <h3
                     className={cn(
@@ -193,7 +201,7 @@ export function BaseAfiliadosExportaciones() {
                   </div>
                 </div>
 
-                {/* Download Button */}
+                {/* Botón de descarga */}
                 <button
                   onClick={() => handleDownload(file.filename)}
                   disabled={downloading === file.filename}

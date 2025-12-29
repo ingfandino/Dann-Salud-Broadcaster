@@ -1,9 +1,16 @@
-// backend/src/controllers/autoresponseController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE RESPUESTAS AUTOMÁTICAS (autoresponseController)
+ * ============================================================
+ * Gestiona las reglas de auto-respuesta para mensajes entrantes.
+ * Cada usuario puede definir sus propias reglas por palabra clave
+ * y un único mensaje fallback cuando no hay coincidencias.
+ */
 
 const Autoresponse = require("../models/Autoresponse");
 const logger = require("../utils/logger");
 
-// Crear autorespuesta
+/** Crea una nueva regla de auto-respuesta */
 exports.createAutoresponse = async (req, res) => {
     try {
         const { keyword, response, isFallback = false } = req.body;

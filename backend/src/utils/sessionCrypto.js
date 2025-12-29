@@ -1,9 +1,15 @@
-// backend/src/utils/sessionCrypto.js
+/**
+ * ============================================================
+ * CRIPTOGRAFÍA DE SESIONES (sessionCrypto.js)
+ * ============================================================
+ * Encriptación/desencriptación de datos de sesión WhatsApp
+ * usando AES-256-GCM para mayor seguridad.
+ */
 
 const crypto = require("crypto");
 const logger = require("../utils/logger");
 
-// 🚨 Forzar que SESSION_SECRET esté definido
+/* ========== VALIDACIÓN DE SECRETO ========== */
 if (!process.env.SESSION_SECRET) {
     logger.error("❌ FATAL: SESSION_SECRET no definido. Configúralo en tu .env");
     process.exit(1); // detener ejecución

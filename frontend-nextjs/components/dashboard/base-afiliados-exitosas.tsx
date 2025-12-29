@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * AFILIACIONES EXITOSAS (base-afiliados-exitosas.tsx)
+ * ============================================================
+ * Vista de afiliados con auditorías completadas exitosamente.
+ * Muestra historial de ventas concretadas.
+ */
+
 "use client"
 
 import { useState, useEffect, useRef } from "react"
@@ -360,7 +368,7 @@ export function BaseAfiliadosExitosas() {
 
     return (
         <div className="space-y-6 animate-fade-in-up">
-            {/* Header */}
+            {/* Encabezado de afiliaciones exitosas */}
             <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
                 <div>
                     <h2 className={cn("text-2xl font-bold flex items-center gap-2", theme === "dark" ? "text-white" : "text-gray-800")}>
@@ -402,7 +410,7 @@ export function BaseAfiliadosExitosas() {
                 </div>
             </div>
 
-            {/* Filters */}
+            {/* Sección de filtros */}
             <div className={cn(
                 "rounded-2xl border p-4 transition-all duration-300",
                 theme === "dark" ? "bg-[#1a1333]/50 border-white/5" : "bg-white border-gray-100 shadow-sm"
@@ -422,7 +430,7 @@ export function BaseAfiliadosExitosas() {
 
                 {filtersExpanded && (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        {/* Asesor Filter */}
+                        {/* Filtro de asesor */}
                         <div className="relative" ref={asesorFilterRef}>
                             <label className="text-xs font-medium mb-1.5 block text-gray-500">Asesor</label>
                             <div
@@ -474,7 +482,7 @@ export function BaseAfiliadosExitosas() {
                             )}
                         </div>
 
-                        {/* Supervisor Filter */}
+                        {/* Filtro de supervisor */}
                         <div className="relative" ref={supervisorFilterRef}>
                             <label className="text-xs font-medium mb-1.5 block text-gray-500">Supervisor</label>
                             <div
@@ -526,7 +534,7 @@ export function BaseAfiliadosExitosas() {
                             )}
                         </div>
 
-                        {/* CUIL Filter */}
+                        {/* Filtro de CUIL */}
                         <div>
                             <label className="text-xs font-medium mb-1.5 block text-gray-500">CUIL</label>
                             <div className="relative">
@@ -546,7 +554,7 @@ export function BaseAfiliadosExitosas() {
                             </div>
                         </div>
 
-                        {/* Date Range Filter */}
+                        {/* Filtro de rango de fechas */}
                         <div className="flex gap-2">
                             <div className="flex-1">
                                 <label className="text-xs font-medium mb-1.5 block text-gray-500">Desde (Fecha QR)</label>
@@ -606,7 +614,7 @@ export function BaseAfiliadosExitosas() {
                 </div>
             </div>
 
-            {/* Summary Panel */}
+            {/* Panel de resumen */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in-up" style={{ animationDelay: "0.1s" }}>
                 <div className={cn(
                     "p-4 rounded-2xl border flex items-center justify-between",
@@ -631,7 +639,7 @@ export function BaseAfiliadosExitosas() {
                 </div>
             </div>
 
-            {/* Table */}
+            {/* Tabla de afiliaciones */}
             <div className={cn(
                 "rounded-2xl border overflow-hidden",
                 theme === "dark" ? "bg-[#1a1333]/50 border-white/5" : "bg-white border-gray-100 shadow-sm"
@@ -704,7 +712,7 @@ export function BaseAfiliadosExitosas() {
                 </div>
             </div>
 
-            {/* Stats Modals */}
+            {/* Modales de estadísticas */}
             {showSupervisorStats && createPortal(
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSupervisorStats(false)} />

@@ -1,10 +1,15 @@
-// backend/src/services/logService.js
+/**
+ * ============================================================
+ * SERVICIO DE LOGS (logService.js)
+ * ============================================================
+ * Persiste logs en MongoDB y emite en tiempo real vía Socket.IO.
+ */
 
 const Log = require("../models/Log");
 const { emitNewLog } = require("../config/socket");
 const logger = require("../utils/logger");
 
-// Guardar log en BD y emitir en tiempo real
+/** Guarda log en BD y emite en tiempo real */
 async function addLog({ tipo = "info", mensaje, metadata = {} }) {
     try {
         const log = new Log({ tipo, mensaje, metadata });

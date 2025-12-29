@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * FORMAS FLOTANTES (floating-shapes.tsx)
+ * ============================================================
+ * Elementos decorativos animados para páginas de auth.
+ * Genera figuras geométricas con movimiento aleatorio.
+ */
+
 "use client"
 
 import { useEffect, useState } from "react"

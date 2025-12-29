@@ -1,16 +1,34 @@
-// backend/src/controllers/affiliateController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE AFILIADOS (affiliateController)
+ * ============================================================
+ * Gestiona la base de datos de afiliados (potenciales clientes).
+ * 
+ * Funcionalidades principales:
+ * - Importación masiva desde archivos Excel
+ * - Exportación a supervisores para distribución
+ * - Gestión de datos frescos vs reutilizables
+ * - Estadísticas de la base de datos
+ * - Configuración de exportaciones automáticas
+ * 
+ * Permisos:
+ * - Gerencia: acceso completo
+ * - Supervisores: solo estadísticas y exportación de su equipo
+ */
 
 const Affiliate = require("../models/Affiliate");
 const Audit = require("../models/Audit");
 const AffiliateExportConfig = require("../models/AffiliateExportConfig");
 const User = require("../models/User");
+const LeadAssignment = require("../models/LeadAssignment");
+const Report = require("../models/Report");
 const logger = require("../utils/logger");
 const XLSX = require("xlsx");
 const path = require("path");
 const fs = require("fs").promises;
 const { v4: uuidv4 } = require("uuid");
 
-// 🔐 Middleware de seguridad: solo gerencia
+/** Middleware: Solo usuarios de rol Gerencia */
 exports.requireGerencia = (req, res, next) => {
     if (req.user.role !== "gerencia") {
         logger.warn(`⚠️ Acceso denegado a base de afiliados: ${req.user.email} (rol: ${req.user.role})`);
@@ -25,7 +43,7 @@ exports.requireGerencia = (req, res, next) => {
 // 🔐 Middleware: Gerencia o Supervisor
 exports.requireSupervisorOrGerencia = (req, res, next) => {
     const role = req.user.role?.toLowerCase();
-    if (role !== "gerencia" && role !== "supervisor" && role !== "admin") {
+    if (role !== "gerencia" && role !== "supervisor" && role !== "administrativo") {
         return res.status(403).json({
             error: "Acceso denegado",
             message: "Solo Supervisores o Gerencia pueden acceder"
@@ -47,26 +65,26 @@ exports.uploadAffiliates = async (req, res) => {
 
         logger.info(`📄 Procesando archivo de afiliados: ${originalName} (usuario: ${req.user.nombre || req.user.name || req.user.email})`);
 
-        // Leer archivo Excel
+        /* Leer archivo Excel */
         const workbook = XLSX.readFile(filePath);
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         const rawData = XLSX.utils.sheet_to_json(sheet);
 
         if (rawData.length === 0) {
-            await fs.unlink(filePath); // Limpiar archivo
+            await fs.unlink(filePath); /* Limpiar archivo */
             return res.status(400).json({ error: "El archivo está vacío" });
         }
 
         logger.info(`📊 Filas encontradas: ${rawData.length}`);
 
-        // Normalizar encabezados y validar datos
+        /* Normalizar encabezados y validar datos */
         const result = await processAffiliatesData(rawData, userId, originalName);
 
-        // Limpiar archivo temporal
+        /* Limpiar archivo temporal */
         await fs.unlink(filePath);
 
-        // Si hay duplicados, generar reporte
+        /* Si hay duplicados, generar reporte */
         let duplicatesReportPath = null;
         if (result.duplicates.length > 0) {
             duplicatesReportPath = await generateDuplicatesReport(result.duplicates, originalName);
@@ -86,7 +104,7 @@ exports.uploadAffiliates = async (req, res) => {
     } catch (error) {
         logger.error("❌ Error procesando archivo de afiliados:", error);
 
-        // Limpiar archivo en caso de error
+        /* Limpiar archivo en caso de error */
         if (req.file && req.file.path) {
             try {
                 await fs.unlink(req.file.path);
@@ -106,7 +124,7 @@ async function processAffiliatesData(rawData, userId, sourceFile) {
     const valid = [];
     const duplicates = [];
 
-    // Obtener todos los teléfonos existentes en la BD
+    /* Obtener todos los teléfonos existentes en la BD */
     const existingPhones = new Set();
     const existingCUILs = new Set();
 
@@ -121,7 +139,7 @@ async function processAffiliatesData(rawData, userId, sourceFile) {
         if (aff.telefono5) existingPhones.add(normalizePhone(aff.telefono5));
     }
 
-    // Mapear afiliados existentes por CUIL para obtener fecha de carga
+    /* Mapear afiliados existentes por CUIL para obtener fecha de carga */
     const cuilToDate = {};
     for (const aff of existingAffiliates) {
         if (aff.cuil) {
@@ -129,7 +147,7 @@ async function processAffiliatesData(rawData, userId, sourceFile) {
         }
     }
 
-    // Teléfonos del archivo actual (para detectar duplicados dentro del mismo archivo)
+    /* Teléfonos del archivo actual (para detectar duplicados dentro del mismo archivo) */
     const currentBatchPhones = new Set();
     const currentBatchCUILs = new Set();
 
@@ -142,7 +160,7 @@ async function processAffiliatesData(rawData, userId, sourceFile) {
                 logger.info("📋 Headers encontrados en Excel:", Object.keys(row));
             }
 
-            // Normalizar campos obligatorios con headers tolerantes
+            /* Normalizar campos obligatorios con headers tolerantes */
             const normalized = {
                 nombre: extractField(row, ["nombre", "name", "nombreyapellido", "apellidoynombre", "fullname"]),
                 cuil: extractField(row, ["cuil", "cuit", "dni", "documento"]),
@@ -156,7 +174,7 @@ async function processAffiliatesData(rawData, userId, sourceFile) {
                 logger.info("📊 Primera fila normalizada:", normalized);
             }
 
-            // Validar campos obligatorios
+            /* Validar campos obligatorios */
             const missingFields = [];
             if (!normalized.nombre) missingFields.push("Nombre");
             if (!normalized.cuil) missingFields.push("CUIL");
@@ -174,7 +192,7 @@ async function processAffiliatesData(rawData, userId, sourceFile) {
                 continue;
             }
 
-            // Normalizar teléfono y CUIL
+            /* Normalizar teléfono y CUIL */
             const normalizedPhone1 = normalizePhone(normalized.telefono1);
             const normalizedCUIL = normalizeString(normalized.cuil);
 
@@ -184,7 +202,7 @@ async function processAffiliatesData(rawData, userId, sourceFile) {
                 logger.info(`🆔 Fila ${i + 1} - CUIL original: "${normalized.cuil}" → Normalizado: "${normalizedCUIL}"`);
             }
 
-            // Detectar duplicados
+            /* Detectar duplicados */
             let isDuplicate = false;
             let duplicateReason = "";
 
@@ -213,19 +231,19 @@ async function processAffiliatesData(rawData, userId, sourceFile) {
                 continue;
             }
 
-            // Agregar a sets de control
+            /* Agregar a sets de control */
             currentBatchPhones.add(normalizedPhone1);
             currentBatchCUILs.add(normalizedCUIL);
 
-            // Extraer campos opcionales
+            /* Extraer campos opcionales */
             const telefono2 = extractField(row, ["telefono_2", "telefono2", "tel_2", "tel2", "phone_2", "phone2"]);
             const telefono3 = extractField(row, ["telefono_3", "telefono3", "tel_3", "tel3", "phone_3", "phone3"]);
             const telefono4 = extractField(row, ["telefono_4", "telefono4", "tel_4", "tel4"]);
             const telefono5 = extractField(row, ["telefono_5", "telefono5", "tel_5", "tel5"]);
             const edad = extractField(row, ["edad", "age", "años"]);
-            const codigoObraSocial = extractField(row, ["codigoobrasocial", "codigo_obra_social", "codigo_os", "codigoos"]);
+            const codigoObraSocial = extractField(row, ["codigoobrasocial", "codigo_obra_social", "codigo_os", "codigoos", "codigodeobrasocial", "codigo de obra social"]);
 
-            // Crear afiliado
+            /* Crear afiliado */
             const affiliate = new Affiliate({
                 nombre: normalized.nombre,
                 cuil: normalizedCUIL,  // ✅ Ya normalizado
@@ -241,6 +259,7 @@ async function processAffiliatesData(rawData, userId, sourceFile) {
                 uploadedBy: userId,
                 sourceFile,
                 batchId,
+                dataSource: 'fresh',
                 additionalData: extractAdditionalFields(row)
             });
 
@@ -344,7 +363,7 @@ exports.downloadReport = async (req, res) => {
         const { filename } = req.params;
         const filePath = path.join(__dirname, "../../uploads/affiliate-reports", filename);
 
-        // Seguridad: verificar que el archivo existe y está en el directorio correcto
+        /* Seguridad: verificar que el archivo existe y está en el directorio correcto */
         const exists = await fs.access(filePath).then(() => true).catch(() => false);
         if (!exists) {
             return res.status(404).json({ error: "Reporte no encontrado" });
@@ -371,7 +390,7 @@ exports.searchAffiliates = async (req, res) => {
 
         const filter = { active: true };
 
-        // Búsqueda por texto (nombre, CUIL, teléfono)
+        /* Búsqueda por texto (nombre, CUIL, teléfono) */
         if (searchTerm) {
             const normalizedQuery = searchTerm.trim();
             filter.$or = [
@@ -383,12 +402,12 @@ exports.searchAffiliates = async (req, res) => {
             ];
         }
 
-        // Filtro por obra social
+        /* Filtro por obra social */
         if (obraSocial && obraSocial !== "all") {
             filter.obraSocial = obraSocial;
         }
 
-        // Filtro por usuario (para estadísticas de RRHH)
+        /* Filtro por usuario (para estadísticas de RRHH) */
         if (userId) {
             filter.uploadedBy = userId;
         }
@@ -399,7 +418,7 @@ exports.searchAffiliates = async (req, res) => {
             .populate("uploadedBy", "nombre email")
             .sort({ uploadDate: -1 });
 
-        // Si limit es 0 o 'all', no paginar (traer todo)
+        /* Si limit es 0 o 'all', no paginar (traer todo) */
         if (limit !== "0" && limit !== 0 && limit !== "all") {
             queryBuilder = queryBuilder
                 .limit(Number(limit))
@@ -485,41 +504,43 @@ exports.getSupervisorStats = async (req, res) => {
         const userId = req.user._id;
         const role = req.user.role.toLowerCase();
 
-        // Si es admin/gerencia, podría ver todo, pero por ahora nos enfocamos en el supervisor
         // Si es supervisor, solo ve lo asignado a él
-        const filter = { active: true };
+        const baseFilter = { active: true };
 
         if (role === 'supervisor') {
-            filter.exportedTo = userId;
+            baseFilter.exportedTo = userId;
         }
 
-        // Datos Frescos: Asignados al supervisor pero NO usados (no asignados a asesores o isUsed: false)
+        // Debug: Ver total de affiliates asignados a este supervisor
+        const totalAssigned = await Affiliate.countDocuments(baseFilter);
+        
+        // ✅ FIX: Usar campo dataSource para clasificar
+        // Datos Frescos: dataSource = 'fresh' o sin dataSource (legacy), y no usados
         const freshCount = await Affiliate.countDocuments({
-            ...filter,
-            isUsed: false
+            ...baseFilter,
+            $or: [
+                { dataSource: 'fresh' },
+                { dataSource: { $exists: false } }
+            ],
+            isUsed: { $ne: true }
         });
 
-        // Datos Reutilizables: Asignados al supervisor y con estado 'Reutilizable' o 'No contesta'/'Llamado' antiguos
-        const reusableFilter = {
-            ...filter,
-            $or: [
-                { leadStatus: 'Reutilizable' },
-                { leadStatus: { $in: ['No contesta', 'Llamado'] }, lastInteraction: { $lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } }
-            ]
-        };
+        // Datos Reutilizables: dataSource = 'reusable' y no usados
+        const reusableCount = await Affiliate.countDocuments({
+            ...baseFilter,
+            dataSource: 'reusable',
+            isUsed: { $ne: true }
+        });
+        
+        // Debug log
+        logger.info(`📊 getSupervisorStats para ${req.user.nombre}: total=${totalAssigned}, fresh=${freshCount}, reusable=${reusableCount}`);
 
-        const reusableCount = await Affiliate.countDocuments(reusableFilter);
-
-        // Desglose por Obra Social (de los disponibles: frescos + reutilizables)
+        // Desglose por Obra Social (de todos los disponibles: no usados)
         const byObraSocial = await Affiliate.aggregate([
             {
                 $match: {
-                    ...filter,
-                    $or: [
-                        { isUsed: false },
-                        reusableFilter.$or[0],
-                        reusableFilter.$or[1]
-                    ]
+                    ...baseFilter,
+                    isUsed: { $ne: true }
                 }
             },
             { $group: { _id: "$obraSocial", count: { $sum: 1 } } },
@@ -695,71 +716,147 @@ exports.getAvailableObrasSociales = async (req, res) => {
     }
 };
 
-// 🆕 GESTIÓN DE LEADS
+// 🆕 GESTIÓN DE LEADS - Lógica completa de clasificación
 
-// 1. Obtener Datos Frescos (No usados)
+const ESTADOS_USADO_AUDITORIAS = [
+    "Falta clave y documentación", "No le llegan los mensajes", "Cortó", "Autovinculación",
+    "Caída", "Rehacer vídeo", "Pendiente", "QR hecho", "AFIP", "Baja laboral con nueva alta",
+    "Baja laboral sin nueva alta", "Padrón", "En revisión", "Remuneración no válida",
+    "Cargada", "Aprobada", "Aprobada, pero no reconoce clave", "Completa", "Reprogramada",
+    "Mensaje enviado", "En videollamada", "Rechazada", "Falta documentación", "Falta clave",
+    "Falta clave (por ARCA)"
+];
+
+const ESTADOS_REUTILIZABLE_24H = [
+    "Reprogramada (falta confirmar hora)", "No atendió", "Tiene dudas", "Mensaje enviado", "En videollamada"
+];
+
+async function calcularClasificacion() {
+    const cuilsUsadosSet = new Set();
+    
+    const leadAssignmentsUsados = await LeadAssignment.find({
+        status: { $in: ['Venta', 'No le interesa'] }
+    }).populate('affiliate', 'cuil').lean();
+    
+    for (const la of leadAssignmentsUsados) {
+        if (la.affiliate?.cuil) cuilsUsadosSet.add(la.affiliate.cuil);
+    }
+    
+    const cuilsAuditUsados = await Audit.distinct('cuil', {
+        cuil: { $exists: true, $ne: null },
+        status: { $in: ESTADOS_USADO_AUDITORIAS }
+    });
+    cuilsAuditUsados.forEach(c => cuilsUsadosSet.add(c));
+
+    const cuilsReutilizablesSet = new Set();
+    const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    
+    const telefonosConMensajeExitoso = await Report.distinct('telefono', {
+        messageStatus: { $in: ['enviado', 'recibido'] }
+    });
+    
+    if (telefonosConMensajeExitoso.length > 0) {
+        const affiliatesConMensaje = await Affiliate.find({
+            active: true,
+            telefono1: { $in: telefonosConMensajeExitoso }
+        }, 'cuil').lean();
+        
+        for (const aff of affiliatesConMensaje) {
+            if (aff.cuil && !cuilsUsadosSet.has(aff.cuil)) {
+                cuilsReutilizablesSet.add(aff.cuil);
+            }
+        }
+    }
+    
+    const leadAssignmentsReutilizables = await LeadAssignment.find({
+        status: { $nin: ['Venta', 'Pendiente', 'No le interesa'] }
+    }).populate('affiliate', 'cuil').lean();
+    
+    for (const la of leadAssignmentsReutilizables) {
+        if (la.affiliate?.cuil && !cuilsUsadosSet.has(la.affiliate.cuil)) {
+            cuilsReutilizablesSet.add(la.affiliate.cuil);
+        }
+    }
+    
+    const auditsReutilizables24h = await Audit.find({
+        cuil: { $exists: true, $ne: null },
+        status: { $in: ESTADOS_REUTILIZABLE_24H },
+        updatedAt: { $lt: hace24h }
+    }, 'cuil').lean();
+    
+    for (const audit of auditsReutilizables24h) {
+        if (audit.cuil && !cuilsUsadosSet.has(audit.cuil)) {
+            cuilsReutilizablesSet.add(audit.cuil);
+        }
+    }
+    
+    return { cuilsUsados: cuilsUsadosSet, cuilsReutilizables: cuilsReutilizablesSet };
+}
+
 exports.getFreshData = async (req, res) => {
     try {
-        const { page = 1, limit = 50, obraSocial, query } = req.query;
-        const filter = { active: true, isUsed: false };
+        const { cuilsUsados, cuilsReutilizables } = await calcularClasificacion();
+        const cuilsNoFrescos = new Set([...cuilsUsados, ...cuilsReutilizables]);
 
-        // ✅ Si es supervisor, solo ver sus asignados
-        if (req.user.role === 'supervisor') {
-            filter.assignedTo = req.user._id;
-        }
-
-        if (obraSocial && obraSocial !== 'all') filter.obraSocial = obraSocial;
-        if (query) {
-            const regex = new RegExp(query.trim(), 'i');
-            filter.$or = [{ nombre: regex }, { cuil: regex }, { telefono1: regex }];
-        }
-
-        const total = await Affiliate.countDocuments(filter);
-        const affiliates = await Affiliate.find(filter)
+        const freshAffiliates = await Affiliate.find({ 
+            active: true,
+            cuil: { $nin: Array.from(cuilsNoFrescos), $exists: true, $ne: null }
+        })
+            .select('nombre cuil obraSocial telefono1 localidad')
             .sort({ uploadDate: -1 })
-            .skip((page - 1) * limit)
-            .limit(Number(limit))
             .lean();
 
-        res.json({ affiliates, total, pages: Math.ceil(total / limit) });
+        const data = freshAffiliates.map(a => ({
+            _id: a._id,
+            nombre: a.nombre,
+            cuil: a.cuil,
+            obraSocial: a.obraSocial || '-',
+            telefono: a.telefono1 || '-',
+            localidad: a.localidad || '-'
+        }));
+
+        res.json({ data, total: data.length });
     } catch (error) {
         logger.error("Error getting fresh data:", error);
         res.status(500).json({ error: error.message });
     }
 };
 
-// 2. Obtener Datos Reutilizables
 exports.getReusableData = async (req, res) => {
     try {
-        const { page = 1, limit = 50, obraSocial, query } = req.query;
-        // Definir qué constituye "Reutilizable": explícitamente marcado O estados 'No contesta' antiguos
-        const filter = {
+        const { cuilsUsados, cuilsReutilizables } = await calcularClasificacion();
+
+        const reusableAffiliates = await Affiliate.find({
             active: true,
-            $or: [
-                { leadStatus: 'Reutilizable' },
-                { leadStatus: { $in: ['No contesta', 'Llamado'] }, lastInteraction: { $lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } // Ejemplo: 7 días
-            ]
-        };
-
-        // ✅ Si es supervisor, solo ver sus asignados
-        if (req.user.role === 'supervisor') {
-            filter.assignedTo = req.user._id;
-        }
-
-        if (obraSocial && obraSocial !== 'all') filter.obraSocial = obraSocial;
-        if (query) {
-            const regex = new RegExp(query.trim(), 'i');
-            filter.$and = [filter.$or[0], { $or: [{ nombre: regex }, { cuil: regex }] }]; // Ajuste complejo de query
-        }
-
-        const total = await Affiliate.countDocuments(filter);
-        const affiliates = await Affiliate.find(filter)
-            .sort({ lastInteraction: 1 }) // Los más antiguos primero
-            .skip((page - 1) * limit)
-            .limit(Number(limit))
+            cuil: { $in: Array.from(cuilsReutilizables) }
+        })
+            .select('nombre cuil obraSocial telefono1 localidad')
+            .sort({ uploadDate: -1 })
             .lean();
 
-        res.json({ affiliates, total, pages: Math.ceil(total / limit) });
+        const cuilToAuditStatus = {};
+        const audits = await Audit.find({ 
+            cuil: { $in: Array.from(cuilsReutilizables) } 
+        }).select('cuil status').sort({ updatedAt: -1 }).lean();
+        
+        for (const audit of audits) {
+            if (audit.cuil && !cuilToAuditStatus[audit.cuil]) {
+                cuilToAuditStatus[audit.cuil] = audit.status;
+            }
+        }
+
+        const data = reusableAffiliates.map(a => ({
+            _id: a._id,
+            nombre: a.nombre,
+            cuil: a.cuil,
+            obraSocial: a.obraSocial || '-',
+            telefono: a.telefono1 || '-',
+            localidad: a.localidad || '-',
+            estado: cuilToAuditStatus[a.cuil] || 'Sin estado',
+            source: 'affiliate'
+        }));
+
+        res.json({ data, total: data.length });
     } catch (error) {
         logger.error("Error getting reusable data:", error);
         res.status(500).json({ error: error.message });
@@ -992,99 +1089,6 @@ exports.getFailedAffiliations = async (req, res) => {
     }
 };
 
-// 7. Obtener Datos Reutilizables (Audits con estados específicos)
-exports.getReusableData = async (req, res) => {
-    try {
-        // Estados específicos para datos reutilizables
-        const reusableStatuses = [
-            'No atendió',
-            'Tiene dudas',
-            'Reprogramada (falta confirmar hora)'
-        ];
-
-        // Fetch audits with specific statuses
-        const audits = await Audit.find({
-            status: { $in: reusableStatuses }
-        })
-            .populate('asesor', 'nombre')
-            .sort({ scheduledAt: -1 })
-            .lean();
-
-        // Get CUILs to fetch affiliate data
-        const cuilList = audits.map(a => a.cuil).filter(Boolean);
-
-        // Fetch affiliate data for localidad
-        const affiliates = await Affiliate.find({
-            cuil: { $in: cuilList }
-        }).select('cuil localidad').lean();
-
-        // Create a map for quick lookup
-        const localidadMap = {};
-        affiliates.forEach(aff => {
-            if (aff.cuil) {
-                localidadMap[aff.cuil] = aff.localidad || 'DESCONOCIDO';
-            }
-        });
-
-        // Normalize data for reusable display
-        const reusableData = audits.map(a => ({
-            _id: a._id,
-            nombre: a.nombre,
-            cuil: a.cuil || '-',
-            telefono: a.telefono,
-            obraSocial: a.obraSocialAnterior || a.obraSocialVendida || '-',
-            localidad: localidadMap[a.cuil] || 'DESCONOCIDO',
-            estado: a.status,
-            source: 'audit'
-        }));
-
-        res.json({
-            data: reusableData,
-            total: reusableData.length
-        });
-
-    } catch (error) {
-        logger.error("Error getting reusable data:", error);
-        res.status(500).json({ error: error.message });
-    }
-};
-
-// 8. Obtener Datos Frescos (Affiliates NOT in audits)
-exports.getFreshData = async (req, res) => {
-    try {
-        // Get all CUILs that exist in Audits
-        const auditsWithCuil = await Audit.find({ cuil: { $exists: true, $ne: null } }).distinct('cuil').lean();
-
-        // Find affiliates whose CUIL is NOT in the audits list
-        const freshAffiliates = await Affiliate.find({
-            active: true,
-            cuil: { $nin: auditsWithCuil, $exists: true, $ne: null }
-        })
-            .select('nombre cuil obraSocial telefono1 localidad')
-            .sort({ uploadDate: -1 })
-            .lean();
-
-        // Normalize data
-        const freshData = freshAffiliates.map(a => ({
-            _id: a._id,
-            nombre: a.nombre,
-            cuil: a.cuil,
-            obraSocial: a.obraSocial || '-',
-            telefono: a.telefono1 || '-',
-            localidad: a.localidad || '-'
-        }));
-
-        res.json({
-            data: freshData,
-            total: freshData.length
-        });
-
-    } catch (error) {
-        logger.error("Error getting fresh data:", error);
-        res.status(500).json({ error: error.message });
-    }
-};
-
 // 9. Cancelar envíos programados
 exports.cancelExports = async (req, res) => {
     try {
@@ -1120,6 +1124,49 @@ exports.cancelExports = async (req, res) => {
 
     } catch (error) {
         logger.error("Error cancelling exports:", error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// 10. Limpiar datos frescos anteriores (marcarlos como reutilizables)
+exports.cleanupFreshData = async (req, res) => {
+    try {
+        const batchId = `cleanup_${Date.now()}`;
+        
+        // Obtener CUILs que YA están en auditorías
+        const auditsWithCuil = await Audit.find({
+            cuil: { $exists: true, $ne: null }
+        }).distinct('cuil').lean();
+
+        // Marcar como 'reusable' todos los Affiliates frescos no usados
+        const cleanupResult = await Affiliate.updateMany(
+            {
+                active: true,
+                exported: { $ne: true },
+                cuil: { $nin: auditsWithCuil, $exists: true, $ne: null },
+                dataSource: { $ne: 'reusable' }
+            },
+            {
+                $set: {
+                    dataSource: 'reusable',
+                    isUsed: true,
+                    obsoletedAt: new Date(),
+                    obsoletedByBatchId: batchId
+                }
+            }
+        );
+
+        logger.info(`🧹 Limpieza manual: ${cleanupResult.modifiedCount} datos frescos marcados como reutilizables por ${req.user.email}`);
+
+        res.json({
+            success: true,
+            message: `${cleanupResult.modifiedCount} datos frescos anteriores movidos a reutilizables`,
+            cleanedCount: cleanupResult.modifiedCount,
+            batchId
+        });
+
+    } catch (error) {
+        logger.error("Error cleaning up fresh data:", error);
         res.status(500).json({ error: error.message });
     }
 };

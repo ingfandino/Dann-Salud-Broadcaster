@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * PÁGINA DE RECUPERACIÓN (app/recover/page.tsx)
+ * ============================================================
+ * Formulario para solicitar recuperación de contraseña.
+ * Envía enlace de restablecimiento por email.
+ */
+
 "use client"
 
 import type React from "react"
@@ -11,6 +19,7 @@ import { FloatingShapes } from "@/components/auth/floating-shapes"
 import { useAuth } from "@/lib/auth"
 import { toast } from "sonner"
 
+/** Página de recuperación de contraseña */
 export default function RecoverPage() {
     const router = useRouter()
     const { recoverPassword } = useAuth()

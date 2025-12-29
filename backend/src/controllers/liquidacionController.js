@@ -1,7 +1,15 @@
+/**
+ * ============================================================
+ * CONTROLADOR DE LIQUIDACIÓN (liquidacionController)
+ * ============================================================
+ * Gestiona las auditorías listas para liquidar (estado "QR hecho").
+ * Al final de cada mes, las auditorías se archivan automáticamente.
+ */
+
 const Audit = require('../models/Audit');
 const logger = require('../utils/logger');
 
-// GET /api/liquidacion -> lista de auditorías con estado "QR hecho"
+/** Lista auditorías con estado "QR hecho" listas para liquidación */
 exports.list = async (req, res) => {
     try {
         const User = require('../models/User');
@@ -57,75 +65,74 @@ exports.list = async (req, res) => {
         console.log('🔍 Liquidación Request:', { dateFrom, dateTo, dateField });
 
         if (dateFrom && dateTo) {
-            // ✅ Si hay fechas, filtramos por rango y status, IGNORANDO isLiquidacion/month
             // Esto permite ver históricos
             const from = new Date(dateFrom);
+            from.setUTCHours(3, 0, 0, 0); // 00:00 Argentina = 03:00 UTC
+            
             const to = new Date(dateTo);
-            to.setDate(to.getDate() + 1); // Incluir hasta el final del día
+            to.setUTCDate(to.getUTCDate() + 1);
+            to.setUTCHours(2, 59, 59, 999); // 23:59:59 Argentina = 02:59:59 UTC del día siguiente
 
             const field = dateField || 'fechaCreacionQR'; // Default a fechaCreacionQR si no se especifica
 
             if (field === 'fechaCreacionQR') {
-                // ✅ CORREGIDO: Priorizar fechaCreacionQR, solo usar scheduledAt si fechaCreacionQR no existe
-                filter.$and = [
+                // La lógica es: SI fechaCreacionQR tiene valor -> usar ese, SINO -> usar scheduledAt
+                filter.$or = [
+                    // Caso 1: fechaCreacionQR existe y tiene valor válido en el rango
+                    { fechaCreacionQR: { $ne: null, $gte: from, $lte: to } },
+                    // Caso 2: fechaCreacionQR NO existe o es null -> usar scheduledAt
                     {
-                        $or: [
-                            { fechaCreacionQR: { $gte: from, $lt: to } },
-                            {
-                                $and: [
-                                    { fechaCreacionQR: { $exists: false } },
-                                    { scheduledAt: { $gte: from, $lt: to } }
-                                ]
-                            }
+                        $and: [
+                            { $or: [{ fechaCreacionQR: { $exists: false } }, { fechaCreacionQR: null }] },
+                            { scheduledAt: { $gte: from, $lte: to } }
                         ]
                     }
                 ];
             } else {
-                filter[field] = { $gte: from, $lt: to };
+                filter[field] = { $gte: from, $lte: to };
             }
 
             filter.status = { $in: ["QR hecho", "Cargada", "Aprobada"] };
 
             console.log(`📅 Filtrando Liquidación por ${field} (con fallback): ${from.toISOString()} - ${to.toISOString()}`);
         } else {
-            // ✅ Default: Semana laboral actual (Viernes a Jueves)
+            // ✅ Default: Últimas 4 semanas laborales (para mostrar todas las pestañas en el frontend)
+            // Cada semana va de Viernes 00:00 a Jueves 23:59 (hora Argentina = UTC-3)
             const today = new Date();
             const dayOfWeek = today.getDay(); // 0=Dom, 1=Lun, ..., 4=Jue, 5=Vie, 6=Sab
-            const hours = today.getHours();
-            const minutes = today.getMinutes();
 
-            // Calcular inicio de semana (Viernes)
-            let weekStart = new Date(today);
+            // Calcular inicio de la semana ACTUAL (Viernes más reciente)
+            let currentWeekStart = new Date(today);
             if (dayOfWeek === 5) {
-                // Viernes
-                weekStart.setHours(0, 0, 0, 0);
+                // Viernes - hoy es inicio de semana
             } else if (dayOfWeek === 6) {
-                // Sábado - la semana comenzó ayer (viernes)
-                weekStart.setDate(weekStart.getDate() - 1);
-                weekStart.setHours(0, 0, 0, 0);
-            } else if (dayOfWeek === 0) {
-                // Domingo - la semana comenzó hace 2 días (viernes)
-                weekStart.setDate(weekStart.getDate() - 2);
-                weekStart.setHours(0, 0, 0, 0);
-            } else if (dayOfWeek >= 1 && dayOfWeek <= 4) {
-                // Lunes a Jueves - restar días hasta viernes anterior
-                weekStart.setDate(weekStart.getDate() - (dayOfWeek + 2));
-                weekStart.setHours(0, 0, 0, 0);
+                // Sábado - la semana comenzó ayer
+                currentWeekStart.setUTCDate(currentWeekStart.getUTCDate() - 1);
+            } else {
+                // Domingo a Jueves - restar días hasta viernes anterior
+                const daysToSubtract = dayOfWeek === 0 ? 2 : dayOfWeek + 2;
+                currentWeekStart.setUTCDate(currentWeekStart.getUTCDate() - daysToSubtract);
             }
+            // Ajustar a 00:00 Argentina (03:00 UTC)
+            currentWeekStart.setUTCHours(3, 0, 0, 0);
 
-            // Calcular fin de semana (Jueves 23:01)
-            let weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekEnd.getDate() + 6); // 6 días después del viernes = jueves
-            weekEnd.setHours(23, 1, 0, 0);
+            // Retroceder 3 semanas para obtener 4 semanas en total
+            let monthStart = new Date(currentWeekStart);
+            monthStart.setUTCDate(monthStart.getUTCDate() - 21); // 3 semanas antes
+
+            // Fin de la semana actual (Jueves 23:59:59 Argentina = 02:59:59 UTC del día siguiente)
+            let monthEnd = new Date(currentWeekStart);
+            monthEnd.setUTCDate(monthEnd.getUTCDate() + 7); // Siguiente viernes
+            monthEnd.setUTCHours(2, 59, 59, 999); // 23:59:59 Argentina del jueves
 
             filter.$and = [
                 {
                     $or: [
-                        { fechaCreacionQR: { $gte: weekStart, $lte: weekEnd } },
+                        { fechaCreacionQR: { $gte: monthStart, $lte: monthEnd } },
                         {
                             $and: [
-                                { fechaCreacionQR: { $exists: false } },
-                                { scheduledAt: { $gte: weekStart, $lte: weekEnd } }
+                                { $or: [{ fechaCreacionQR: { $exists: false } }, { fechaCreacionQR: null }] },
+                                { scheduledAt: { $gte: monthStart, $lte: monthEnd } }
                             ]
                         }
                     ]
@@ -133,7 +140,7 @@ exports.list = async (req, res) => {
             ];
             filter.status = { $in: ["QR hecho", "Cargada", "Aprobada"] };
 
-            console.log(`📅 Filtrando Liquidación por Semana Actual: ${weekStart.toISOString()} - ${weekEnd.toISOString()}`);
+            console.log(`📅 Filtrando Liquidación (últimas 4 semanas): ${monthStart.toISOString()} - ${monthEnd.toISOString()}`);
         }
 
         // Traer auditorías
@@ -155,9 +162,35 @@ exports.list = async (req, res) => {
             .lean();
 
         const currentUser = req.user;
-        const isSupervisor = currentUser?.role === 'supervisor' || currentUser?.role === 'Supervisor';
+        const userRole = currentUser?.role?.toLowerCase();
+        const isSupervisor = userRole === 'supervisor';
+        const isAsesor = userRole === 'asesor';
+        const isAuditor = userRole === 'auditor';
 
-        if (isSupervisor && currentUser?.numeroEquipo) {
+        // ✅ Filtro para ASESORES: Solo ver sus propias auditorías
+        if (isAsesor) {
+            audits = audits.filter((audit) => {
+                // El asesor de la auditoría debe ser el usuario actual
+                return audit.asesor?._id?.toString() === currentUser._id?.toString();
+            });
+
+            logger.info(
+                `👤 Asesor ${currentUser.email} viendo ${audits.length} auditorías propias en Liquidación`
+            );
+        }
+        // ✅ Filtro para AUDITORES con equipo: Solo ver donde aparecen como asesor
+        else if (isAuditor && currentUser?.numeroEquipo) {
+            audits = audits.filter((audit) => {
+                // El auditor ve solo donde él aparece como asesor
+                return audit.asesor?._id?.toString() === currentUser._id?.toString();
+            });
+
+            logger.info(
+                `🔍 Auditor con equipo ${currentUser.email} viendo ${audits.length} auditorías como asesor en Liquidación`
+            );
+        }
+        // ✅ Filtro para SUPERVISORES: Ver auditorías de su equipo
+        else if (isSupervisor && currentUser?.numeroEquipo) {
             const targetNumeroEquipo = String(currentUser.numeroEquipo || '').trim().toLowerCase();
 
             audits = audits.filter((audit) => {
@@ -175,6 +208,7 @@ exports.list = async (req, res) => {
                 );
             }
         }
+        // ✅ Gerencia/Auditor/Administrativo ven todo (sin filtro adicional)
 
         // Buscar supervisores dinámicamente por numeroEquipo
         const equipos = [...new Set(
@@ -236,14 +270,22 @@ exports.exportLiquidation = (req, res) => {
         const field = dateField || 'fechaCreacionQR';
 
         if (field === 'fechaCreacionQR') {
+            // La lógica es: SI fechaCreacionQR tiene valor -> usar ese, SINO -> usar scheduledAt
             filter.$or = [
-                { fechaCreacionQR: { $gte: from, $lt: to } },
-                { scheduledAt: { $gte: from, $lt: to } }
+                // Caso 1: fechaCreacionQR existe y tiene valor válido en el rango
+                { fechaCreacionQR: { $ne: null, $gte: from, $lt: to } },
+                // Caso 2: fechaCreacionQR NO existe o es null -> usar scheduledAt
+                {
+                    $and: [
+                        { $or: [{ fechaCreacionQR: { $exists: false } }, { fechaCreacionQR: null }] },
+                        { scheduledAt: { $gte: from, $lt: to } }
+                    ]
+                }
             ];
         } else {
             filter[field] = { $gte: from, $lt: to };
         }
-        console.log(`📅 Export Filter: ${field} between ${from.toISOString()} and ${to.toISOString()}`);
+        console.log(`📅 Export Filter: ${field} (prioriza fechaCreacionQR) between ${from.toISOString()} and ${to.toISOString()}`);
     } else {
         // Default: Mes actual
         const now = new Date();

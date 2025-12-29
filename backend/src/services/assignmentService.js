@@ -1,12 +1,19 @@
+/**
+ * ============================================================
+ * SERVICIO DE ASIGNACIONES (assignmentService.js)
+ * ============================================================
+ * Distribuye leads a asesores para "Datos del día".
+ * Mezcla afiliados frescos con reutilizables.
+ */
+
 const Affiliate = require("../models/Affiliate");
 const Audit = require("../models/Audit");
 const User = require("../models/User");
 const LeadAssignment = require("../models/LeadAssignment");
+const Contact = require("../models/Contact");
 const logger = require("../utils/logger");
 
-/**
- * Fisher-Yates shuffle algorithm
- */
+/** Fisher-Yates shuffle para mezclar arrays */
 function shuffleArray(array) {
     const arr = [...array];
     for (let i = arr.length - 1; i > 0; i--) {
@@ -157,24 +164,56 @@ async function distributeLeads(config, supervisorId) {
 }
 
 /**
- * Obtener asignaciones del día para un asesor
+ * Obtener asignaciones del día para un asesor/supervisor
+ * ✅ Incluye leads asignados directamente + leads reasignados al usuario
+ * ✅ Marca automáticamente como "Spam" si el teléfono ya fue contactado por mensajería masiva
  */
-async function getDailyAssignments(asesorId) {
+async function getDailyAssignments(userId) {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
 
-    return await LeadAssignment.find({
-        assignedTo: asesorId,
+    const assignments = await LeadAssignment.find({
+        $or: [
+            { assignedTo: userId },
+            { reassignedTo: userId }
+        ],
         active: true,
-        status: { $nin: ['Venta', 'No Interesa', 'Reciclable'] }, // Mostrar pendientes y en gestión
-        // Opcional: filtrar solo asignados hoy O pendientes antiguos
-        // Por ahora mostramos todo lo activo asignado a este asesor
+        status: { $nin: ['Venta', 'No Interesa', 'Reciclable'] },
     })
         .populate('affiliate', 'nombre telefono1 cuil obraSocial localidad')
-        .sort({ status: 1, assignedAt: -1 }); // Pendientes primero, luego por fecha
+        .sort({ isPriority: -1, status: 1, assignedAt: -1 });
+
+    const phoneNumbers = assignments
+        .map(a => a.affiliate?.telefono1)
+        .filter(Boolean)
+        .map(phone => String(phone).replace(/\D/g, ""));
+
+    if (phoneNumbers.length > 0) {
+        const contactedPhones = await Contact.find({
+            telefono: { $in: phoneNumbers },
+            massMessagedAt: { $ne: null }
+        }).select('telefono').lean();
+
+        const contactedSet = new Set(contactedPhones.map(c => String(c.telefono)));
+
+        for (const assignment of assignments) {
+            const phone = assignment.affiliate?.telefono1 
+                ? String(assignment.affiliate.telefono1).replace(/\D/g, "") 
+                : null;
+            
+            if (phone && contactedSet.has(phone) && assignment.status !== 'Spam') {
+                assignment.status = 'Spam';
+                assignment.subStatus = 'Ya contactado por campaña masiva';
+                await assignment.save();
+                logger.info(`📛 Lead ${assignment._id} marcado como Spam (teléfono ${phone} ya contactado por mensajería masiva)`);
+            }
+        }
+    }
+
+    return assignments;
 }
 
 module.exports = {

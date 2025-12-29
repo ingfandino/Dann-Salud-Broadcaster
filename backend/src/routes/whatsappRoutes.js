@@ -1,4 +1,10 @@
-// backend/src/routes/whatsappRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE WHATSAPP (whatsappRoutes.js)
+ * ============================================================
+ * Gestión de la conexión global de WhatsApp Web.
+ * Inicialización, estado, QR y desconexión.
+ */
 
 const express = require("express");
 const router = express.Router();

@@ -1,10 +1,17 @@
-// backend/src/services/jobScheduler.js
+/**
+ * ============================================================
+ * PROGRAMADOR DE JOBS (jobScheduler.js)
+ * ============================================================
+ * Ejecuta jobs programados de envío masivo.
+ * Maneja concurrencia, reintentos y monitoreo de salud.
+ */
 
 const SendJob = require("../models/SendJob");
 const { processJob } = require("./sendMessageService");
 const { emitJobsUpdate } = require("../config/socket");
 const logger = require("../utils/logger");
 
+/* ========== CONFIGURACIÓN ========== */
 const CHECK_INTERVAL = 15 * 1000;
 // ✅ Concurrencia optimizada: 8 jobs simultáneos para mejor throughput
 const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_JOBS || 8);

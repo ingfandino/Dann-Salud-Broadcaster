@@ -1,17 +1,24 @@
-// backend/src/controllers/employeeController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE EMPLEADOS (employeeController)
+ * ============================================================
+ * Gestiona la información de Recursos Humanos de los empleados.
+ * Extiende los datos de usuario con información laboral,
+ * documentación, y estado del empleado.
+ * 
+ * Usado por el módulo de RR.HH para gestión de personal.
+ */
 
 const Employee = require('../models/Employee');
 const User = require('../models/User');
 const Audit = require('../models/Audit');
 const InternalMessage = require('../models/InternalMessage');
 
-/**
- * Obtener todos los empleados
- */
+/** Obtiene todos los empleados con datos de usuario */
 exports.getAllEmployees = async (req, res) => {
     try {
         const employees = await Employee.find()
-            .populate('userId', 'nombre email role numeroEquipo active teamHistory')
+            .populate('userId', 'nombre email role numeroEquipo active teamHistory createdAt')
             .populate('createdBy', 'nombre email')
             .sort({ createdAt: -1 });
 
@@ -47,7 +54,7 @@ exports.getEmployeeById = async (req, res) => {
         const { id } = req.params;
 
         const employee = await Employee.findById(id)
-            .populate('userId', 'nombre email role numeroEquipo active teamHistory')
+            .populate('userId', 'nombre email role numeroEquipo active teamHistory createdAt')
             .populate('createdBy', 'nombre email')
             .populate('updatedBy', 'nombre email');
 
@@ -110,7 +117,7 @@ exports.createEmployee = async (req, res) => {
 
         await employee.save();
 
-        await employee.populate('userId', 'nombre email role numeroEquipo active teamHistory');
+        await employee.populate('userId', 'nombre email role numeroEquipo active teamHistory createdAt');
 
         res.status(201).json(employee);
     } catch (error) {
@@ -165,7 +172,7 @@ exports.updateEmployee = async (req, res) => {
             updates,
             { new: true, runValidators: true }
         )
-            .populate('userId', 'nombre email role numeroEquipo active teamHistory')
+            .populate('userId', 'nombre email role numeroEquipo active teamHistory createdAt')
             .populate('createdBy', 'nombre email')
             .populate('updatedBy', 'nombre email');
 
@@ -271,7 +278,7 @@ exports.getEmployeeStats = async (req, res) => {
         }
 
         const employee = await Employee.findOne({ userId })
-            .populate('userId', 'nombre email role numeroEquipo active teamHistory');
+            .populate('userId', 'nombre email role numeroEquipo active teamHistory createdAt');
 
         if (!employee) {
             return res.status(404).json({ message: 'Empleado no encontrado' });

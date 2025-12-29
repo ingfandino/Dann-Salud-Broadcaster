@@ -1,4 +1,10 @@
-// src/controllers/reportsController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE REPORTES (reportsController)
+ * ============================================================
+ * Genera reportes de campañas de mensajería masiva.
+ * Permite filtrar por fechas, asesor, grupo y job.
+ */
 
 const Report = require("../models/Report");
 const SendJob = require("../models/SendJob");
@@ -7,6 +13,7 @@ const Contact = require("../models/Contact");
 const User = require("../models/User");
 const logger = require("../utils/logger");
 
+/** Obtiene reportes con filtros opcionales */
 const getReports = async (req, res) => {
     try {
         const { startDate, endDate, asesor, grupo, q, jobId } = req.query;

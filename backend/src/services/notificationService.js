@@ -1,12 +1,14 @@
-// backend/src/services/notificationService.js
+/**
+ * ============================================================
+ * SERVICIO DE NOTIFICACIONES (notificationService.js)
+ * ============================================================
+ * Envía notificaciones automáticas vía mensajería interna.
+ * Usado para alertas de auditorías, palabras prohibidas, etc.
+ */
 
 const InternalMessage = require("../models/InternalMessage");
 const User = require("../models/User");
 const logger = require("../utils/logger");
-
-/**
- * Servicio de notificaciones automáticas para mensajería interna
- */
 
 // 📧 Enviar mensaje interno automático
 async function sendInternalNotification({ toUserIds, subject, content, metadata = {} }) {
@@ -20,7 +22,7 @@ async function sendInternalNotification({ toUserIds, subject, content, metadata 
         }
         
         // Como último recurso, usar admin
-        const fromUser = systemUser || await User.findOne({ role: "admin" });
+        const fromUser = systemUser || await User.findOne({ role: "administrativo" });
         
         if (!fromUser) {
             logger.error("❌ No se encontró usuario del sistema para enviar notificaciones");
@@ -202,7 +204,7 @@ Esta notificación es automática y no requiere respuesta.
 async function notifyAuditCompleted({ audit }) {
     try {
         // SOLO notificar a admins
-        const adminUsers = await User.find({ role: "admin", active: true }).select("_id");
+        const adminUsers = await User.find({ role: "administrativo", active: true }).select("_id");
         
         if (adminUsers.length === 0) {
             logger.warn("⚠️ No hay admins activos para notificación de auditoría completa");
@@ -253,15 +255,15 @@ Esta notificación es automática y no requiere respuesta.
 // 🔔 5. Notificación cuando auditoría pasa a Recovery
 async function notifyAuditRecovery({ audit }) {
     try {
-        // Obtener usuarios con rol 'revendedor'
-        const revendedorUsers = await User.find({ role: "revendedor", active: true }).select("_id");
+        // Obtener usuarios con rol 'auditor' para notificar recovery
+        const auditorUsers = await User.find({ role: "auditor", active: true }).select("_id");
         
-        if (revendedorUsers.length === 0) {
-            logger.warn("⚠️ No hay revendedores activos para notificar");
+        if (auditorUsers.length === 0) {
+            logger.warn("⚠️ No hay auditores activos para notificar recovery");
             return;
         }
         
-        const recipients = revendedorUsers.map(u => u._id);
+        const recipients = auditorUsers.map(u => u._id);
         
         const content = `
 🔄 VIDEO-AUDITORÍA REQUIERE RECUPERACIÓN
@@ -291,7 +293,7 @@ Esta notificación es automática y no requiere respuesta.
             content
         });
         
-        logger.info(`✅ Notificación de recovery enviada a ${recipients.length} revendedor(es) para CUIL: ${audit.cuil}`);
+        logger.info(`✅ Notificación de recovery enviada a ${recipients.length} auditor(es) para CUIL: ${audit.cuil}`);
     } catch (error) {
         logger.error("❌ Error notificando recovery de auditoría:", error);
     }
@@ -363,7 +365,7 @@ Esta notificación es automática y no requiere respuesta.
 async function notifyRecoveryAuditCompleted({ audit }) {
     try {
         // SOLO notificar a admins
-        const adminUsers = await User.find({ role: "admin", active: true }).select("_id");
+        const adminUsers = await User.find({ role: "administrativo", active: true }).select("_id");
         
         if (!adminUsers || adminUsers.length === 0) {
             logger.warn("⚠️ No hay usuarios admin activos para notificar");

@@ -1,14 +1,16 @@
-// backend/src/services/auditReminderCron.js
+/**
+ * ============================================================
+ * CRON DE RECORDATORIOS (auditReminderCron.js)
+ * ============================================================
+ * Notifica auditorías que inician en 5 minutos sin auditor.
+ */
 
 const cron = require("node-cron");
 const Audit = require("../models/Audit");
 const { notifyAuditReminder } = require("./notificationService");
 const logger = require("../utils/logger");
 
-/**
- * Cron job que se ejecuta cada minuto para verificar auditorías
- * que inicien en 5 minutos y aún no estén asignadas
- */
+/** Inicia el cron de recordatorios */
 function startAuditReminderCron() {
     // Ejecutar cada minuto
     cron.schedule("* * * * *", async () => {

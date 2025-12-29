@@ -1,3 +1,4 @@
+/** Página: Lista General de Afiliados */
 'use client';
 
 import { DashboardContent } from '@/components/dashboard/dashboard-content';

@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * MODAL DE EDICIÓN DE RECUPERACIÓN (recovery-edit-modal.tsx)
+ * ============================================================
+ * Modal para editar auditorías en estado de recuperación.
+ * Permite cambiar estado y reasignar a otros usuarios.
+ */
+
 "use client"
 
 import { useState, useEffect } from "react"

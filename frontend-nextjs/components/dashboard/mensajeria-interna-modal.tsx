@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * MODAL DE MENSAJERÍA INTERNA (mensajeria-interna-modal.tsx)
+ * ============================================================
+ * Sistema de mensajes internos entre usuarios.
+ * Permite enviar, leer y responder mensajes.
+ */
+
 "use client"
 
 import { useState, useEffect } from "react"

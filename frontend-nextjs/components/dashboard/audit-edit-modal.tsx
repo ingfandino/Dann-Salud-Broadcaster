@@ -1,12 +1,24 @@
+/**
+ * ============================================================
+ * MODAL DE EDICIÓN DE AUDITORÍA (audit-edit-modal.tsx)
+ * ============================================================
+ * Modal para editar auditorías (ventas).
+ * Permite cambiar estado, reprogramar, asignar auditor/admin.
+ */
+
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { useTheme } from "./theme-provider"
 import { cn } from "@/lib/utils"
 import { X, Save, Clock, User, CheckCircle2, AlertCircle, Calendar as CalendarIcon, Users, MessageSquare } from "lucide-react"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
+import { CelebrationAnimation } from "./celebration-animation"
+
+/* Estados que disparan la animación de celebración */
+const CELEBRATION_STATUSES = ["Completa", "QR hecho"]
 
 interface Audit {
     _id: string
@@ -81,6 +93,7 @@ const STATUS_OPTIONS = [
     "Rechazada",
     "Falta documentación",
     "Falta clave",
+    "Falta clave (por ARCA)",
     "Reprogramada",
     "Reprogramada (falta confirmar hora)",
     "Completa",
@@ -107,7 +120,8 @@ const STATUS_OPTIONS = [
     "Rechazada",
     "Falta documentación",
     "Falta clave",
-    "Falta clave y documentación"
+    "Falta clave y documentación",
+    "El afiliado cambió la clave"
 ]
 
 const ARGENTINE_OBRAS_SOCIALES = [
@@ -153,7 +167,8 @@ const ARGENTINE_OBRAS_SOCIALES = [
     "OSPIC",
     "OSG (109202)",
     "OSPERYH (106500)",
-    "OSPCRA (104009)"
+    "OSPCRA (104009)",
+    "OSPMA (700108)"
 ]
 
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
@@ -190,6 +205,8 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
     const isGerencia = userRole === 'gerencia';
     const isAdmin = userRole === 'administrativo';
     const isAuditorOrSupervisor = ['auditor', 'supervisor'].includes(userRole || '');
+    const isQRHecho = audit.status?.toLowerCase() === 'qr hecho';
+    const isLockedByQR = isQRHecho && !isAdmin && !isGerencia;
 
     // Status options logic
     const getAvailableStatuses = () => {
@@ -200,13 +217,13 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                 "Remuneración no válida", "Cargada", "Aprobada",
                 "Aprobada, pero no reconoce clave", "Rehacer vídeo",
                 "Rechazada", "Falta documentación", "Falta clave",
-                "Falta clave y documentación"
+                "Falta clave y documentación", "El afiliado cambió la clave"
             ];
         }
         if (isAuditorOrSupervisor) {
             return [
                 "Mensaje enviado", "En videollamada", "Rechazada",
-                "Falta documentación", "Falta clave", "Reprogramada",
+                "Falta documentación", "Falta clave", "Falta clave (por ARCA)", "Reprogramada",
                 "Reprogramada (falta confirmar hora)", "Completa",
                 "No atendió", "Tiene dudas", "Falta clave y documentación",
                 "No le llegan los mensajes", "Cortó", "Autovinculación",
@@ -245,6 +262,8 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
     const [loading, setLoading] = useState(false)
     const [reprogramar, setReprogramar] = useState(false)
     const [activeTab, setActiveTab] = useState<"details" | "history">("details")
+    const [showCelebration, setShowCelebration] = useState(false)
+    const pendingResponseRef = useRef<any>(null) // Guardar datos de respuesta para después de la animación
 
     const [asesores, setAsesores] = useState<any[]>([])
     const [grupos, setGrupos] = useState<any[]>([])
@@ -486,9 +505,30 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
             }
 
             const response = await api.audits.update(audit._id, payload)
-            toast.success("Auditoría actualizada")
-            onSave(response.data)
-            onClose()
+            
+            // ✅ Verificar si el estado cambió a uno de celebración
+            const previousStatus = audit.status
+            const newStatus = form.status
+            const shouldCelebrate = 
+                CELEBRATION_STATUSES.includes(newStatus) && 
+                previousStatus !== newStatus
+            
+            console.log("[AuditEditModal] Estado anterior:", previousStatus, "-> Nuevo estado:", newStatus)
+            console.log("[AuditEditModal] Debería celebrar?:", shouldCelebrate, "Estados de celebración:", CELEBRATION_STATUSES)
+            
+            if (shouldCelebrate) {
+                // Mostrar animación de celebración PRIMERO, luego guardar
+                console.log("[AuditEditModal] 🎉 Activando celebración!")
+                toast.success("🎉 ¡Excelente! Venta completada")
+                // Guardar referencia a los datos para usarlos después de la animación
+                pendingResponseRef.current = response.data
+                setShowCelebration(true)
+                // NO llamar onSave/onClose aquí - se hará en onComplete de la animación
+            } else {
+                toast.success("Auditoría actualizada")
+                onSave(response.data)
+                onClose()
+            }
         } catch (error: any) {
             console.error("Error updating audit:", error)
             toast.error(error.response?.data?.message || "Error al actualizar auditoría")
@@ -516,7 +556,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                     theme === "dark" ? "bg-[#1a1333] border border-white/10" : "bg-white"
                 )}
             >
-                {/* Header */}
+                {/* Encabezado del modal */}
                 <div className={cn(
                     "px-6 py-4 border-b flex items-center justify-between",
                     theme === "dark" ? "border-white/10" : "border-gray-100"
@@ -540,7 +580,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                     </button>
                 </div>
 
-                {/* Tabs */}
+                {/* Pestañas de navegación */}
                 <div className={cn(
                     "flex border-b",
                     theme === "dark" ? "border-white/10" : "border-gray-100"
@@ -569,12 +609,22 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                     </button>
                 </div>
 
-                {/* Content */}
+                {/* Contenido principal */}
                 <div className="flex-1 overflow-y-auto p-6">
-                    <fieldset disabled={isAsesor} className="contents">
+                    {isLockedByQR && (
+                        <div className={cn(
+                            "mb-4 p-3 rounded-lg border",
+                            theme === "dark" ? "bg-yellow-500/10 border-yellow-500/30" : "bg-yellow-50 border-yellow-200"
+                        )}>
+                            <p className={cn("text-sm font-medium", theme === "dark" ? "text-yellow-400" : "text-yellow-700")}>
+                                🔒 Esta auditoría tiene estado "QR Hecho" y no puede ser editada.
+                            </p>
+                        </div>
+                    )}
+                    <fieldset disabled={isAsesor || isLockedByQR} className="contents">
                         {activeTab === "details" ? (
                             <div className="space-y-4">
-                                {/* Basic Info */}
+                                {/* Información básica */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -621,7 +671,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                     />
                                 </div>
 
-                                {/* Obras Sociales */}
+                                {/* Obras sociales (anterior y vendida) */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -662,7 +712,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                     </div>
                                 </div>
 
-                                {/* Estado y Tipo */}
+                                {/* Estado y tipo de venta */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -678,7 +728,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                             )}
                                         >
                                             <option value="">Seleccionar estado...</option>
-                                            {/* Always show current status even if not in available list */}
+                                            {/* Siempre mostrar estado actual aunque no esté en lista disponible */}
                                             {form.status && !availableStatuses.includes(form.status) && (
                                                 <option value={form.status}>{form.status}</option>
                                             )}
@@ -709,7 +759,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                     </div>
                                 </div>
 
-                                {/* Asesor, Grupo, Supervisor, Auditor */}
+                                {/* Asignación: Asesor, Grupo, Supervisor, Auditor */}
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                     <div>
                                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -797,7 +847,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                     </div>
                                 </div>
 
-                                {/* Administrador */}
+                                {/* Campo Administrador */}
                                 <div>
                                     <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
                                         Administrador
@@ -820,7 +870,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                     </select>
                                 </div>
 
-                                {/* Fecha y Hora */}
+                                {/* Fecha y hora programada */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -864,7 +914,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                     </div>
                                 </div>
 
-                                {/* Fecha Creación QR (Solo Admin/Gerencia) */}
+                                {/* Fecha creación QR (solo Admin/Gerencia) */}
                                 {['administrativo', 'gerencia'].includes(user?.role?.toLowerCase() || '') && (
                                     <div>
                                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -883,7 +933,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                     </div>
                                 )}
 
-                                {/* Reprogramar Checkbox */}
+                                {/* Checkbox para reprogramar turno */}
                                 <div className="flex items-center gap-2">
                                     <input
                                         type="checkbox"
@@ -897,7 +947,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                     </label>
                                 </div>
 
-                                {/* Datos Extra */}
+                                {/* Notas y datos adicionales */}
                                 <div>
                                     <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
                                         Datos Extra / Notas
@@ -914,7 +964,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                     />
                                 </div>
 
-                                {/* Checkbox Recuperada */}
+                                {/* Checkbox para marcar como recuperada */}
                                 <div className="flex items-center gap-2">
                                     <input
                                         type="checkbox"
@@ -930,7 +980,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                             </div>
                         ) : (
                             <div className="space-y-6">
-                                {/* Status History */}
+                                {/* Historial de estados */}
                                 <div>
                                     <h3 className={cn("text-sm font-semibold mb-3 flex items-center gap-2", theme === "dark" ? "text-white" : "text-gray-800")}>
                                         <Clock className="w-4 h-4" />
@@ -957,7 +1007,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                     </div>
                                 </div>
 
-                                {/* Asesor History */}
+                                {/* Historial de asesores */}
                                 <div>
                                     <h3 className={cn("text-sm font-semibold mb-3 flex items-center gap-2", theme === "dark" ? "text-white" : "text-gray-800")}>
                                         <Users className="w-4 h-4" />
@@ -984,7 +1034,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                     </div>
                                 </div>
 
-                                {/* Comments History */}
+                                {/* Historial de comentarios */}
                                 <div>
                                     <h3 className={cn("text-sm font-semibold mb-3 flex items-center gap-2", theme === "dark" ? "text-white" : "text-gray-800")}>
                                         <MessageSquare className="w-4 h-4" />
@@ -1015,7 +1065,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                     </fieldset>
                 </div>
 
-                {/* Footer */}
+                {/* Pie del modal con botones */}
                 <div className={cn(
                     "px-6 py-4 border-t flex justify-end gap-3",
                     theme === "dark" ? "border-white/10" : "border-gray-100"
@@ -1043,6 +1093,22 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                     </button>
                 </div>
             </div>
+            
+            {/* ✅ Animación de celebración */}
+            <CelebrationAnimation 
+                isActive={showCelebration}
+                onComplete={() => {
+                    console.log("[AuditEditModal] Animación completada, guardando y cerrando...")
+                    setShowCelebration(false)
+                    // Llamar onSave con los datos guardados
+                    if (pendingResponseRef.current) {
+                        onSave(pendingResponseRef.current)
+                        pendingResponseRef.current = null
+                    }
+                    onClose()
+                }}
+                duration={3500}
+            />
         </div>,
         document.body
     )

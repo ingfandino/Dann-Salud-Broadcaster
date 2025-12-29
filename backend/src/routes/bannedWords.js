@@ -1,11 +1,17 @@
-// backend/src/routes/bannedWords.js
+/**
+ * ============================================================
+ * RUTAS DE PALABRAS PROHIBIDAS (bannedWords.js)
+ * ============================================================
+ * Gestión del filtro de contenido.
+ * Solo Gerencia puede administrar, todos pueden consultar.
+ */
 
 const express = require("express");
 const router = express.Router();
 const bannedWordController = require("../controllers/bannedWordController");
 const { requireAuth } = require("../middlewares/authMiddleware");
 
-// 🔐 Todas las rutas requieren autenticación
+/* ========== RUTAS PROTEGIDAS ========== */
 router.use(requireAuth);
 
 // 📋 Listar palabras prohibidas (todos los roles autenticados pueden ver)

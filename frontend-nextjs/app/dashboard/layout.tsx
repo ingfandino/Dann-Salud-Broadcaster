@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * LAYOUT DEL DASHBOARD (app/dashboard/layout.tsx)
+ * ============================================================
+ * Estructura principal del panel de control.
+ * Incluye sidebar, header móvil, tema y notificaciones.
+ */
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -9,6 +17,7 @@ import { ThemeProvider } from '@/components/dashboard/theme-provider';
 import { Toaster } from '@/components/ui/sonner';
 import { connectSocket } from '@/lib/socket';
 
+/** Layout principal del dashboard con navegación */
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     const router = useRouter();
     const { logout } = useAuth();
@@ -17,7 +26,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     const pathname = usePathname();
 
-    // Map section to route
+    /* Mapeo de sección a ruta */
     const routeMap: Record<string, string> = {
         'reportes-globales': '/dashboard/reports',
         'mensajeria-masiva': '/dashboard/send',
@@ -48,7 +57,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         'gestion-usuarios': '/dashboard/users',
     };
 
-    // Sync activeSection with pathname
+    /* Sincronizar activeSection con pathname */
     useEffect(() => {
         const entry = Object.entries(routeMap).find(([_, route]) => route === pathname);
         if (entry) {
@@ -70,7 +79,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         }
     };
 
-    // Initialize socket connection for all dashboard pages
+    /* Inicializar conexión socket para todas las páginas del dashboard */
     useEffect(() => {
         if (typeof window !== 'undefined') {
             const token = localStorage.getItem('token');

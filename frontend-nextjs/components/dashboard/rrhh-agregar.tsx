@@ -31,6 +31,7 @@ export function RRHHAgregar() {
   const [users, setUsers] = useState<User[]>([])
   const [existingEmployees, setExistingEmployees] = useState<Set<string>>(new Set())
   const [loadingData, setLoadingData] = useState(true)
+  const [uploadingDNI, setUploadingDNI] = useState(false)
 
   const [formData, setFormData] = useState({
     userId: "",
@@ -128,19 +129,32 @@ export function RRHHAgregar() {
     try {
       setLoading(true)
 
-      // Prepare payload
+      let fotoDNIPath = ""
+
+      if (formData.fotoDNI) {
+        setUploadingDNI(true)
+        try {
+          const uploadRes = await api.employees.uploadDNI(formData.fotoDNI)
+          fotoDNIPath = uploadRes.data.fotoDNI || ""
+        } catch (uploadError: any) {
+          console.error("Error uploading DNI:", uploadError)
+          toast.error(uploadError.response?.data?.message || "Error al subir foto de DNI")
+          setUploadingDNI(false)
+          setLoading(false)
+          return
+        }
+        setUploadingDNI(false)
+      }
+
       const payload = {
         ...formData,
-        // If file upload is implemented later, handle it here. 
-        // For now, sending null or string if backend expects it.
-        fotoDNI: ""
+        fotoDNI: fotoDNIPath
       }
 
       await api.employees.create(payload)
       toast.success("Empleado creado exitosamente")
       handleLimpiar()
-      // Optionally redirect or refresh
-      fetchData() // Refresh list to update available users
+      fetchData()
 
     } catch (error: any) {
       console.error("Error creating employee:", error)
@@ -171,7 +185,7 @@ export function RRHHAgregar() {
             : "bg-white border-gray-200 shadow-sm",
         )}
       >
-        {/* Header */}
+        {/* Encabezado del formulario */}
         <div className="mb-6">
           <h2 className={cn("text-xl font-semibold mb-1", theme === "dark" ? "text-white" : "text-gray-800")}>
             Nuevo Empleado
@@ -181,7 +195,7 @@ export function RRHHAgregar() {
           </p>
         </div>
 
-        {/* Usuario de la plataforma - destacado */}
+        {/* Selección de usuario de plataforma */}
         <div
           className={cn(
             "rounded-xl border p-4 mb-6",
@@ -213,9 +227,9 @@ export function RRHHAgregar() {
           </p>
         </div>
 
-        {/* Formulario principal */}
+        {/* Campos del formulario */}
         <div className="space-y-4">
-          {/* Nombre completo */}
+          {/* Campo: Nombre completo */}
           <div>
             <label
               className={cn("text-sm font-medium mb-1 block", theme === "dark" ? "text-gray-300" : "text-gray-700")}
@@ -235,7 +249,7 @@ export function RRHHAgregar() {
             />
           </div>
 
-          {/* Teléfono y Equipo */}
+          {/* Campos: Teléfono y Equipo */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label
@@ -276,7 +290,7 @@ export function RRHHAgregar() {
             </div>
           </div>
 
-          {/* Fechas */}
+          {/* Campos: Fechas de ingreso y baja */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label
@@ -315,7 +329,7 @@ export function RRHHAgregar() {
             </div>
           </div>
 
-          {/* Cargo */}
+          {/* Campo: Cargo */}
           <div>
             <label
               className={cn("text-sm font-medium mb-1 block", theme === "dark" ? "text-gray-300" : "text-gray-700")}
@@ -337,7 +351,7 @@ export function RRHHAgregar() {
             </p>
           </div>
 
-          {/* Checkboxes */}
+          {/* Opciones de estado */}
           <div
             className={cn(
               "flex items-center gap-6 p-4 rounded-lg border",
@@ -366,7 +380,7 @@ export function RRHHAgregar() {
             </label>
           </div>
 
-          {/* Foto DNI */}
+          {/* Campo: Foto DNI */}
           <div>
             <label
               className={cn(
@@ -381,20 +395,26 @@ export function RRHHAgregar() {
               type="file"
               accept=".jpg,.jpeg,.png"
               onChange={handleFileChange}
-              disabled={true} // Disabled for now as backend expects string
+              disabled={loading || uploadingDNI}
               className={cn(
-                "w-full px-4 py-2.5 rounded-lg border text-sm file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium opacity-50 cursor-not-allowed",
+                "w-full px-4 py-2.5 rounded-lg border text-sm file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium cursor-pointer",
                 theme === "dark"
                   ? "bg-white/5 border-white/10 text-white file:bg-[#1E88E5]/20 file:text-[#1E88E5]"
                   : "bg-white border-gray-200 text-gray-800 file:bg-[#1E88E5]/10 file:text-[#1E88E5]",
+                (loading || uploadingDNI) && "opacity-50 cursor-not-allowed"
               )}
             />
+            {formData.fotoDNI && (
+              <p className={cn("text-xs mt-1", theme === "dark" ? "text-green-400" : "text-green-600")}>
+                ✅ Archivo seleccionado: {formData.fotoDNI.name}
+              </p>
+            )}
             <p className={cn("text-xs mt-1", theme === "dark" ? "text-gray-500" : "text-gray-500")}>
-              Carga de imágenes deshabilitada temporalmente
+              Máximo 5MB. Formatos aceptados: JPG, PNG
             </p>
           </div>
 
-          {/* Notas */}
+          {/* Campo: Notas */}
           <div>
             <label
               className={cn("text-sm font-medium mb-1 block", theme === "dark" ? "text-gray-300" : "text-gray-700")}
@@ -416,7 +436,7 @@ export function RRHHAgregar() {
           </div>
         </div>
 
-        {/* Footer con botones */}
+        {/* Pie con botones de acción */}
         <div
           className={cn(
             "flex justify-end gap-3 mt-6 pt-6 border-t",
@@ -445,7 +465,7 @@ export function RRHHAgregar() {
             style={{ backgroundColor: "#1E88E5" }}
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-            Crear Empleado
+            {uploadingDNI ? "Subiendo DNI..." : loading ? "Creando..." : "Crear Empleado"}
           </button>
         </div>
       </div>

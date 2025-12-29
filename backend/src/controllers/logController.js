@@ -1,11 +1,18 @@
-// backend/src/controllers/logController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE LOGS (logController)
+ * ============================================================
+ * Gestiona el acceso y exportación de logs del sistema.
+ * Permite filtrar por tipo (info, warning, error) y rango de fechas.
+ * Soporta exportación en JSON, CSV y Excel.
+ */
 
 const { getLogs, exportLogs } = require("../services/logService");
 const { Parser } = require("json2csv");
 const ExcelJS = require("exceljs");
 const logger = require("../utils/logger");
 
-// 🔹 Listar logs con filtros
+/** Lista logs con filtros opcionales (tipo, límite, fechas) */
 exports.listLogs = async (req, res) => {
     try {
         const { tipo, limit, from, to } = req.query;

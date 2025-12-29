@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * TARJETA DE ESTADÍSTICAS (stats-card.tsx)
+ * ============================================================
+ * Componente de tarjeta para mostrar métricas.
+ * Incluye animación de contador y estilos por color.
+ */
+
 "use client"
 
 import { cn } from "@/lib/utils"

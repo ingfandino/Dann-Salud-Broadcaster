@@ -1,4 +1,10 @@
-// src/services/connectionManager.js
+/**
+ * ============================================================
+ * MANAGER DE CONEXIONES (connectionManager.js)
+ * ============================================================
+ * Gestiona la cola de conexiones de WhatsApp.
+ * Limita conexiones simultáneas para evitar sobrecarga.
+ */
 
 const EventEmitter = require('events');
 EventEmitter.defaultMaxListeners = 50;
@@ -6,6 +12,7 @@ const path = require('path');
 const logger = require('../utils/logger');
 const { clients } = require('./whatsappManager');
 
+/** Gestor de cola de conexiones */
 class ConnectionManager {
   constructor() {
     this.connectionQueue = [];

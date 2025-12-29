@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * REPORTES GLOBALES (reportes-globales.tsx)
+ * ============================================================
+ * Vista de reportes y estadísticas de campañas de envío.
+ * Permite filtrar, exportar y visualizar métricas.
+ */
+
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
@@ -24,7 +32,7 @@ interface Campaign {
   repliesCount: number
 }
 
-// Pastel color styles for status badges
+/* Estilos de colores pastel para badges de estado */
 const estadoStyles = {
   completed: {
     dark: "bg-[#A8E6CF]/20 text-[#A8E6CF] border-[#A8E6CF]/30",
@@ -182,7 +190,7 @@ export function ReportesGlobales() {
 
   return (
     <div className="animate-fade-in-up">
-      {/* Header */}
+      {/* Encabezado de reportes */}
       <div className="mb-6">
         <h2 className={cn("text-xl lg:text-2xl font-bold mb-1", theme === "dark" ? "text-white" : "text-gray-700")}>
           Reportes de Mensajería
@@ -192,7 +200,7 @@ export function ReportesGlobales() {
         </p>
       </div>
 
-      {/* Filters */}
+      {/* Sección de filtros */}
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="flex items-center gap-2 flex-1">
           <div className="relative flex-1 sm:flex-initial sm:min-w-[180px]">
@@ -266,7 +274,7 @@ export function ReportesGlobales() {
         </div>
       </div>
 
-      {/* Table */}
+      {/* Tabla de reportes */}
       <div
         className={cn(
           "rounded-xl border overflow-hidden",

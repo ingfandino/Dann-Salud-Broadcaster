@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * LIQUIDACIÓN DE AUDITORÍAS (auditorias-liquidacion.tsx)
+ * ============================================================
+ * Vista para liquidación de auditorías completadas.
+ * Permite filtrar, exportar y visualizar datos de pago.
+ */
+
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
@@ -12,14 +20,14 @@ import { connectSocket } from "@/lib/socket"
 
 const OBRAS_SOCIALES = ["Binimed", "Meplife", "TURF"]
 
-// ✅ Helper para obtener el nombre del supervisor (prioriza snapshot)
+/* Helper para obtener el nombre del supervisor (prioriza snapshot) */
 const getSupervisorName = (item: any): string => {
-  // 1. Prioridad: supervisorSnapshot
+  /* 1. Prioridad: supervisorSnapshot */
   if (item.supervisorSnapshot?.nombre) {
     return item.supervisorSnapshot.nombre
   }
 
-  // 2. Fallback: asesor.supervisor (para ventas antiguas)
+  /* 2. Fallback: asesor.supervisor (para ventas antiguas) */
   if (item.asesor?.supervisor?.nombre) {
     return item.asesor.supervisor.nombre
   }
@@ -27,45 +35,96 @@ const getSupervisorName = (item: any): string => {
   return "-"
 }
 
-const getSupervisorColor = (supervisorName: string, theme: string) => {
-  if (!supervisorName) return theme === "dark" ? "bg-gray-500/20 text-gray-400" : "bg-gray-100 text-gray-700"
+const getObraSocialColor = (obraSocial: string, theme: string) => {
+  if (!obraSocial) return theme === "dark" ? "bg-gray-500/20 text-gray-400" : "bg-gray-100 text-gray-700"
+  const osLower = obraSocial.toLowerCase()
+  if (osLower.includes('meplife')) {
+    return theme === "dark" ? "bg-green-900 text-green-200" : "bg-green-100 text-green-800"
+  }
+  if (osLower.includes('binimed')) {
+    return theme === "dark" ? "bg-blue-900 text-blue-200" : "bg-blue-100 text-blue-800"
+  }
+  if (osLower.includes('turf')) {
+    return theme === "dark" ? "bg-violet-900 text-violet-200" : "bg-violet-100 text-violet-800"
+  }
+  return theme === "dark" ? "bg-gray-500/20 text-gray-400" : "bg-gray-100 text-gray-700"
+}
 
-  // Hash string to get consistent color
+const getSupervisorColor = (supervisorName: string, theme: string) => {
+  if (!supervisorName || supervisorName === "-") return theme === "dark" ? "bg-gray-500/20 text-gray-400" : "bg-gray-100 text-gray-700"
+
+  const nombreLower = supervisorName.toLowerCase()
+
+  if ((nombreLower.includes('nahuel') && nombreLower.includes('sanchez')) ||
+    (nombreLower.includes('nahia') && nombreLower.includes('avellaneda')) ||
+    (nombreLower.includes('santiago') && nombreLower.includes('goldsztein')) ||
+    (nombreLower.includes('facundo') && nombreLower.includes('tevez'))) {
+    return theme === "dark" ? "bg-red-900 text-red-200" : "bg-red-100 text-red-800"
+  }
+
+  if (nombreLower.includes('abigail') && nombreLower.includes('vera')) {
+    return theme === "dark" ? "bg-fuchsia-900 text-fuchsia-200" : "bg-fuchsia-100 text-fuchsia-800"
+  }
+
+  if (nombreLower.includes('mateo') && nombreLower.includes('viera')) {
+    return theme === "dark" ? "bg-blue-900 text-blue-200" : "bg-blue-100 text-blue-800"
+  }
+
+  if (nombreLower.includes('belen') && nombreLower.includes('salaverry')) {
+    return theme === "dark" ? "bg-purple-900 text-purple-200" : "bg-purple-100 text-purple-800"
+  }
+
+  if (nombreLower.includes('analia') && nombreLower.includes('suarez')) {
+    return theme === "dark" ? "bg-pink-900 text-pink-200" : "bg-pink-100 text-pink-800"
+  }
+
+  if (nombreLower.includes('erika') && nombreLower.includes('cardozo')) {
+    return theme === "dark" ? "bg-green-900 text-green-200" : "bg-green-100 text-green-800"
+  }
+
+  if (nombreLower.includes('aryel') && nombreLower.includes('puiggros')) {
+    return theme === "dark" ? "bg-yellow-900 text-yellow-200" : "bg-yellow-100 text-yellow-800"
+  }
+
+  if ((nombreLower.includes('joaquin') && nombreLower.includes('valdez')) ||
+    (nombreLower.includes('joquin') && nombreLower.includes('valdez'))) {
+    return theme === "dark" ? "bg-violet-900 text-violet-200" : "bg-violet-100 text-violet-800"
+  }
+
+  if (nombreLower.includes('luciano') && nombreLower.includes('carugno')) {
+    return theme === "dark" ? "bg-gray-700 text-gray-200" : "bg-gray-200 text-gray-800"
+  }
+
+  if (nombreLower.includes('alejandro') && nombreLower.includes('mejail')) {
+    return theme === "dark" ? "bg-amber-900 text-amber-200" : "bg-amber-100 text-amber-800"
+  }
+
+  if (nombreLower.includes('gaston') && nombreLower.includes('sarmiento')) {
+    return theme === "dark" ? "bg-orange-900 text-orange-200" : "bg-orange-100 text-orange-800"
+  }
+
+  const colors = [
+    { light: "bg-teal-100 text-teal-800", dark: "bg-teal-900 text-teal-200" },
+    { light: "bg-cyan-100 text-cyan-800", dark: "bg-cyan-900 text-cyan-200" },
+    { light: "bg-rose-100 text-rose-800", dark: "bg-rose-900 text-rose-200" },
+    { light: "bg-emerald-100 text-emerald-800", dark: "bg-emerald-900 text-emerald-200" },
+    { light: "bg-indigo-100 text-indigo-800", dark: "bg-indigo-900 text-indigo-200" },
+  ]
+
   let hash = 0
   for (let i = 0; i < supervisorName.length; i++) {
     hash = supervisorName.charCodeAt(i) + ((hash << 5) - hash)
   }
-
-  const colors = [
-    { light: "bg-red-100 text-red-800", dark: "bg-red-500/20 text-red-300" },
-    { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-300" },
-    { light: "bg-amber-100 text-amber-800", dark: "bg-amber-500/20 text-amber-300" },
-    { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-300" },
-    { light: "bg-lime-100 text-lime-800", dark: "bg-lime-500/20 text-lime-300" },
-    { light: "bg-green-100 text-green-800", dark: "bg-green-500/20 text-green-300" },
-    { light: "bg-emerald-100 text-emerald-800", dark: "bg-emerald-500/20 text-emerald-300" },
-    { light: "bg-teal-100 text-teal-800", dark: "bg-teal-500/20 text-teal-300" },
-    { light: "bg-cyan-100 text-cyan-800", dark: "bg-cyan-500/20 text-cyan-300" },
-    { light: "bg-sky-100 text-sky-800", dark: "bg-sky-500/20 text-sky-300" },
-    { light: "bg-blue-100 text-blue-800", dark: "bg-blue-500/20 text-blue-300" },
-    { light: "bg-indigo-100 text-indigo-800", dark: "bg-indigo-500/20 text-indigo-300" },
-    { light: "bg-violet-100 text-violet-800", dark: "bg-violet-500/20 text-violet-300" },
-    { light: "bg-purple-100 text-purple-800", dark: "bg-purple-500/20 text-purple-300" },
-    { light: "bg-fuchsia-100 text-fuchsia-800", dark: "bg-fuchsia-500/20 text-fuchsia-300" },
-    { light: "bg-pink-100 text-pink-800", dark: "bg-pink-500/20 text-pink-300" },
-    { light: "bg-rose-100 text-rose-800", dark: "bg-rose-500/20 text-rose-300" }
-  ]
-
   const index = Math.abs(hash) % colors.length
   const color = colors[index]
 
   return theme === "dark" ? color.dark : color.light
 }
 
-// ✅ Para fechas puras (sin hora específica) - evita problemas de zona horaria
+/* Para fechas puras (sin hora específica) - evita problemas de zona horaria */
 const formatDateOnly = (value: string) => {
   if (!value) return "-"
-  // Extraer solo la parte de fecha del ISO string para evitar conversión de zona horaria
+  /* Extraer solo la parte de fecha del ISO string para evitar conversión de zona horaria */
   const dateStr = value.split('T')[0]
   if (!dateStr) return "-"
   const [year, month, day] = dateStr.split('-')
@@ -77,6 +136,7 @@ export function AuditoriasLiquidacion() {
   const { theme } = useTheme()
   const { user } = useAuth()
   const isGerencia = user?.role?.toLowerCase() === 'gerencia'
+  const isAsesor = user?.role?.toLowerCase() === 'asesor'
 
   // State
   const [items, setItems] = useState<any[]>([])
@@ -94,8 +154,6 @@ export function AuditoriasLiquidacion() {
   const [filters, setFilters] = useState({
     afiliado: "",
     cuil: "",
-    asesor: "",
-    supervisor: "",
     auditor: "",
     administrador: "",
     obraSocialVendida: "",
@@ -105,17 +163,46 @@ export function AuditoriasLiquidacion() {
     dateField: "fechaCreacionQR"
   })
 
+  // Multi-selection states for Supervisores and Asesores
+  const [selectedSupervisores, setSelectedSupervisores] = useState<string[]>([])
+  const [selectedAsesores, setSelectedAsesores] = useState<string[]>([])
+
+  // Sorting state
+  const [sortBy, setSortBy] = useState<'fecha' | 'asesor' | 'supervisor'>('fecha')
+
   // Lists for dropdowns
   const [asesores, setAsesores] = useState<any[]>([])
   const [supervisores, setSupervisores] = useState<any[]>([])
   const [auditores, setAuditores] = useState<any[]>([])
   const [administradores, setAdministradores] = useState<any[]>([])
 
+  // Dropdown visibility
+  const [isSupervisorDropdownOpen, setIsSupervisorDropdownOpen] = useState(false)
+  const [isAsesorDropdownOpen, setIsAsesorDropdownOpen] = useState(false)
+
+  // Filtrado unidireccional: Supervisor → Asesor
+  const filteredAsesoresList = useMemo(() => {
+    if (selectedSupervisores.length === 0) return asesores
+    const equiposSupervisores = new Set<string>()
+    selectedSupervisores.forEach(supName => {
+      const sup = supervisores.find((s: any) => s.nombre === supName)
+      if (sup?.numeroEquipo) equiposSupervisores.add(sup.numeroEquipo)
+    })
+    if (equiposSupervisores.size === 0) return asesores
+    return asesores.filter((a: any) => a.numeroEquipo && equiposSupervisores.has(a.numeroEquipo))
+  }, [asesores, selectedSupervisores, supervisores])
+
   // Fetch Data
   const loadData = async (useFilters = false) => {
     try {
       setLoading(true)
-      const query = useFilters ? { ...filters, dateField: 'fechaCreacionQR' } : {}
+      let query: any = useFilters ? { ...filters, dateField: 'fechaCreacionQR' } : {}
+      
+      // ✅ Si es asesor, forzar filtro por su ID
+      if (isAsesor && user?._id) {
+        query.asesor = user._id
+      }
+      
       const { data } = await api.liquidation.list(query)
       setItems(Array.isArray(data) ? data : [])
     } catch (err) {
@@ -131,10 +218,10 @@ export function AuditoriasLiquidacion() {
       const { data } = await api.users.list()
       const users = Array.isArray(data) ? data : []
 
-      setAsesores(users.filter((u: any) => u.role?.toLowerCase() === "asesor"))
-      setSupervisores(users.filter((u: any) => u.role?.toLowerCase() === "supervisor"))
-      setAuditores(users.filter((u: any) => u.role?.toLowerCase() === "auditor"))
-      setAdministradores(users.filter((u: any) => u.role?.toLowerCase() === "admin"))
+      setAsesores(users.filter((u: any) => u.role?.toLowerCase() === "asesor" && u.active !== false))
+      setSupervisores(users.filter((u: any) => u.role?.toLowerCase() === "supervisor" && u.active !== false))
+      setAuditores(users.filter((u: any) => u.role?.toLowerCase() === "auditor" && u.active !== false))
+      setAdministradores(users.filter((u: any) => u.role?.toLowerCase() === "administrativo" && u.active !== false))
     } catch (err) {
       console.error(err)
     }
@@ -210,37 +297,40 @@ export function AuditoriasLiquidacion() {
     }
   }, [])
 
-  // Week Logic
+  // Week Logic: Semana laboral viernes 00:00 a jueves 23:01 (hora Argentina)
   const getWeekStart = (date: Date) => {
     const d = new Date(date)
-    const day = d.getDay() // 0=Sun, 1=Mon, ..., 4=Thu, 5=Fri, 6=Sat
+    // Usar getters locales (hora del navegador = Argentina)
+    const day = d.getDay()
     const hours = d.getHours()
     const minutes = d.getMinutes()
 
-    // If it's Thursday after 23:00, it counts as next week (Friday)
-    // Actually, user wants "Thursday 23:01 to next Thursday 23:00"
-    // So if it's Thu > 23:00, it belongs to the week starting THIS Thu 23:01
-    // Wait, "Thursday 23:01" is the START of the week.
-
-    // Let's normalize everything to the "week start date" which is the Thursday 23:01
-
-    // Logic from LiquidacionList.jsx seems to be:
-    // Week starts Friday 00:00.
-    // But user says "iniciando desde el jueves a las 23:01 hrs".
-    // This means Thu 23:01 IS effectively Friday 00:00 for accounting purposes.
-
-    // Let's adjust the date so that Thu 23:01+ becomes Friday.
+    // Si es jueves después de las 23:00, pertenece a la siguiente semana
     if (day === 4 && (hours > 23 || (hours === 23 && minutes >= 1))) {
       d.setDate(d.getDate() + 1)
       d.setHours(0, 0, 0, 0)
     }
 
-    // Now use standard Friday logic
-    const normalizedDay = d.getDay()
-    const diff = (normalizedDay < 5 ? -2 - normalizedDay : 5 - normalizedDay)
-    d.setDate(d.getDate() - (normalizedDay === 5 ? 0 : normalizedDay === 6 ? 1 : normalizedDay === 0 ? 2 : normalizedDay + 2))
+    // Calcular el viernes de inicio de la semana laboral
+    const currentDay = d.getDay()
+    let daysToSubtract = 0
+    
+    if (currentDay === 5) {
+      daysToSubtract = 0
+    } else if (currentDay === 6) {
+      daysToSubtract = 1
+    } else {
+      daysToSubtract = currentDay + 2
+    }
+    
+    d.setDate(d.getDate() - daysToSubtract)
     d.setHours(0, 0, 0, 0)
     return d
+  }
+
+  // ✅ Helper para convertir fecha a string YYYY-MM-DD en hora LOCAL (no UTC)
+  const toLocalDateString = (date: Date) => {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
   }
 
   const itemsByWeek = useMemo(() => {
@@ -252,7 +342,8 @@ export function AuditoriasLiquidacion() {
       // ✅ Use fechaCreacionQR for QR-based records, fallback to scheduledAt
       const dateField = item.status === 'QR hecho' ? (item.fechaCreacionQR || item.scheduledAt) : item.scheduledAt;
       const date = new Date(dateField || item.createdAt)
-      const weekStart = getWeekStart(date).toISOString().split('T')[0]
+      // ✅ CORREGIDO: Usar hora local en lugar de UTC para agrupar semanas
+      const weekStart = toLocalDateString(getWeekStart(date))
       if (!weeks[weekStart]) weeks[weekStart] = []
       weeks[weekStart].push(item)
     })
@@ -272,7 +363,9 @@ export function AuditoriasLiquidacion() {
       baseItems = baseItems.filter(item => {
         // ✅ Use fechaCreacionQR for QR records, fallback to scheduledAt
         const dateField = item.status === 'QR hecho' ? (item.fechaCreacionQR || item.scheduledAt) : item.scheduledAt;
-        const itemDate = new Date(dateField).toISOString().split('T')[0];
+        // ✅ CORREGIDO: Usar fecha LOCAL (Argentina) en lugar de UTC para comparación
+        const d = new Date(dateField);
+        const itemDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
         if (filters.dateFrom && itemDate < filters.dateFrom) return false;
         if (filters.dateTo && itemDate > filters.dateTo) return false;
@@ -285,19 +378,46 @@ export function AuditoriasLiquidacion() {
     }
 
     // Apply other filters
-    return baseItems.filter(item => {
+    let result = baseItems.filter(item => {
       if (filters.afiliado && !item.nombre?.toLowerCase().includes(filters.afiliado.toLowerCase())) return false
       if (filters.cuil && !item.cuil?.includes(filters.cuil)) return false
-      if (filters.asesor && item.asesor?._id !== filters.asesor) return false
-      if (filters.supervisor && item.asesor?.supervisor?._id !== filters.supervisor) return false
+      
+      // Multi-selección de supervisores
+      if (selectedSupervisores.length > 0) {
+        const supervisorName = getSupervisorName(item)
+        if (!selectedSupervisores.includes(supervisorName)) return false
+      }
+      
+      // Multi-selección de asesores
+      if (selectedAsesores.length > 0) {
+        const asesorName = item.asesor?.nombre || ''
+        if (!selectedAsesores.includes(asesorName)) return false
+      }
+      
       if (filters.auditor && item.auditor?._id !== filters.auditor) return false
       if (filters.administrador && item.administrador?._id !== filters.administrador) return false
       if (filters.obraSocialVendida && item.obraSocialVendida !== filters.obraSocialVendida) return false
       if (filters.estado && item.status !== filters.estado) return false
 
       return true
-    }).sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())
-  }, [items, itemsByWeek, currentWeek, filters])
+    })
+
+    // Aplicar ordenamiento
+    return result.sort((a, b) => {
+      if (sortBy === 'asesor') {
+        const nameA = (a.asesor?.nombre || '').toLowerCase()
+        const nameB = (b.asesor?.nombre || '').toLowerCase()
+        return nameA.localeCompare(nameB)
+      }
+      if (sortBy === 'supervisor') {
+        const supA = getSupervisorName(a).toLowerCase()
+        const supB = getSupervisorName(b).toLowerCase()
+        return supA.localeCompare(supB)
+      }
+      // Default: fecha descendente
+      return new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime()
+    })
+  }, [items, itemsByWeek, currentWeek, filters, selectedSupervisores, selectedAsesores, sortBy])
 
   // Export
   const handleExport = async () => {
@@ -378,7 +498,7 @@ export function AuditoriasLiquidacion() {
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {/* Header & Controls */}
+      {/* Encabezado y controles */}
       <div className={cn(
         "rounded-2xl border p-4 shadow-sm",
         theme === "dark" ? "bg-white/5 border-white/10" : "bg-white border-gray-200"
@@ -410,7 +530,7 @@ export function AuditoriasLiquidacion() {
           </div>
         </div>
 
-        {/* Week Navigation */}
+        {/* Navegación por semana */}
         {!filters.dateFrom && !filters.dateTo && itemsByWeek.length > 0 && (
           <div className="flex items-center justify-between bg-gray-50 dark:bg-white/5 p-3 rounded-xl mb-4">
             <div className="flex items-center gap-3">
@@ -445,7 +565,7 @@ export function AuditoriasLiquidacion() {
           </div>
         )}
 
-        {/* Supervisor Stats */}
+        {/* Estadísticas por supervisor */}
         {stats.supervisorStats.length > 0 && (
           <div className={cn(
             "p-3 rounded-xl text-xs mb-4",
@@ -466,7 +586,30 @@ export function AuditoriasLiquidacion() {
           </div>
         )}
 
-        {/* Filters Grid */}
+        {/* Botón de ordenamiento */}
+        <div className="flex items-center gap-2 mb-3">
+          <span className={cn("text-sm font-medium", theme === "dark" ? "text-gray-300" : "text-gray-600")}>Ordenar por:</span>
+          <div className="flex gap-1">
+            {(['fecha', 'asesor', 'supervisor'] as const).map((option) => (
+              <button
+                key={option}
+                onClick={() => setSortBy(option)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                  sortBy === option
+                    ? "bg-purple-600 text-white"
+                    : theme === "dark"
+                      ? "bg-white/10 text-gray-300 hover:bg-white/20"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                )}
+              >
+                {option === 'fecha' ? 'Fecha' : option === 'asesor' ? 'Asesor' : 'Supervisor'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Grilla de filtros */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
           <input
             placeholder="Buscar afiliado..."
@@ -480,22 +623,84 @@ export function AuditoriasLiquidacion() {
             onChange={e => setFilters({ ...filters, cuil: e.target.value })}
             className={cn("px-3 py-2 rounded-lg border text-sm", theme === "dark" ? "bg-black/20 border-white/10" : "bg-white")}
           />
-          <select
-            value={filters.asesor}
-            onChange={e => setFilters({ ...filters, asesor: e.target.value })}
-            className={cn("px-3 py-2 rounded-lg border text-sm", theme === "dark" ? "bg-black/20 border-white/10" : "bg-white")}
-          >
-            <option value="">Todos los Asesores</option>
-            {asesores.map(a => <option key={a._id} value={a._id}>{a.nombre}</option>)}
-          </select>
-          <select
-            value={filters.supervisor}
-            onChange={e => setFilters({ ...filters, supervisor: e.target.value })}
-            className={cn("px-3 py-2 rounded-lg border text-sm", theme === "dark" ? "bg-black/20 border-white/10" : "bg-white")}
-          >
-            <option value="">Todos los Supervisores</option>
-            {supervisores.map(s => <option key={s._id} value={s._id}>{s.nombre}</option>)}
-          </select>
+
+          {/* Dropdown multi-selección Supervisores */}
+          <div className="relative">
+            <button
+              onClick={() => setIsSupervisorDropdownOpen(!isSupervisorDropdownOpen)}
+              className={cn("w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm", theme === "dark" ? "bg-black/20 border-white/10" : "bg-white")}
+            >
+              <span className="truncate">
+                {selectedSupervisores.length === 0 ? "Todos los Supervisores" : `${selectedSupervisores.length} supervisor${selectedSupervisores.length > 1 ? 'es' : ''}`}
+              </span>
+              <ChevronDown className="w-4 h-4" />
+            </button>
+            {isSupervisorDropdownOpen && (
+              <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
+                  <button type="button" onClick={() => setSelectedSupervisores(supervisores.map(s => s.nombre))} className="text-xs text-blue-600 hover:text-blue-800">Todos</button>
+                  {selectedSupervisores.length > 0 && (
+                    <button type="button" onClick={() => setSelectedSupervisores([])} className="text-xs text-blue-600 hover:text-blue-800">Limpiar</button>
+                  )}
+                </div>
+                {supervisores.map((s) => (
+                  <label key={s._id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedSupervisores.includes(s.nombre)}
+                      onChange={() => {
+                        setSelectedSupervisores(prev => 
+                          prev.includes(s.nombre) ? prev.filter(n => n !== s.nombre) : [...prev, s.nombre]
+                        )
+                      }}
+                      className="accent-blue-600"
+                    />
+                    <span className="dark:text-gray-200">{s.nombre}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Dropdown multi-selección Asesores (filtrado por supervisor seleccionado) */}
+          {!isAsesor && (
+            <div className="relative">
+              <button
+                onClick={() => setIsAsesorDropdownOpen(!isAsesorDropdownOpen)}
+                className={cn("w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm", theme === "dark" ? "bg-black/20 border-white/10" : "bg-white")}
+              >
+                <span className="truncate">
+                  {selectedAsesores.length === 0 ? "Todos los Asesores" : `${selectedAsesores.length} asesor${selectedAsesores.length > 1 ? 'es' : ''}`}
+                </span>
+                <ChevronDown className="w-4 h-4" />
+              </button>
+              {isAsesorDropdownOpen && (
+                <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
+                    <button type="button" onClick={() => setSelectedAsesores(filteredAsesoresList.map(a => a.nombre))} className="text-xs text-blue-600 hover:text-blue-800">Todos</button>
+                    {selectedAsesores.length > 0 && (
+                      <button type="button" onClick={() => setSelectedAsesores([])} className="text-xs text-blue-600 hover:text-blue-800">Limpiar</button>
+                    )}
+                  </div>
+                  {filteredAsesoresList.map((a) => (
+                    <label key={a._id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedAsesores.includes(a.nombre)}
+                        onChange={() => {
+                          setSelectedAsesores(prev => 
+                            prev.includes(a.nombre) ? prev.filter(n => n !== a.nombre) : [...prev, a.nombre]
+                          )
+                        }}
+                        className="accent-blue-600"
+                      />
+                      <span className="dark:text-gray-200">{a.nombre}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
@@ -512,7 +717,7 @@ export function AuditoriasLiquidacion() {
             onChange={e => setFilters({ ...filters, administrador: e.target.value })}
             className={cn("px-3 py-2 rounded-lg border text-sm", theme === "dark" ? "bg-black/20 border-white/10" : "bg-white")}
           >
-            <option value="">Todos los Administradores</option>
+            <option value="">Todos los Administrativos</option>
             {administradores.map(a => <option key={a._id} value={a._id}>{a.nombre}</option>)}
           </select>
           <select
@@ -536,7 +741,7 @@ export function AuditoriasLiquidacion() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {/* Date Filters */}
+          {/* Filtros de fecha */}
           <input
             type="date"
             placeholder="Fecha desde"
@@ -562,12 +767,14 @@ export function AuditoriasLiquidacion() {
           <button
             onClick={() => {
               setFilters({
-                afiliado: "", cuil: "", asesor: "", supervisor: "",
+                afiliado: "", cuil: "",
                 auditor: "", administrador: "", obraSocialVendida: "",
                 estado: "", dateFrom: "", dateTo: "",
                 dateField: "fechaCreacionQR"
               });
-              // Reload without filters (default view)
+              setSelectedSupervisores([]);
+              setSelectedAsesores([]);
+              setSortBy('fecha');
               setTimeout(() => loadData(false), 0);
             }}
             className="px-3 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20 rounded-lg text-sm transition-colors"
@@ -577,7 +784,7 @@ export function AuditoriasLiquidacion() {
         </div>
       </div>
 
-      {/* Table */}
+      {/* Tabla de liquidación */}
       <div className={cn(
         "rounded-2xl border shadow-sm overflow-hidden",
         theme === "dark" ? "bg-white/5 border-white/10" : "bg-white border-gray-200"
@@ -635,7 +842,10 @@ export function AuditoriasLiquidacion() {
                     <td className="px-2 py-1.5 font-medium truncate max-w-[150px]" title={item.nombre}>{item.nombre}</td>
                     <td className="px-2 py-1.5 font-mono opacity-70 truncate">{item.cuil}</td>
                     <td className="px-2 py-1.5">
-                      <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 truncate max-w-[80px]">
+                      <span className={cn(
+                        "inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium truncate max-w-[80px]",
+                        getObraSocialColor(item.obraSocialVendida, theme)
+                      )}>
                         {item.obraSocialVendida}
                       </span>
                     </td>
@@ -665,7 +875,7 @@ export function AuditoriasLiquidacion() {
         </div>
       </div>
 
-      {/* Recalculate Modal - Floating Popover */}
+      {/* Modal de recálculo */}
       {showRecalculateModal && (
         <Portal>
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">

@@ -1,4 +1,14 @@
-// backend/src/controllers/bannedWordController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE PALABRAS PROHIBIDAS (bannedWordController)
+ * ============================================================
+ * Gestiona el filtro de contenido y palabras prohibidas.
+ * Solo Gerencia puede administrar las palabras, pero el sistema
+ * monitorea mensajes de todos los usuarios y genera alertas.
+ * 
+ * Categorías: ofensiva, legal, competencia, otra
+ * Severidades: baja, media, alta, crítica
+ */
 
 const BannedWord = require("../models/BannedWord");
 const BannedWordDetection = require("../models/BannedWordDetection");
@@ -6,7 +16,7 @@ const User = require("../models/User");
 const InternalMessage = require("../models/InternalMessage");
 const logger = require("../utils/logger");
 
-// 🔐 Middleware: Solo Gerencia
+/** Middleware: Solo usuarios de rol Gerencia */
 exports.requireGerencia = (req, res, next) => {
     if (req.user.role !== "gerencia") {
         return res.status(403).json({

@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * RECUPERO DE AUDITORÍAS (auditorias-recupero.tsx)
+ * ============================================================
+ * Gestión de auditorías marcadas para recuperación.
+ * Muestra ventas fallidas que pueden ser reasignadas.
+ */
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -11,7 +19,7 @@ import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { RecoveryEditModal } from "./recovery-edit-modal"
 
-// Status Colors Helper
+/* Helper para colores de estado */
 const getStatusColor = (status: string) => {
     const statusColors: Record<string, string> = {
         "Mensaje enviado": "bg-cyan-100 text-cyan-800 border-cyan-300 dark:bg-cyan-900/30 dark:text-cyan-300 dark:border-cyan-800",
@@ -118,7 +126,7 @@ export function AuditoriasRecupero() {
 
     return (
         <div className="space-y-6 animate-fade-in-up">
-            {/* Filters */}
+            {/* Sección de filtros */}
             <div className={cn(
                 "rounded-2xl border p-4 shadow-sm",
                 theme === "dark" ? "bg-white/5 border-white/10" : "bg-white border-gray-200"
@@ -231,7 +239,7 @@ export function AuditoriasRecupero() {
                 </div>
             </div>
 
-            {/* Table */}
+            {/* Tabla de recupero */}
             <div className={cn(
                 "rounded-2xl border shadow-sm overflow-hidden",
                 theme === "dark" ? "bg-white/5 border-white/10" : "bg-white border-gray-200"
@@ -345,7 +353,7 @@ export function AuditoriasRecupero() {
                 </div>
             </div>
 
-            {/* Edit Modal */}
+            {/* Modal de edición */}
             {showModal && selectedAudit && (
                 <RecoveryEditModal
                     audit={selectedAudit}

@@ -1,4 +1,10 @@
-// backend/src/routes/templateRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE PLANTILLAS (templateRoutes.js)
+ * ============================================================
+ * CRUD de plantillas de mensajes reutilizables.
+ * Soporta variables y spintax para mensajes dinámicos.
+ */
 
 const express = require("express");
 const router = express.Router();
@@ -8,7 +14,7 @@ const validateRequest = require("../middlewares/validateRequest");
 const { requireAuth } = require("../middlewares/authMiddleware");
 const { permit } = require("../middlewares/roleMiddleware");
 
-// CRUD
+/* ========== CRUD DE PLANTILLAS ========== */
 router.post("/", requireAuth, permit("asesor", "auditor", "supervisor", "administrativo", "gerencia"), createTemplateValidator, validateRequest, templateController.createTemplate);
 router.get("/", requireAuth, permit("asesor", "auditor", "supervisor", "administrativo", "gerencia"), templateController.getTemplates);
 router.get("/:id", requireAuth, permit("asesor", "auditor", "supervisor", "administrativo", "gerencia"), templateController.getTemplateById);

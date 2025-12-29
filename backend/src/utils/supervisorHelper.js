@@ -1,15 +1,17 @@
-// backend/src/utils/supervisorHelper.js
+/**
+ * ============================================================
+ * HELPER DE SUPERVISORES (supervisorHelper.js)
+ * ============================================================
+ * Funciones para determinar el supervisor correcto de una auditoría
+ * basándose en el historial de equipos del asesor y fechas.
+ */
 
 const User = require('../models/User');
 const logger = require('./logger');
 
 /**
- * Obtiene el snapshot del supervisor correcto para una auditoría
- * basándose en el historial de equipos del asesor y la fecha de la venta
- * 
- * @param {Object} audit - Documento de Audit (con fechaCreacionQR y statusHistory)
- * @param {Object} asesor - Documento de User (asesor) con teamHistory populated
- * @returns {Object|null} Snapshot del supervisor {_id, nombre, numeroEquipo} o null
+ * Obtiene el supervisor correcto para una auditoría.
+ * Usa el historial de equipos del asesor para fechas pasadas.
  */
 async function getSupervisorSnapshotForAudit(audit, asesor) {
     try {

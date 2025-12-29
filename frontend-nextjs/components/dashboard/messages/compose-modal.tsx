@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * MODAL DE COMPOSICIÓN (compose-modal.tsx)
+ * ============================================================
+ * Modal para redactar nuevos mensajes internos.
+ * Permite buscar destinatarios y adjuntar archivos.
+ */
+
 "use client"
 
 import { useState, useEffect } from "react"

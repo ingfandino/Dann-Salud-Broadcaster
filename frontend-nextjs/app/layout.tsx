@@ -1,9 +1,17 @@
+/**
+ * ============================================================
+ * LAYOUT RAÍZ (app/layout.tsx)
+ * ============================================================
+ * Layout principal de la aplicación Next.js.
+ * Configura fuentes, metadatos SEO e íconos adaptativos.
+ */
+
 import type React from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
 
-// <CHANGE> Using Inter font for modern look
+/* ========== FUENTE PRINCIPAL ========== */
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" })
 
 export const metadata: Metadata = {

@@ -1,4 +1,16 @@
-// backend/src/controllers/auditController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE AUDITORÍAS (auditController)
+ * ============================================================
+ * Gestiona el ciclo de vida completo de las auditorías (ventas):
+ * - Creación y programación de turnos
+ * - Actualización de estados y datos
+ * - Gestión de multimedia (imágenes, videos, claves)
+ * - Exportación a CSV
+ * - Notificaciones en tiempo real vía Socket.IO
+ * 
+ * Las auditorías representan ventas pendientes de verificación.
+ */
 
 const Audit = require('../models/Audit');
 const User = require('../models/User');
@@ -50,7 +62,7 @@ function parseLocalDate(dateStr) {
 exports.createAudit = async (req, res) => {
     const { nombre, cuil, telefono, tipoVenta, obraSocialAnterior, obraSocialVendida, scheduledAt, asesor, validador } = req.body;
 
-    // Parse scheduledAt directly as Date - frontend sends ISO string with correct timezone
+    /* Parsear scheduledAt como Date - el frontend envía ISO string con timezone correcto */
     const sched = new Date(scheduledAt);
     if (!sched || isNaN(sched.getTime())) {
         return res.status(400).json({ message: 'Fecha inválida' });
@@ -134,7 +146,7 @@ exports.createAudit = async (req, res) => {
 
     await audit.save();
 
-    // Poblar datos para notificación
+    /* Poblar datos para notificación */
     await audit.populate('createdBy', 'nombre email role numeroEquipo');
     await audit.populate('datosExtraHistory.updatedBy', 'nombre name username email role');
     await audit.populate('statusHistory.updatedBy', 'nombre name username email role');
@@ -172,7 +184,7 @@ exports.getAuditsByDate = async (req, res) => {
             dateTo,
             afiliado,
             cuil,
-            telefono, // ✅ Nuevo: Soporte para búsqueda por teléfono
+            telefono,
             obraAnterior,
             obraVendida,
             estado,
@@ -182,19 +194,19 @@ exports.getAuditsByDate = async (req, res) => {
             auditor,
             supervisor,
             administrador,
-            ignoreDate, // ✅ Nuevo: Flag para ignorar filtro de fecha por defecto
-            dateField, // ✅ Nuevo: Campo de fecha a filtrar (default: scheduledAt)
-            userId // ✅ Nuevo: Filtrar por usuario específico (para estadísticas)
+            ignoreDate,
+            dateField,
+            userId
         } = req.query;
 
         let filter = {};
 
-        // ✅ Si se busca por CUIL o teléfono (validación de duplicados), no aplicar filtro de fecha
-        // Esto permite encontrar todos los registros históricos para validación
+        /* Si se busca por CUIL o teléfono (validación de duplicados), no aplicar filtro de fecha
+           Esto permite encontrar todos los registros históricos para validación */
         if ((cuil || telefono) && !date && !dateFrom && !dateTo) {
-            // Validación de duplicados: buscar en todo el historial
+            /* Validación de duplicados: buscar en todo el historial */
             if (cuil && telefono) {
-                // Buscar registros que coincidan en CUIL O teléfono
+                /* Buscar registros que coincidan en CUIL O teléfono */
                 filter.$or = [
                     { cuil: { $regex: `^${escapeRegex(cuil)}$`, $options: "i" } },
                     { telefono: { $regex: `^${escapeRegex(telefono)}$`, $options: "i" } }
@@ -206,31 +218,37 @@ exports.getAuditsByDate = async (req, res) => {
             }
         } else if (userId && !date && !dateFrom && !dateTo) {
             // ✅ Si filtramos por usuario para estadísticas y no hay fecha, traemos TODO el historial
-            // No aplicamos filtro de fecha
+            /* No aplicamos filtro de fecha */
         } else if (ignoreDate === 'true') {
             // ✅ Si se solicita ignorar la fecha, no aplicamos ningún filtro de fecha
             // Útil para Recuperaciones que necesita ver todo el historial
         } else {
-            // Filtro de fecha normal para listados
+            /* Filtro de fecha normal para listados */
             const fieldToFilter = dateField || 'scheduledAt';
 
             if (dateFrom && dateTo) {
                 const from = parseLocalDate(dateFrom);
                 const to = parseLocalDate(dateTo);
-                to.setDate(to.getDate() + 1); // incluir hasta fin de día
+                to.setDate(to.getDate() + 1); /* incluir hasta fin de día */
 
-                // ✅ Si no se especifica campo, buscar en ambos para no perder ventas
-                // donde fechaCreacionQR difiere de scheduledAt
+                /* La lógica es: SI fechaCreacionQR tiene valor -> usar ese, SINO -> usar scheduledAt */
                 if (!dateField) {
                     filter.$or = [
-                        { scheduledAt: { $gte: from, $lt: to } },
-                        { fechaCreacionQR: { $gte: from, $lt: to } }
+                        // Caso 1: fechaCreacionQR existe y tiene valor válido en el rango
+                        { fechaCreacionQR: { $ne: null, $gte: from, $lt: to } },
+                        // Caso 2: fechaCreacionQR NO existe o es null -> usar scheduledAt
+                        {
+                            $and: [
+                                { $or: [{ fechaCreacionQR: { $exists: false } }, { fechaCreacionQR: null }] },
+                                { scheduledAt: { $gte: from, $lt: to } }
+                            ]
+                        }
                     ];
                 } else {
                     filter[fieldToFilter] = { $gte: from, $lt: to };
                 }
             } else {
-                // default: día actual (si no hay rango ni date explícito)
+                /* default: día actual (si no hay rango ni date explícito) */
                 const day = parseLocalDate(date || undefined);
                 const next = new Date(day);
                 next.setDate(next.getDate() + 1);
@@ -275,17 +293,15 @@ exports.getAuditsByDate = async (req, res) => {
         }
         if (tipo) filter.tipoVenta = { $regex: escapeRegex(tipo), $options: "i" };
 
-        // Visibilidad por rol
+        /* Visibilidad por rol */
         const expRole = (req.user?.role || '').toLowerCase();
         if (expRole === 'supervisor' || expRole === 'asesor') {
-            // Supervisores y Asesores ven TODAS las auditorías
-            // El frontend ocultará teléfonos de otros grupos
-            // No aplicamos ningún filtro adicional
+            /* Supervisores y Asesores ven TODAS las auditorías
+               El frontend ocultará teléfonos de otros grupos */
         }
 
-        // ✅ CORRECCIÓN: Ya NO se excluyen auditorías de recuperación de FollowUp
-        // Se mostrarán TODAS las auditorías para evitar que "desaparezcan"
-        // El frontend mostrará un indicador visual para las que están en recuperación
+        /* Ya NO se excluyen auditorías de recuperación de FollowUp
+           Se mostrarán TODAS para evitar que "desaparezcan" */
 
 
 
@@ -297,7 +313,7 @@ exports.getAuditsByDate = async (req, res) => {
             })
             .populate('validador', 'nombre name email') // ✅ Usuario que valida la venta
             .populate('auditor', 'nombre name email')
-            .populate('administrador', 'nombre name email') // ✅
+            .populate('administrador', 'nombre name email')
             .populate('groupId', 'nombre name')
             .populate('datosExtraHistory.updatedBy', 'nombre name username email role')
             .populate('statusHistory.updatedBy', 'nombre name username email role')
@@ -312,7 +328,7 @@ exports.getAuditsByDate = async (req, res) => {
             .sort({ scheduledAt: 1 })
             .lean();
 
-        // Filtrado adicional (asesor / auditor / grupo) - strings parciales (no siempre llegan ids)
+        /* Filtrado adicional (asesor / auditor / grupo) - strings parciales */
         if (asesor) {
             const queries = String(asesor)
                 .split(",")
@@ -351,13 +367,13 @@ exports.getAuditsByDate = async (req, res) => {
             }
         }
 
-        // Enriquecer supervisor/grupo cuando falte, usando numeroEquipo
-        const supCache = new Map(); // key: numeroEquipo -> supervisor user
+        /* Enriquecer supervisor/grupo cuando falte, usando numeroEquipo */
+        const supCache = new Map(); /* key: numeroEquipo -> supervisor user */
         await Promise.all(audits.map(async (a) => {
             let as = a.asesor;
             if (!as) return;
 
-            // Resolver asesor cuando no viene populado (ObjectId) o viene como email string
+            /* Resolver asesor cuando no viene populado (ObjectId) o viene como email string */
             if (!as.email && !as.nombre && !as.name) {
                 try {
                     if (typeof as === 'string' && as.includes('@')) {
@@ -375,7 +391,7 @@ exports.getAuditsByDate = async (req, res) => {
             }
 
             const grupo = as && as.numeroEquipo;
-            // Fallback de supervisor a partir de numeroEquipo
+            /* Fallback de supervisor a partir de numeroEquipo */
             if (as && (!as.supervisor || !as.supervisor._id) && grupo) {
                 if (!supCache.has(String(grupo))) {
                     const sup = await User.findOne({ role: 'supervisor', numeroEquipo: String(grupo) })
@@ -388,13 +404,13 @@ exports.getAuditsByDate = async (req, res) => {
                     a.asesor.supervisor = found;
                 }
             }
-            // Fallback de groupId a partir de numeroEquipo
+            /* Fallback de groupId a partir de numeroEquipo */
             if (!a.groupId && grupo) {
                 a.groupId = { nombre: String(grupo) };
             }
         }));
 
-        // Aplicar filtros de grupo y supervisor DESPUÉS del enriquecimiento
+        /* Aplicar filtros de grupo y supervisor DESPUÉS del enriquecimiento */
         if (grupo) {
             const groupFilters = String(grupo)
                 .split(",")
@@ -469,29 +485,29 @@ exports.getAvailableSlots = async (req, res) => {
     const { date } = req.query;
     if (!date) return res.status(400).json({ message: 'date required' });
 
-    // Parsear fecha recibida como YYYY-MM-DD y crear rango en UTC
-    // El frontend envía fecha en formato local, necesitamos buscar en todo el día
+    /* Parsear fecha recibida como YYYY-MM-DD y crear rango en UTC
+       El frontend envía fecha en formato local, necesitamos buscar en todo el día */
     const [year, month, day] = date.split('-').map(Number);
 
-    // Crear inicio del día en Argentina (UTC-3)
+    /* Crear inicio del día en Argentina (UTC-3) */
     const startOfDay = new Date(Date.UTC(year, month - 1, day, 3, 0, 0)); // 00:00 ARG = 03:00 UTC
     const endOfDay = new Date(Date.UTC(year, month - 1, day + 1, 2, 59, 59)); // 23:59 ARG = 02:59 UTC siguiente día
 
     const slots = [];
 
-    // Generar slots de 09:20 a 23:00 (hora local Argentina) ✅ Extendido hasta 23:00
+    /* Generar slots de 09:20 a 23:00 (hora local Argentina) - Extendido hasta 23:00 */
     for (let hour = 9; hour <= 23; hour++) {
         const minutes = hour === 9 ? [20, 40] : hour === 23 ? [0] : [0, 20, 40];
 
         for (const minute of minutes) {
-            if (hour === 23 && minute > 0) continue; // No generar después de 23:00
+            if (hour === 23 && minute > 0) continue; /* No generar después de 23:00 */
 
-            // Crear slot en hora local de Argentina
+            /* Crear slot en hora local de Argentina */
             const slotStartLocal = new Date(year, month - 1, day, hour, minute, 0);
             const slotEndLocal = new Date(slotStartLocal);
             slotEndLocal.setMinutes(slotEndLocal.getMinutes() + 20);
 
-            // Contar auditorías que caen en este slot
+            /* Contar auditorías que caen en este slot */
             const count = await Audit.countDocuments({
                 scheduledAt: {
                     $gte: slotStartLocal,
@@ -607,24 +623,6 @@ exports.updateStatus = async (req, res) => {
             emitAuditUpdate(audit._id, { status, updatedBy: req.user._id });
 
             // ✅ Enviar notificación interna al asesor si no fue él quien hizo el cambio
-            /* 
-            // DESACTIVADO POR SOLICITUD DEL USUARIO (Solo notificaciones de distribución de datos)
-            if (audit.asesor && audit.asesor.toString() !== req.user._id.toString()) {
-                const message = await InternalMessage.create({
-                    from: req.user._id,
-                    to: audit.asesor,
-                    subject: `Actualización de estado: ${audit.afiliadoNombre}`,
-                    content: `El estado de la auditoría para ${audit.afiliadoNombre} ha cambiado a "${status}".`,
-                    read: false
-                });
-
-                const io = getIO();
-                if (io) {
-                    const populatedMsg = await InternalMessage.findById(message._id).populate('from', 'nombre email');
-                    io.to(audit.asesor.toString()).emit('new_message', populatedMsg);
-                }
-            }
-            */
         } catch (e) {
             logger.error("emitAuditUpdate error", e);
         }
@@ -634,15 +632,15 @@ exports.updateStatus = async (req, res) => {
 };
 
 /**
- * Editar auditoría (roles: admin, auditor, supervisor)
+ * Editar auditoría (roles: administrativo, auditor, supervisor, gerencia, RR.HH)
  */
 exports.updateAudit = async (req, res) => {
     try {
         const { id } = req.params;
         const updates = req.body;
 
-        // Solo admin/auditor/supervisor/gerencia/RR.HH/administrativo pueden editar
-        if (!['admin', 'auditor', 'supervisor', 'gerencia', 'RR.HH', 'administrativo'].includes(req.user.role)) {
+        // Solo administrativo/auditor/supervisor/gerencia/RR.HH pueden editar
+        if (!['administrativo', 'auditor', 'supervisor', 'gerencia', 'RR.HH'].includes(req.user.role)) {
             return res.status(403).json({ message: 'No autorizado' });
         }
 
@@ -663,7 +661,10 @@ exports.updateAudit = async (req, res) => {
             // 
             if (updates.status === 'QR hecho') {
                 updates.scheduledAt = new Date();
-                updates.fechaCreacionQR = new Date(); // ✅ Nuevo campo
+                // ✅ Solo asignar fechaCreacionQR automáticamente si NO viene del frontend
+                if (!updates.fechaCreacionQR) {
+                    updates.fechaCreacionQR = new Date();
+                }
                 logger.info(`Auditoría ${id} cambió a QR hecho. Fecha actualizada a: ${updates.scheduledAt}`);
             }
 
@@ -973,7 +974,7 @@ exports.uploadMultimedia = async (req, res) => {
     try {
         const { id } = req.params;
         const files = req.files || {};
-        const { afiliadoKey, afiliadoKeyDefinitiva } = req.body; // ✅ se añade este campo
+        const { afiliadoKey, afiliadoKeyDefinitiva } = req.body;
 
         const audit = await Audit.findById(id);
         if (!audit) return res.status(404).json({ message: "Auditoría no encontrada" });
@@ -1363,7 +1364,6 @@ exports.getAuditsByDateRange = async (req, res) => {
         // ✅ Restricción por rol
         const rangeRole = (req.user?.role || '').toLowerCase();
         if (rangeRole === 'supervisor') {
-            // ✅ CAMBIO: Supervisores ven TODAS las auditorías
             // El frontend ocultará teléfonos de otros grupos
         } else if (rangeRole === 'asesor') {
             // Asesor: solo lo creado por él/ella
@@ -1377,7 +1377,7 @@ exports.getAuditsByDateRange = async (req, res) => {
                 populate: { path: 'supervisor', select: 'nombre name email' }
             })
             .populate('auditor', 'nombre name email')
-            .populate('administrador', 'nombre name email') // ✅
+            .populate('administrador', 'nombre name email')
             .populate('groupId', 'nombre name')
             .sort({ scheduledAt: 1 });
 

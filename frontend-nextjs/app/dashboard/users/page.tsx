@@ -1,3 +1,4 @@
+/** Página: Gestión de Usuarios */
 'use client';
 
 import { DashboardContent } from '@/components/dashboard/dashboard-content';

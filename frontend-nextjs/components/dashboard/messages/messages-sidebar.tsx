@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * SIDEBAR DE MENSAJES (messages-sidebar.tsx)
+ * ============================================================
+ * Navegación lateral del sistema de mensajes.
+ * Permite cambiar entre bandeja, enviados y destacados.
+ */
+
 "use client"
 
 import { Button } from "@/components/ui/button"

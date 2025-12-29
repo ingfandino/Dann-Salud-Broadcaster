@@ -1,8 +1,15 @@
-// backend/src/utils/jwt.js
+/**
+ * ============================================================
+ * UTILIDADES JWT (jwt.js)
+ * ============================================================
+ * Funciones para firmar y verificar tokens JWT.
+ * Tokens duran 30 días por defecto para evitar deslogueos.
+ */
 
 const jwt = require("jsonwebtoken");
 const logger = require("../utils/logger");
 
+/* ========== CONFIGURACIÓN ========== */
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "30d"; // 30 días para evitar deslogueos frecuentes
 

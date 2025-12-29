@@ -1,3 +1,4 @@
+/** Página: Empleados Inactivos (RR.HH.) */
 'use client';
 
 import { DashboardContent } from '@/components/dashboard/dashboard-content';

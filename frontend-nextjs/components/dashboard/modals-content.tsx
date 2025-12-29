@@ -1,12 +1,17 @@
-// Modal components for Turnos and Estadísticas
-// This file contains the JSX for the modals to be inserted into auditorias-seguimiento.tsx
+/**
+ * ============================================================
+ * CONTENIDO DE MODALES (modals-content.tsx)
+ * ============================================================
+ * Templates JSX para modales de Turnos y Estadísticas.
+ * Se insertan dinámicamente en auditorias-seguimiento.
+ */
 
 export const TurnosModalContent = `
-      {/* Turnos Modal */}
+      {/* Modal de Turnos */}
       {showSlotsModal && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
-            {/* Header */}
+            {/* Encabezado */}
             <div className="flex items-center justify-between p-5 border-b dark:border-gray-700 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20">
               <div className="flex items-center gap-3">
                 <div className="bg-purple-600 p-2 rounded-lg">
@@ -36,7 +41,7 @@ export const TurnosModalContent = `
               />
             </div>
 
-            {/* Legend */}
+            {/* Leyenda de disponibilidad */}
             <div className="p-5 bg-blue-50 dark:bg-blue-900/20 border-b dark:border-gray-700">
               <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Leyenda de disponibilidad:</p>
               <div className="flex flex-wrap gap-3 text-xs">
@@ -59,7 +64,7 @@ export const TurnosModalContent = `
               </div>
             </div>
 
-            {/* Slots List */}
+            {/* Lista de slots disponibles */}
             <div className="flex-1 overflow-y-auto p-5">
               {loadingSlots ? (
                 <div className="flex items-center justify-center py-12">
@@ -104,7 +109,7 @@ export const TurnosModalContent = `
               )}
             </div>
 
-            {/* Footer */}
+            {/* Pie del modal */}
             <div className="p-5 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex justify-between items-center">
               <div className="text-sm text-gray-600 dark:text-gray-400">
                 <span className="font-semibold">Total de turnos:</span> {availableSlots.length}
@@ -123,11 +128,11 @@ export const TurnosModalContent = `
 `
 
 export const EstadisticasModalContent = `
-      {/* Estadísticas Modal */}
+      {/* Modal de Estadísticas */}
       {showStatsModal && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
-            {/* Header */}
+            {/* Encabezado del modal */}
             <div className="flex items-center justify-between p-5 border-b dark:border-gray-700 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20">
               <div className="flex items-center gap-3">
                 <div className="bg-indigo-600 p-2 rounded-lg">
@@ -157,7 +162,7 @@ export const EstadisticasModalContent = `
               />
             </div>
 
-            {/* Stats List */}
+            {/* Lista de estadísticas */}
             <div className="flex-1 overflow-y-auto p-5">
               {loadingStats ? (
                 <div className="flex items-center justify-center py-12">
@@ -197,7 +202,7 @@ export const EstadisticasModalContent = `
                           </div>
                         </div>
 
-                        {/* Progress bar */}
+                        {/* Barra de progreso */}
                         <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 mt-2">
                           <div
                             className="bg-gradient-to-r from-indigo-500 to-purple-500 h-2 rounded-full transition-all duration-500"
@@ -212,7 +217,7 @@ export const EstadisticasModalContent = `
               )}
             </div>
 
-            {/* Footer */}
+            {/* Pie del modal con totales */}
             <div className="p-5 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex justify-between items-center">
               <div className="text-sm text-gray-600 dark:text-gray-400">
                 <span className="font-semibold">Total contactaciones:</span> {salesStats.reduce((sum: number, s: any) => sum + s.count, 0)}

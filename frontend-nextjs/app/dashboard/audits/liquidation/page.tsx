@@ -1,3 +1,4 @@
+/** Página: Liquidación de Auditorías */
 'use client';
 
 import { DashboardContent } from "@/components/dashboard/dashboard-content"

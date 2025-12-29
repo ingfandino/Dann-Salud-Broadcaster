@@ -1,4 +1,15 @@
-// backend/src/routes/authRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE AUTENTICACIÓN (authRoutes.js)
+ * ============================================================
+ * Endpoints públicos para autenticación de usuarios.
+ * 
+ * POST /api/auth/register - Registro de nuevo usuario
+ * POST /api/auth/login - Inicio de sesión (devuelve JWT)
+ * GET  /api/auth/me - Perfil del usuario autenticado
+ * POST /api/auth/forgot-password - Solicitar reset de contraseña
+ * POST /api/auth/reset-password - Completar reset de contraseña
+ */
 
 const express = require("express");
 const router = express.Router();
@@ -8,7 +19,7 @@ const { createUserValidator } = require("../validators/userValidator");
 const { body } = require("express-validator");
 const { validationResult } = require("express-validator");
 
-// Middleware genérico para manejar errores de validación
+/** Middleware para manejar errores de validación */
 const validate = (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {

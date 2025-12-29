@@ -1,8 +1,14 @@
-// backend/src/middlewares/roleMiddleware.js
+/**
+ * ============================================================
+ * MIDDLEWARE DE ROLES (roleMiddleware.js)
+ * ============================================================
+ * Control de acceso basado en roles de usuario.
+ * Incluye helpers para filtrar por equipo/supervisor.
+ */
 
 const User = require("../models/User");
 
-// Permite acceso si el rol del usuario está dentro de la lista
+/** Permite acceso solo si el rol del usuario está en la lista */
 exports.permit = (...roles) => {
     const allowed = roles.map(r => (r || '').toLowerCase());
     return (req, res, next) => {

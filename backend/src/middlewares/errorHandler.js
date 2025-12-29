@@ -1,4 +1,11 @@
-// backend/src/middlewares/errorHandler.js
+/**
+ * ============================================================
+ * MIDDLEWARE DE ERRORES (errorHandler.js)
+ * ============================================================
+ * Manejo centralizado de errores de la aplicación.
+ * Genera traceId único, sanitiza mensajes en producción,
+ * y maneja errores de validación, MongoDB y JWT.
+ */
 
 const isProduction = process.env.NODE_ENV === "production";
 const crypto = require("crypto");

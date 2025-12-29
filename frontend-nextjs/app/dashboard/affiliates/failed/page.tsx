@@ -1,3 +1,4 @@
+/** Página: Afiliaciones Fallidas */
 'use client';
 
 import { DashboardContent } from '@/components/dashboard/dashboard-content';

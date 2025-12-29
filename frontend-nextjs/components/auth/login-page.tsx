@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * PÁGINA DE INICIO DE SESIÓN (login-page.tsx)
+ * ============================================================
+ * Formulario de autenticación con fondo animado.
+ * Incluye toggle de tema claro/oscuro.
+ */
+
 "use client"
 
 import type React from "react"
@@ -24,7 +32,7 @@ export function LoginPage({ onLogin, onRegister, onRecover }: LoginPageProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-    // Simulate API call
+    /* Simular llamada API */
     await new Promise((resolve) => setTimeout(resolve, 1500))
     setIsLoading(false)
     onLogin()
@@ -45,7 +53,7 @@ export function LoginPage({ onLogin, onRegister, onRecover }: LoginPageProps) {
       <AnimatedBackground theme={theme} />
       <FloatingShapes theme={theme} />
 
-      {/* Theme toggle - discreet position */}
+      {/* Botón de cambio de tema */}
       <button
         onClick={toggleTheme}
         className={`fixed top-4 right-4 p-2.5 rounded-full transition-all duration-300 hover:scale-110 z-50 ${
@@ -55,10 +63,10 @@ export function LoginPage({ onLogin, onRegister, onRecover }: LoginPageProps) {
         {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
       </button>
 
-      {/* Main content */}
+      {/* Contenido principal */}
       <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-5xl flex flex-col lg:flex-row gap-6 lg:gap-8">
-          {/* Left card - Info */}
+          {/* Tarjeta izquierda - Información */}
           <div
             className={`flex-1 rounded-3xl p-8 lg:p-10 backdrop-blur-xl transition-all duration-500 animate-slide-in-left ${
               theme === "dark"
@@ -122,7 +130,7 @@ export function LoginPage({ onLogin, onRegister, onRecover }: LoginPageProps) {
               ))}
             </ul>
 
-            {/* Animated decoration */}
+            {/* Decoración animada */}
             <div className="mt-8 flex items-center gap-2">
               <Sparkles className={`w-5 h-5 animate-pulse ${theme === "dark" ? "text-[#F4C04A]" : "text-[#F4C04A]"}`} />
               <span className={`text-xs ${theme === "dark" ? "text-gray-500" : "text-gray-400"}`}>
@@ -131,7 +139,7 @@ export function LoginPage({ onLogin, onRegister, onRecover }: LoginPageProps) {
             </div>
           </div>
 
-          {/* Right card - Form */}
+          {/* Tarjeta derecha - Formulario */}
           <div
             className={`w-full lg:w-[400px] rounded-3xl p-8 backdrop-blur-xl transition-all duration-500 animate-fade-in-up ${
               theme === "dark"

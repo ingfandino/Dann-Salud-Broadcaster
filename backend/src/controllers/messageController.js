@@ -1,4 +1,10 @@
-// src/controllers/messageController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE MENSAJES (messageController)
+ * ============================================================
+ * Gestiona los mensajes de WhatsApp enviados y recibidos.
+ * Permite consultar historial, estadísticas y exportar datos.
+ */
 
 const Contact = require("../models/Contact");
 const Message = require("../models/Message");
@@ -8,7 +14,7 @@ const fs = require("fs");
 const logger = require("../utils/logger");
 const { parseSpintax } = require("../utils/spintax");
 
-// 🔹 Validador de teléfono argentino más flexible (8–13 dígitos)
+/** Valida teléfono argentino (8-13 dígitos) */
 const isValidPhone = (v) => {
     const digits = String(v || "").replace(/\D/g, "");
     return /^\d{8,13}$/.test(digits);

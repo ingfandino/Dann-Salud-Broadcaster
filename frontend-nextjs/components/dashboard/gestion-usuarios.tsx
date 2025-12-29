@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * GESTIÓN DE USUARIOS (gestion-usuarios.tsx)
+ * ============================================================
+ * Panel de administración de usuarios del sistema.
+ * Permite crear, editar, eliminar y cambiar roles.
+ */
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -40,14 +48,14 @@ export function GestionUsuarios() {
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 10
 
-  // Modal states
+  /* Estados de modales */
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [rolePopupOpen, setRolePopupOpen] = useState<string | null>(null)
   const [selectedUsuario, setSelectedUsuario] = useState<Usuario | null>(null)
   const [showPassword, setShowPassword] = useState(false)
 
-  // Form states
+  /* Estados del formulario */
   const [formData, setFormData] = useState({
     nombre: "",
     email: "",
@@ -218,7 +226,7 @@ export function GestionUsuarios() {
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {/* Header */}
+      {/* Encabezado con título y botón crear */}
       <div
         className={cn(
           "rounded-2xl border p-6",
@@ -244,7 +252,7 @@ export function GestionUsuarios() {
           </button>
         </div>
 
-        {/* Search and Filters */}
+        {/* Búsqueda y filtros */}
         <div className="flex flex-col md:flex-row gap-4 mb-6">
           <div className="flex-1 relative">
             <input
@@ -278,7 +286,7 @@ export function GestionUsuarios() {
           </select>
         </div>
 
-        {/* Table */}
+        {/* Tabla de usuarios */}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -320,7 +328,7 @@ export function GestionUsuarios() {
                       {usuario.role}
                     </button>
 
-                    {/* Role Change Modal (Portal) */}
+                    {/* Modal de cambio de rol (Portal) */}
                     {rolePopupOpen === usuario._id && typeof window !== 'undefined' && createPortal(
                       <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
                         <div
@@ -420,7 +428,7 @@ export function GestionUsuarios() {
           </table>
         </div>
 
-        {/* Pagination */}
+        {/* Paginación */}
         {totalPages > 1 && (
           <div className="flex items-center justify-center gap-4 mt-6">
             <button
@@ -456,7 +464,7 @@ export function GestionUsuarios() {
         )}
       </div>
 
-      {/* Edit/Create User Modal */}
+      {/* Modal de edición/creación de usuario */}
       {(editModalOpen || createModalOpen) && typeof window !== 'undefined' && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div

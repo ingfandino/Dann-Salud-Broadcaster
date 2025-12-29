@@ -15,7 +15,11 @@ import {
   Trash2,
   CheckCircle,
   X,
-  RefreshCw
+  RefreshCw,
+  ImageIcon,
+  Download,
+  Upload,
+  Loader2
 } from "lucide-react"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
@@ -31,6 +35,7 @@ interface Employee {
     role: string
     numeroEquipo?: string
     active: boolean
+    createdAt?: string
     teamHistory?: Array<{
       _id: string
       numeroEquipo: string
@@ -78,6 +83,8 @@ export function RRHHActivos() {
 
   // Edit form state
   const [editForm, setEditForm] = useState<Partial<Employee>>({})
+  const [uploadingDNI, setUploadingDNI] = useState(false)
+  const [newDNIFile, setNewDNIFile] = useState<File | null>(null)
 
   useEffect(() => {
     fetchEmployees()
@@ -127,7 +134,25 @@ export function RRHHActivos() {
 
     try {
       setSaving(true)
-      await api.employees.update(selectedEmpleado._id, editForm)
+
+      let fotoDNIPath = editForm.fotoDNI || selectedEmpleado.fotoDNI || ""
+
+      if (newDNIFile) {
+        setUploadingDNI(true)
+        try {
+          const uploadRes = await api.employees.uploadDNI(newDNIFile)
+          fotoDNIPath = uploadRes.data.fotoDNI || ""
+        } catch (uploadError: any) {
+          console.error("Error uploading DNI:", uploadError)
+          toast.error(uploadError.response?.data?.message || "Error al subir foto de DNI")
+          setUploadingDNI(false)
+          setSaving(false)
+          return
+        }
+        setUploadingDNI(false)
+      }
+
+      await api.employees.update(selectedEmpleado._id, { ...editForm, fotoDNI: fotoDNIPath })
       toast.success("Empleado actualizado correctamente")
 
       // If deactivated, show specific message
@@ -136,6 +161,7 @@ export function RRHHActivos() {
       }
 
       setEditModalOpen(false)
+      setNewDNIFile(null)
       fetchEmployees()
     } catch (error) {
       console.error("Error updating employee:", error)
@@ -143,6 +169,27 @@ export function RRHHActivos() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleDNIFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error("El archivo no puede superar 5MB")
+        return
+      }
+      if (!['image/jpeg', 'image/jpg', 'image/png'].includes(file.type)) {
+        toast.error("Solo se permiten archivos JPG y PNG")
+        return
+      }
+      setNewDNIFile(file)
+    }
+  }
+
+  const getDNIUrl = (path: string) => {
+    if (!path) return null
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+    return `${apiUrl}${path}`
   }
 
   const handleDelete = async (id: string) => {
@@ -192,7 +239,7 @@ export function RRHHActivos() {
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {/* Header con Stats */}
+      {/* Tarjetas de estadísticas */}
       <div className="flex flex-wrap gap-3">
         {statsCards.map((stat, index) => {
           const Icon = stat.icon
@@ -227,7 +274,7 @@ export function RRHHActivos() {
             : "bg-white border-gray-200 shadow-sm",
         )}
       >
-        {/* Indicador */}
+        {/* Indicador de estado */}
         <div
           className={cn(
             "flex items-center gap-2 mb-4 px-3 py-2 rounded-lg w-fit",
@@ -240,7 +287,7 @@ export function RRHHActivos() {
           </span>
         </div>
 
-        {/* Búsqueda y filtros */}
+        {/* Barra de búsqueda y filtros */}
         <div className="flex flex-col md:flex-row gap-4 mb-6">
           <div className="flex-1 relative">
             <Search
@@ -277,21 +324,21 @@ export function RRHHActivos() {
           </select>
         </div>
 
-        {/* Loading State */}
+        {/* Estado de carga */}
         {loading && (
           <div className="flex justify-center py-12">
             <RefreshCw className="w-8 h-8 animate-spin text-purple-500" />
           </div>
         )}
 
-        {/* Empty State */}
+        {/* Estado vacío */}
         {!loading && employees.length === 0 && (
           <div className="text-center py-12 text-gray-500">
             No hay empleados activos registrados.
           </div>
         )}
 
-        {/* Tablas por equipo */}
+        {/* Tablas agrupadas por equipo */}
         {!loading && Object.entries(employeesByTeam).map(([team, teamEmployees]) => (
           <div key={team} className="mb-6">
             <div className="flex items-center gap-2 mb-3">
@@ -609,15 +656,115 @@ export function RRHHActivos() {
                   </div>
                 )}
 
-                {/* ✅ Historial de Equipos */}
+                {/* Historial de equipos del empleado */}
                 {selectedEmpleado.userId && (
                   <TeamHistorySection
                     userId={selectedEmpleado.userId._id}
                     teamHistory={selectedEmpleado.userId.teamHistory}
                     currentNumeroEquipo={selectedEmpleado.userId.numeroEquipo}
+                    userCreatedAt={selectedEmpleado.userId.createdAt}
                     onUpdate={fetchEmployees}
                   />
                 )}
+
+                {/* Foto de DNI */}
+                <div className={cn(
+                  "p-4 rounded-lg border",
+                  theme === "dark" ? "bg-white/5 border-white/10" : "bg-gray-50 border-gray-200"
+                )}>
+                  <label className={cn(
+                    "flex items-center gap-2 text-sm font-medium mb-3",
+                    theme === "dark" ? "text-gray-300" : "text-gray-700"
+                  )}>
+                    <ImageIcon className="w-4 h-4" style={{ color: "#F4C04A" }} />
+                    Foto del DNI
+                  </label>
+
+                  {(selectedEmpleado.fotoDNI || newDNIFile) && (
+                    <div className="mb-3">
+                      <div className={cn(
+                        "relative w-full max-w-[200px] aspect-[3/2] rounded-lg overflow-hidden border",
+                        theme === "dark" ? "border-white/10" : "border-gray-200"
+                      )}>
+                        {newDNIFile ? (
+                          <img
+                            src={URL.createObjectURL(newDNIFile)}
+                            alt="Vista previa DNI"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : selectedEmpleado.fotoDNI ? (
+                          <img
+                            src={getDNIUrl(selectedEmpleado.fotoDNI) || ''}
+                            alt="Foto DNI"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none'
+                            }}
+                          />
+                        ) : null}
+                      </div>
+                      {newDNIFile && (
+                        <p className={cn("text-xs mt-1", theme === "dark" ? "text-green-400" : "text-green-600")}>
+                          ✅ Nueva imagen seleccionada: {newDNIFile.name}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    {selectedEmpleado.fotoDNI && !newDNIFile && (
+                      <a
+                        href={getDNIUrl(selectedEmpleado.fotoDNI) || ''}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download
+                        className={cn(
+                          "flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                          theme === "dark"
+                            ? "bg-white/10 text-gray-300 hover:bg-white/20"
+                            : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                        )}
+                      >
+                        <Download className="w-3 h-3" />
+                        Descargar
+                      </a>
+                    )}
+                    <label className={cn(
+                      "flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors",
+                      uploadingDNI ? "opacity-50 cursor-not-allowed" : "",
+                      theme === "dark"
+                        ? "bg-[#1E88E5]/20 text-[#1E88E5] hover:bg-[#1E88E5]/30"
+                        : "bg-[#1E88E5]/10 text-[#1E88E5] hover:bg-[#1E88E5]/20"
+                    )}>
+                      <Upload className="w-3 h-3" />
+                      {selectedEmpleado.fotoDNI || newDNIFile ? "Cambiar imagen" : "Subir imagen"}
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg,.png"
+                        onChange={handleDNIFileChange}
+                        disabled={uploadingDNI}
+                        className="hidden"
+                      />
+                    </label>
+                    {newDNIFile && (
+                      <button
+                        onClick={() => setNewDNIFile(null)}
+                        className={cn(
+                          "flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                          theme === "dark"
+                            ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                            : "bg-red-100 text-red-600 hover:bg-red-200"
+                        )}
+                      >
+                        <X className="w-3 h-3" />
+                        Cancelar
+                      </button>
+                    )}
+                  </div>
+                  <p className={cn("text-xs mt-2", theme === "dark" ? "text-gray-500" : "text-gray-500")}>
+                    Máximo 5MB. Formatos: JPG, PNG
+                  </p>
+                </div>
 
                 <div>
                   <label
@@ -661,7 +808,7 @@ export function RRHHActivos() {
                   )}
                   style={{ backgroundColor: "#17C787" }}
                 >
-                  {saving ? "Guardando..." : "Guardar Cambios"}
+                  {uploadingDNI ? "Subiendo DNI..." : saving ? "Guardando..." : "Guardar Cambios"}
                 </button>
               </div>
             </div>

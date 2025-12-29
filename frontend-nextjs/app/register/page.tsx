@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * PÁGINA DE REGISTRO (app/register/page.tsx)
+ * ============================================================
+ * Formulario de registro de nuevos usuarios.
+ * Incluye validación de campos y selección de rol.
+ */
+
 "use client"
 
 import type React from "react"
@@ -11,6 +19,7 @@ import { FloatingShapes } from "@/components/auth/floating-shapes"
 import { useAuth } from "@/lib/auth"
 import { toast } from "sonner"
 
+/** Página de registro de usuarios */
 export default function RegisterPage() {
     const router = useRouter()
     const { register } = useAuth()

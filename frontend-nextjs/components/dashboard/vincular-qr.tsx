@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * VINCULAR QR (vincular-qr.tsx)
+ * ============================================================
+ * Componente para escanear QR y vincular WhatsApp.
+ * Maneja reconexiones y muestra estado de la sesión.
+ */
+
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
@@ -277,7 +285,7 @@ export function VincularQR({ onSuccess }: VincularQRProps) {
                         : "bg-gradient-to-br from-white to-gray-50 border border-purple-100"
                 )}
             >
-                {/* Header */}
+                {/* Encabezado del modal QR */}
                 <div className="text-center mb-6">
                     <h2
                         className={cn(
@@ -297,7 +305,7 @@ export function VincularQR({ onSuccess }: VincularQRProps) {
                     </p>
                 </div>
 
-                {/* QR Code Display */}
+                {/* Visualización del código QR */}
                 <div className="mb-6">
                     {status === "loading" || refreshing ? (
                         <div className="flex flex-col items-center justify-center w-64 h-64">
@@ -314,13 +322,17 @@ export function VincularQR({ onSuccess }: VincularQRProps) {
                         </div>
                     ) : qr ? (
                         <motion.div
-                            key={qr}
+                            key={qr.substring(0, 50)}
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{ duration: 0.3 }}
                             className="border-4 border-white shadow-xl p-3 bg-white rounded-xl"
                         >
-                            <QRCode value={qr} size={256} />
+                            {qr.startsWith('data:') ? (
+                                <img src={qr} alt="QR Code" width={256} height={256} />
+                            ) : (
+                                <QRCode value={qr} size={256} />
+                            )}
                         </motion.div>
                     ) : status === "connected" ? (
                         <div className="flex flex-col items-center justify-center w-64 h-64">
@@ -345,7 +357,7 @@ export function VincularQR({ onSuccess }: VincularQRProps) {
                     )}
                 </div>
 
-                {/* Actions */}
+                {/* Botones de acción */}
                 <div className="w-full flex flex-col gap-3">
                     <button
                         onClick={handleRefresh}
@@ -364,7 +376,7 @@ export function VincularQR({ onSuccess }: VincularQRProps) {
                     </button>
                 </div>
 
-                {/* Instructions */}
+                {/* Instrucciones de uso */}
                 <div className={cn(
                     "mt-6 p-4 rounded-lg text-sm text-center",
                     theme === "dark" ? "bg-white/5 text-gray-400" : "bg-purple-50 text-gray-600"

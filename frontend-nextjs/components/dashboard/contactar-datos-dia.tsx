@@ -1,11 +1,21 @@
+/**
+ * ============================================================
+ * CONTACTAR DATOS DEL DÍA (contactar-datos-dia.tsx)
+ * ============================================================
+ * Vista de leads asignados al asesor para contactar hoy.
+ * Permite gestionar estados, enviar WhatsApp y ver historial.
+ */
+
 "use client"
 
-import { Table, Search, Download, RefreshCw, Phone, MessageCircle, Clock, CheckCircle, XCircle, Send, X, Calendar } from "lucide-react"
+import { Table, Search, Download, RefreshCw, Phone, MessageCircle, Clock, CheckCircle, XCircle, Send, X, UserPlus, Users } from "lucide-react"
 import { useTheme } from "./theme-provider"
 import { cn } from "@/lib/utils"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
+import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/react'
+import { useRouter } from "next/navigation"
 
 interface Lead {
     _id: string
@@ -27,17 +37,83 @@ export function ContactarDatosDia() {
     const [leads, setLeads] = useState<Lead[]>([])
     const [searchTerm, setSearchTerm] = useState("")
 
-    // WhatsApp Modal State
+    const router = useRouter()
+
+    /* Estado del modal de WhatsApp (flotante) */
     const [waModalOpen, setWaModalOpen] = useState(false)
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
     const [waMessage, setWaMessage] = useState("")
     const [sendingWa, setSendingWa] = useState(false)
+    const [waLinked, setWaLinked] = useState<boolean | null>(null) // null = no verificado
+    const waButtonRef = useRef<HTMLButtonElement | null>(null)
+    
+    // ✅ Sistema de plantillas de WhatsApp
+    const [waTemplates, setWaTemplates] = useState<{id: string, name: string, message: string}[]>([])
+    const [newTemplateName, setNewTemplateName] = useState("")
+    const [showSaveTemplate, setShowSaveTemplate] = useState(false)
+    
+    // Cargar plantillas desde localStorage al montar
+    useEffect(() => {
+        const saved = localStorage.getItem('wa_templates')
+        if (saved) {
+            try {
+                setWaTemplates(JSON.parse(saved))
+            } catch {
+                setWaTemplates([])
+            }
+        }
+    }, [])
+    
+    // Guardar plantillas en localStorage cuando cambien
+    const saveTemplates = (templates: typeof waTemplates) => {
+        setWaTemplates(templates)
+        localStorage.setItem('wa_templates', JSON.stringify(templates))
+    }
+    
+    const addTemplate = () => {
+        if (!newTemplateName.trim() || !waMessage.trim()) return
+        const newTemplate = {
+            id: Date.now().toString(),
+            name: newTemplateName.trim(),
+            message: waMessage
+        }
+        saveTemplates([...waTemplates, newTemplate])
+        setNewTemplateName("")
+        setShowSaveTemplate(false)
+        toast.success(`Plantilla "${newTemplate.name}" guardada`)
+    }
+    
+    const deleteTemplate = (id: string) => {
+        const updated = waTemplates.filter(t => t.id !== id)
+        saveTemplates(updated)
+        toast.success("Plantilla eliminada")
+    }
+    
+    const applyTemplate = (template: typeof waTemplates[0]) => {
+        // Reemplazar {nombre} con el nombre del afiliado
+        let msg = template.message
+        if (selectedLead) {
+            msg = msg.replace(/\{nombre\}/gi, selectedLead.affiliate.nombre || '')
+            msg = msg.replace(/\{telefono\}/gi, selectedLead.affiliate.telefono1 || '')
+        }
+        setWaMessage(msg)
+    }
 
-    // Reschedule Modal State
-    const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false)
-    const [rescheduleDate, setRescheduleDate] = useState("")
-    const [rescheduleNote, setRescheduleNote] = useState("")
-    const [rescheduling, setRescheduling] = useState(false)
+    // Floating UI para modal WhatsApp
+    const { refs: waRefs, floatingStyles: waFloatingStyles } = useFloating({
+        placement: 'left-start',
+        middleware: [offset(10), flip(), shift({ padding: 10 })],
+        whileElementsMounted: autoUpdate,
+    })
+
+    // Reasignar a Supervisor Modal State
+    const [reassignModalOpen, setReassignModalOpen] = useState(false)
+    const [reassignNote, setReassignNote] = useState("")
+    const [reassignHour, setReassignHour] = useState("") // ✅ Nuevo: Hora programada
+    const [reassigning, setReassigning] = useState(false)
+    const [supervisors, setSupervisors] = useState<{_id: string, nombre: string}[]>([])
+    const [selectedSupervisor, setSelectedSupervisor] = useState("")
+    const [modalScrollTop, setModalScrollTop] = useState(0) // Posición del scroll al abrir modal
 
     const fetchLeads = async () => {
         setLoading(true)
@@ -70,21 +146,76 @@ export function ContactarDatosDia() {
         }
     }
 
-    const openWaModal = (lead: Lead) => {
+    // Verificar vínculo WhatsApp al montar y cuando la ventana recupera el foco
+    const checkWaLink = async () => {
+        try {
+            const res = await api.whatsapp.status()
+            setWaLinked(res.data?.connected || false) // ✅ Usar 'connected' no 'isReady'
+        } catch {
+            setWaLinked(false)
+        }
+    }
+
+    useEffect(() => {
+        checkWaLink()
+        
+        // ✅ Re-verificar cuando la página recupera el foco (después de vincular)
+        const handleFocus = () => checkWaLink()
+        window.addEventListener('focus', handleFocus)
+        return () => window.removeEventListener('focus', handleFocus)
+    }, [])
+
+    const openWaModal = async (lead: Lead, buttonElement: HTMLButtonElement) => {
+        // ✅ Verificar en tiempo real antes de abrir modal
+        try {
+            const res = await api.whatsapp.status()
+            const isLinked = res.data?.connected || false
+            setWaLinked(isLinked)
+            
+            if (!isLinked) {
+                toast.error("WhatsApp no está vinculado. Redirigiendo...")
+                router.push('/dashboard/whatsapp')
+                return
+            }
+        } catch {
+            toast.error("Error verificando WhatsApp. Redirigiendo...")
+            router.push('/dashboard/whatsapp')
+            return
+        }
+
+        // ✅ Capturar posición del scroll para posicionar el modal
+        setModalScrollTop(window.scrollY || document.documentElement.scrollTop)
         setSelectedLead(lead)
         setWaMessage(`Hola ${lead.affiliate.nombre}, soy de Dann Salud. Te contacto por tu consulta sobre obra social.`)
         setWaModalOpen(true)
     }
 
-    const openRescheduleModal = (lead: Lead) => {
+    // Cargar supervisores al montar
+    useEffect(() => {
+        const fetchSupervisors = async () => {
+            try {
+                console.log("[DatosDia] Cargando supervisores con scope=supervisors...")
+                // ✅ Usar scope=supervisors para obtener lista de supervisores
+                const res = await api.users.list("scope=supervisors")
+                console.log("[DatosDia] Supervisores recibidos:", res.data?.length || 0)
+                const sups = (res.data || []).sort((a: any, b: any) => a.nombre?.localeCompare(b.nombre))
+                console.log("[DatosDia] Supervisores:", sups.map((s: any) => s.nombre))
+                setSupervisors(sups)
+            } catch (error) {
+                console.error("[DatosDia] Error cargando supervisores:", error)
+            }
+        }
+        fetchSupervisors()
+    }, [])
+
+    const openReassignModal = (lead: Lead) => {
         setSelectedLead(lead)
-        // Default: mañana a las 10am
-        const tomorrow = new Date()
-        tomorrow.setDate(tomorrow.getDate() + 1)
-        tomorrow.setHours(10, 0, 0, 0)
-        setRescheduleDate(tomorrow.toISOString().slice(0, 16)) // Format for datetime-local
-        setRescheduleNote("")
-        setRescheduleModalOpen(true)
+        setSelectedSupervisor("")
+        setReassignNote("")
+        setReassignHour("")
+        // ✅ Capturar posición del scroll actual para posicionar el modal
+        setModalScrollTop(window.scrollY || document.documentElement.scrollTop)
+        setReassignModalOpen(true)
     }
 
     const sendWhatsApp = async () => {
@@ -95,7 +226,7 @@ export function ContactarDatosDia() {
             await api.assignments.sendWhatsApp(selectedLead._id, { message: waMessage })
             toast.success("Mensaje enviado correctamente")
             setWaModalOpen(false)
-            setLeads(leads.map(l => l._id === selectedLead._id ? { ...l, status: 'En Gestión' } : l))
+            setLeads(leads.map(l => l._id === selectedLead._id ? { ...l, status: 'Llamando' } : l))
         } catch (error: any) {
             console.error("Error enviando WA:", error)
             toast.error(error.response?.data?.error || "Error al enviar mensaje")
@@ -104,24 +235,28 @@ export function ContactarDatosDia() {
         }
     }
 
-    const handleReschedule = async () => {
-        if (!selectedLead || !rescheduleDate) return
+    const handleReassign = async () => {
+        if (!selectedLead || !selectedSupervisor) {
+            toast.error("Selecciona un supervisor")
+            return
+        }
 
-        setRescheduling(true)
+        setReassigning(true)
         try {
-            await api.assignments.reschedule(selectedLead._id, {
-                date: new Date(rescheduleDate).toISOString(),
-                note: rescheduleNote
+            await api.assignments.reassign(selectedLead._id, {
+                supervisorId: selectedSupervisor,
+                note: reassignNote,
+                scheduledHour: reassignHour || undefined // ✅ Enviar hora si se proporcionó
             })
-            toast.success("Reprogramado exitosamente")
-            setRescheduleModalOpen(false)
-            // Actualizar estado localmente
-            setLeads(leads.map(l => l._id === selectedLead._id ? { ...l, status: 'En Gestión', subStatus: 'Reprogramado' } : l))
+            toast.success("Reasignado exitosamente. Se notificó al supervisor.")
+            setReassignModalOpen(false)
+            // Remover de la lista local ya que fue reasignado
+            setLeads(leads.filter(l => l._id !== selectedLead._id))
         } catch (error: any) {
-            console.error("Error reprogramando:", error)
-            toast.error(error.response?.data?.error || "Error al reprogramar")
+            console.error("Error reasignando:", error)
+            toast.error(error.response?.data?.error || "Error al reasignar")
         } finally {
-            setRescheduling(false)
+            setReassigning(false)
         }
     }
 
@@ -134,14 +269,31 @@ export function ContactarDatosDia() {
         )
     })
 
+    // Colores para badges de estado
     const getStatusColor = (status: string) => {
         switch (status) {
-            case 'Pendiente': return theme === 'dark' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
-            case 'En Gestión': return theme === 'dark' ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'
-            case 'Contactado': return theme === 'dark' ? 'bg-purple-500/20 text-purple-400' : 'bg-purple-100 text-purple-700'
+            case 'Pendiente': return theme === 'dark' ? 'bg-gray-500/20 text-gray-400' : 'bg-gray-100 text-gray-700'
+            case 'Llamando': return theme === 'dark' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-yellow-100 text-yellow-700'
+            case 'No contesta': return theme === 'dark' ? 'bg-orange-500/20 text-orange-400' : 'bg-orange-100 text-orange-700'
             case 'Venta': return theme === 'dark' ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-700'
-            case 'No Interesa': return theme === 'dark' ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700'
+            case 'No le interesa': return theme === 'dark' ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-700'
+            case 'Spam': return theme === 'dark' ? 'bg-blue-500/20 text-blue-400' : 'bg-blue-100 text-blue-700'
+            case 'Reasignada': return theme === 'dark' ? 'bg-purple-500/20 text-purple-400' : 'bg-purple-100 text-purple-700'
             default: return theme === 'dark' ? 'bg-gray-500/20 text-gray-400' : 'bg-gray-100 text-gray-700'
+        }
+    }
+
+    // Colores de fondo para filas según estado (Status Coloring)
+    const getRowBackgroundColor = (status: string) => {
+        switch (status) {
+            case 'Pendiente': return theme === 'dark' ? 'bg-gray-500/5' : 'bg-gray-50/50'
+            case 'Llamando': return theme === 'dark' ? 'bg-yellow-500/5' : 'bg-yellow-50/50'
+            case 'No contesta': return theme === 'dark' ? 'bg-orange-500/5' : 'bg-orange-50/50'
+            case 'Venta': return theme === 'dark' ? 'bg-green-500/10' : 'bg-green-50/70'
+            case 'No le interesa': return theme === 'dark' ? 'bg-red-500/5' : 'bg-red-50/50'
+            case 'Spam': return theme === 'dark' ? 'bg-blue-500/5' : 'bg-blue-50/50'
+            case 'Reasignada': return theme === 'dark' ? 'bg-purple-500/5' : 'bg-purple-50/50'
+            default: return ''
         }
     }
 
@@ -164,7 +316,7 @@ export function ContactarDatosDia() {
 
     return (
         <div className="animate-fade-in-up space-y-4 relative">
-            {/* Header */}
+            {/* Encabezado de la sección */}
             <div
                 className={cn(
                     "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -187,7 +339,7 @@ export function ContactarDatosDia() {
                 </p>
             </div>
 
-            {/* Search and Actions Bar */}
+            {/* Barra de búsqueda y acciones */}
             <div
                 className={cn(
                     "rounded-2xl border p-4 backdrop-blur-sm flex flex-col sm:flex-row gap-3 items-center justify-between",
@@ -244,7 +396,7 @@ export function ContactarDatosDia() {
                 </div>
             </div>
 
-            {/* Table */}
+            {/* Tabla de datos del día */}
             <div
                 className={cn(
                     "rounded-2xl border backdrop-blur-sm overflow-hidden",
@@ -283,8 +435,11 @@ export function ContactarDatosDia() {
                                 <tr
                                     key={item._id}
                                     className={cn(
-                                        "transition-colors",
-                                        theme === "dark" ? "hover:bg-white/5" : "hover:bg-purple-50/30",
+                                        "transition-all duration-200",
+                                        getRowBackgroundColor(item.status),
+                                        theme === "dark" 
+                                            ? "hover:bg-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/20 hover:scale-[1.01]" 
+                                            : "hover:bg-emerald-100 hover:shadow-md hover:shadow-emerald-200/50 hover:scale-[1.01]",
                                     )}
                                 >
                                     <td className="px-6 py-4">
@@ -326,11 +481,12 @@ export function ContactarDatosDia() {
                                                 )}
                                             >
                                                 <option value="Pendiente">Pendiente</option>
-                                                <option value="En Gestión">En Gestión</option>
-                                                <option value="Contactado">Contactado</option>
+                                                <option value="Llamando">Llamando</option>
+                                                <option value="No contesta">No contesta</option>
                                                 <option value="Venta">Venta</option>
-                                                <option value="No Interesa">No Interesa</option>
-                                                <option value="No Contesta">No Contesta</option>
+                                                <option value="No le interesa">No le interesa</option>
+                                                <option value="Spam">Spam</option>
+                                                <option value="Reasignada">Reasignada</option>
                                             </select>
                                             {item.subStatus && (
                                                 <span className={cn("text-[10px] italic", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
@@ -342,7 +498,7 @@ export function ContactarDatosDia() {
                                     <td className="px-6 py-4">
                                         <div className="flex gap-2">
                                             <button
-                                                onClick={() => openWaModal(item)}
+                                                onClick={(e) => openWaModal(item, e.currentTarget)}
                                                 className={cn(
                                                     "p-2 rounded-lg transition-colors",
                                                     theme === "dark" ? "bg-green-500/20 text-green-400 hover:bg-green-500/30" : "bg-green-100 text-green-600 hover:bg-green-200"
@@ -352,14 +508,14 @@ export function ContactarDatosDia() {
                                                 <MessageCircle className="w-4 h-4" />
                                             </button>
                                             <button
-                                                onClick={() => openRescheduleModal(item)}
+                                                onClick={() => openReassignModal(item)}
                                                 className={cn(
                                                     "p-2 rounded-lg transition-colors",
-                                                    theme === "dark" ? "bg-blue-500/20 text-blue-400 hover:bg-blue-500/30" : "bg-blue-100 text-blue-600 hover:bg-blue-200"
+                                                    theme === "dark" ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30" : "bg-purple-100 text-purple-600 hover:bg-purple-200"
                                                 )}
-                                                title="Reprogramar"
+                                                title="Reasignar a Supervisor"
                                             >
-                                                <Clock className="w-4 h-4" />
+                                                <UserPlus className="w-4 h-4" />
                                             </button>
                                         </div>
                                     </td>
@@ -378,42 +534,145 @@ export function ContactarDatosDia() {
                 </div>
             </div>
 
-            {/* WhatsApp Modal */}
+            {/* Modal de WhatsApp */}
             {waModalOpen && selectedLead && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-                    <div className={cn(
-                        "w-full max-w-md rounded-2xl border p-6 shadow-xl animate-scale-in",
-                        theme === "dark" ? "bg-[#1a1b26] border-white/10" : "bg-white border-gray-200"
-                    )}>
+                <div 
+                    className="absolute z-50 left-1/2 -translate-x-1/2 p-4"
+                    style={{ top: `${modalScrollTop + 50}px` }}
+                >
+                    <div
+                        className={cn(
+                            "w-[420px] rounded-2xl border p-5 shadow-2xl animate-scale-in",
+                            theme === "dark" 
+                                ? "bg-[#1a1b26] border-white/10 shadow-black/50" 
+                                : "bg-white border-gray-200 shadow-xl shadow-gray-400/30"
+                        )}
+                    >
+                        {/* Encabezado del modal */}
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className={cn("text-lg font-semibold flex items-center gap-2", theme === "dark" ? "text-white" : "text-gray-800")}>
+                            <h3 className={cn("text-base font-semibold flex items-center gap-2", theme === "dark" ? "text-white" : "text-gray-800")}>
                                 <MessageCircle className="w-5 h-5 text-green-500" />
                                 Enviar WhatsApp
                             </h3>
-                            <button onClick={() => setWaModalOpen(false)} className="text-gray-500 hover:text-gray-700">
+                            <button onClick={() => { setWaModalOpen(false); setShowSaveTemplate(false) }} className="text-gray-500 hover:text-gray-700">
                                 <X className="w-5 h-5" />
                             </button>
                         </div>
 
-                        <div className="mb-4">
-                            <p className={cn("text-sm mb-2", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
-                                Para: <span className="font-medium text-green-500">{selectedLead.affiliate.nombre}</span> ({selectedLead.affiliate.telefono1})
+                        {/* Información del destinatario */}
+                        <div className="mb-4 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                            <p className={cn("text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                                Para: <span className="font-semibold text-green-600">{selectedLead.affiliate.nombre}</span>
                             </p>
+                            <p className={cn("text-xs mt-1", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
+                                📱 {selectedLead.affiliate.telefono1}
+                            </p>
+                        </div>
+
+                        {/* Selector de plantillas de mensaje */}
+                        {waTemplates.length > 0 && (
+                            <div className="mb-3">
+                                <label className={cn("text-xs font-medium mb-1.5 block", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                                    📋 Plantillas guardadas
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                    {waTemplates.map(template => (
+                                        <div key={template.id} className="flex items-center gap-1">
+                                            <button
+                                                onClick={() => applyTemplate(template)}
+                                                className={cn(
+                                                    "px-2.5 py-1 rounded-lg text-xs font-medium transition-colors",
+                                                    theme === "dark" 
+                                                        ? "bg-purple-500/20 text-purple-300 hover:bg-purple-500/30" 
+                                                        : "bg-purple-100 text-purple-700 hover:bg-purple-200"
+                                                )}
+                                            >
+                                                {template.name}
+                                            </button>
+                                            <button
+                                                onClick={() => deleteTemplate(template.id)}
+                                                className="text-red-400 hover:text-red-500 p-0.5"
+                                                title="Eliminar plantilla"
+                                            >
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <p className={cn("text-[10px] mt-1.5 italic", theme === "dark" ? "text-gray-500" : "text-gray-400")}>
+                                    Tip: Usa {"{nombre}"} y {"{telefono}"} como variables
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Campo de texto del mensaje */}
+                        <div className="mb-4">
+                            <label className={cn("text-xs font-medium mb-1.5 block", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                                ✉️ Mensaje
+                            </label>
                             <textarea
                                 value={waMessage}
                                 onChange={(e) => setWaMessage(e.target.value)}
-                                rows={4}
+                                rows={5}
                                 className={cn(
-                                    "w-full p-3 rounded-xl border text-sm resize-none focus:ring-2 focus:ring-green-500/50 outline-none",
+                                    "w-full p-3 rounded-lg border text-sm resize-none focus:ring-2 focus:ring-green-500/50 outline-none",
                                     theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-gray-50 border-gray-200 text-gray-800"
                                 )}
                                 placeholder="Escribe tu mensaje aquí..."
                             />
                         </div>
 
+                        {/* Guardar mensaje como plantilla */}
+                        {showSaveTemplate ? (
+                            <div className="mb-4 p-3 rounded-lg border border-dashed border-purple-400/50 bg-purple-500/5">
+                                <label className={cn("text-xs font-medium mb-1.5 block", theme === "dark" ? "text-purple-300" : "text-purple-600")}>
+                                    Nombre de la plantilla
+                                </label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={newTemplateName}
+                                        onChange={(e) => setNewTemplateName(e.target.value)}
+                                        placeholder="Ej: Saludo inicial"
+                                        className={cn(
+                                            "flex-1 px-3 py-1.5 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-purple-500/50",
+                                            theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200"
+                                        )}
+                                    />
+                                    <button
+                                        onClick={addTemplate}
+                                        disabled={!newTemplateName.trim()}
+                                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50"
+                                    >
+                                        Guardar
+                                    </button>
+                                    <button
+                                        onClick={() => { setShowSaveTemplate(false); setNewTemplateName("") }}
+                                        className={cn("px-2 py-1.5 rounded-lg text-xs", theme === "dark" ? "text-gray-400 hover:text-gray-300" : "text-gray-500 hover:text-gray-700")}
+                                    >
+                                        Cancelar
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={() => setShowSaveTemplate(true)}
+                                disabled={!waMessage.trim()}
+                                className={cn(
+                                    "w-full mb-4 px-3 py-2 rounded-lg text-xs font-medium transition-colors border border-dashed",
+                                    theme === "dark" 
+                                        ? "border-purple-500/30 text-purple-400 hover:bg-purple-500/10 disabled:opacity-40" 
+                                        : "border-purple-300 text-purple-600 hover:bg-purple-50 disabled:opacity-40"
+                                )}
+                            >
+                                💾 Guardar mensaje como plantilla
+                            </button>
+                        )}
+
+                        {/* Botones de acción del modal */}
                         <div className="flex justify-end gap-3">
                             <button
-                                onClick={() => setWaModalOpen(false)}
+                                onClick={() => { setWaModalOpen(false); setShowSaveTemplate(false) }}
                                 className={cn(
                                     "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
                                     theme === "dark" ? "hover:bg-white/10 text-gray-300" : "hover:bg-gray-100 text-gray-600"
@@ -425,7 +684,7 @@ export function ContactarDatosDia() {
                                 onClick={sendWhatsApp}
                                 disabled={sendingWa || !waMessage.trim()}
                                 className={cn(
-                                    "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                                    "flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-colors",
                                     "bg-green-500 text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
                                 )}
                             >
@@ -437,7 +696,7 @@ export function ContactarDatosDia() {
                                 ) : (
                                     <>
                                         <Send className="w-4 h-4" />
-                                        Enviar Mensaje
+                                        Enviar WhatsApp
                                     </>
                                 )}
                             </button>
@@ -446,59 +705,95 @@ export function ContactarDatosDia() {
                 </div>
             )}
 
-            {/* Reschedule Modal */}
-            {rescheduleModalOpen && selectedLead && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-                    <div className={cn(
-                        "w-full max-w-md rounded-2xl border p-6 shadow-xl animate-scale-in",
-                        theme === "dark" ? "bg-[#1a1b26] border-white/10" : "bg-white border-gray-200"
-                    )}>
+            {/* Modal de reasignación a supervisor */}
+            {reassignModalOpen && selectedLead && (
+                <div 
+                    className="absolute z-50 left-1/2 -translate-x-1/2 p-4"
+                    style={{ top: `${modalScrollTop + 100}px` }}
+                >
+                    <div
+                        className={cn(
+                            "w-full max-w-md rounded-2xl border p-6 shadow-2xl animate-scale-in",
+                            theme === "dark" 
+                                ? "bg-[#1a1b26] border-white/10 shadow-black/50" 
+                                : "bg-white border-gray-200 shadow-xl shadow-gray-400/30"
+                        )}
+                    >
                         <div className="flex items-center justify-between mb-4">
                             <h3 className={cn("text-lg font-semibold flex items-center gap-2", theme === "dark" ? "text-white" : "text-gray-800")}>
-                                <Calendar className="w-5 h-5 text-blue-500" />
-                                Reprogramar Llamada
+                                <Users className="w-5 h-5 text-purple-500" />
+                                Reasignar a Supervisor
                             </h3>
-                            <button onClick={() => setRescheduleModalOpen(false)} className="text-gray-500 hover:text-gray-700">
+                            <button onClick={() => setReassignModalOpen(false)} className="text-gray-500 hover:text-gray-700">
                                 <X className="w-5 h-5" />
                             </button>
                         </div>
 
+                        <div className="mb-4 p-3 rounded-lg bg-purple-50 border border-purple-100">
+                            <p className={cn("text-sm", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                                Lead: <span className="font-semibold text-purple-600">{selectedLead.affiliate.nombre}</span>
+                            </p>
+                            <p className={cn("text-xs mt-1", theme === "dark" ? "text-gray-500" : "text-gray-500")}>
+                                Tel: {selectedLead.affiliate.telefono1} | CUIL: {selectedLead.affiliate.cuil}
+                            </p>
+                        </div>
+
                         <div className="space-y-4 mb-6">
                             <div>
-                                <label className={cn("text-xs mb-1 block", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
-                                    Fecha y Hora
+                                <label className={cn("text-sm font-medium mb-2 block", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                                    Supervisor destino *
+                                </label>
+                                <select
+                                    value={selectedSupervisor}
+                                    onChange={(e) => setSelectedSupervisor(e.target.value)}
+                                    className={cn(
+                                        "w-full p-3 rounded-lg border text-sm focus:ring-2 focus:ring-purple-500/50 outline-none",
+                                        theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-gray-50 border-gray-200 text-gray-800"
+                                    )}
+                                >
+                                    <option value="">Seleccionar supervisor...</option>
+                                    {supervisors.map(sup => (
+                                        <option key={sup._id} value={sup._id}>{sup.nombre}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className={cn("text-sm font-medium mb-2 block", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                                    <Clock className="w-4 h-4 inline mr-1" />
+                                    Hora sugerida para llamar (opcional)
                                 </label>
                                 <input
-                                    type="datetime-local"
-                                    value={rescheduleDate}
-                                    onChange={(e) => setRescheduleDate(e.target.value)}
+                                    type="time"
+                                    value={reassignHour}
+                                    onChange={(e) => setReassignHour(e.target.value)}
                                     className={cn(
-                                        "w-full p-3 rounded-xl border text-sm focus:ring-2 focus:ring-blue-500/50 outline-none",
+                                        "w-full p-3 rounded-lg border text-sm focus:ring-2 focus:ring-purple-500/50 outline-none",
                                         theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-gray-50 border-gray-200 text-gray-800"
                                     )}
                                 />
                             </div>
 
                             <div>
-                                <label className={cn("text-xs mb-1 block", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
-                                    Nota (Opcional)
+                                <label className={cn("text-sm font-medium mb-2 block", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                                    Nota / Motivo (opcional)
                                 </label>
                                 <textarea
-                                    value={rescheduleNote}
-                                    onChange={(e) => setRescheduleNote(e.target.value)}
+                                    value={reassignNote}
+                                    onChange={(e) => setReassignNote(e.target.value)}
                                     rows={3}
                                     className={cn(
-                                        "w-full p-3 rounded-xl border text-sm resize-none focus:ring-2 focus:ring-blue-500/50 outline-none",
+                                        "w-full p-3 rounded-lg border text-sm resize-none focus:ring-2 focus:ring-purple-500/50 outline-none",
                                         theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-gray-50 border-gray-200 text-gray-800"
                                     )}
-                                    placeholder="Motivo de reprogramación..."
+                                    placeholder="Ej: Cliente disponible después de las 15hs..."
                                 />
                             </div>
                         </div>
 
                         <div className="flex justify-end gap-3">
                             <button
-                                onClick={() => setRescheduleModalOpen(false)}
+                                onClick={() => setReassignModalOpen(false)}
                                 className={cn(
                                     "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
                                     theme === "dark" ? "hover:bg-white/10 text-gray-300" : "hover:bg-gray-100 text-gray-600"
@@ -507,22 +802,22 @@ export function ContactarDatosDia() {
                                 Cancelar
                             </button>
                             <button
-                                onClick={handleReschedule}
-                                disabled={rescheduling || !rescheduleDate}
+                                onClick={handleReassign}
+                                disabled={reassigning || !selectedSupervisor}
                                 className={cn(
                                     "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-                                    "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    "bg-purple-500 text-white hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"
                                 )}
                             >
-                                {rescheduling ? (
+                                {reassigning ? (
                                     <>
                                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                        Guardando...
+                                        Reasignando...
                                     </>
                                 ) : (
                                     <>
                                         <CheckCircle className="w-4 h-4" />
-                                        Confirmar
+                                        Confirmar Reasignación
                                     </>
                                 )}
                             </button>

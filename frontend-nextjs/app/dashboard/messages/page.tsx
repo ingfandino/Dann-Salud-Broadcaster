@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * PÁGINA DE MENSAJERÍA INTERNA (app/dashboard/messages/page.tsx)
+ * ============================================================
+ * Sistema de mensajes entre usuarios de la plataforma.
+ * Inbox, enviados, destacados, redactar, responder, reenviar.
+ */
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -12,6 +20,7 @@ import { InternalMessage } from "@/types/internal-message"
 import { toast } from "sonner"
 import { useSocket } from "@/lib/socket"
 
+/** Página de mensajería interna */
 export default function MessagesPage() {
     const { theme } = useTheme()
     const socket = useSocket()
@@ -33,7 +42,7 @@ export default function MessagesPage() {
         loadUnreadCount()
     }, [view, pagination.page])
 
-    // Listen for new messages via socket
+    /* Escuchar nuevos mensajes via socket */
     useEffect(() => {
         if (socket) {
             socket.on('new_message', (msg: any) => {
@@ -94,14 +103,14 @@ export default function MessagesPage() {
     }
 
     const handleSelectMessage = async (message: InternalMessage) => {
-        // If inbox and unread, mark as read
+        /* Si es inbox y no leído, marcar como leído */
         if (view === 'inbox' && !message.read) {
             try {
                 await api.internalMessages.markAsRead(message._id, true)
                 setUnreadCount(prev => Math.max(0, prev - 1))
-                // Update local state
+                /* Actualizar estado local */
                 setMessages(prev => prev.map(m => m._id === message._id ? { ...m, read: true } : m))
-                message.read = true // Update for detail view
+                message.read = true /* Actualizar para vista de detalle */
             } catch (error) {
                 console.error("Error marking as read:", error)
             }
@@ -113,7 +122,7 @@ export default function MessagesPage() {
         e.stopPropagation()
         try {
             await api.internalMessages.toggleStarred(messageId)
-            // Update local state
+            /* Actualizar estado local */
             setMessages(prev => prev.map(m => {
                 if (m._id === messageId) {
                     return { ...m, starred: !m.starred }
@@ -123,7 +132,7 @@ export default function MessagesPage() {
             if (selectedMessage?._id === messageId) {
                 setSelectedMessage(prev => prev ? { ...prev, starred: !prev.starred } : null)
             }
-            // If in starred view and unstarred, reload
+            /* Si está en vista destacados y se quitó, recargar */
             if (view === 'starred') {
                 loadMessages()
             }

@@ -1,4 +1,10 @@
-// backend/src/server.js
+/**
+ * ============================================================
+ * SERVIDOR PRINCIPAL (server.js)
+ * ============================================================
+ * Punto de entrada de la aplicación Express.
+ * Configura middleware, rutas, Socket.IO y tareas programadas.
+ */
 
 require("dotenv").config();
 require("express-async-errors");
@@ -11,7 +17,7 @@ const connectDB = require("./config/db");
 const { initSocket, getIO } = require("./config/socket");
 const initScheduledJobs = require('./cron/recyclerJob');
 
-// Inicializar tareas programadas
+/* Inicializar tareas programadas */
 initScheduledJobs();
 
 const { initWhatsappClient, whatsappEvents } = require("./config/whatsapp");
@@ -24,6 +30,9 @@ const { pushMetrics } = require("./services/metricsService");
 
 // ✅ Cron job para Recovery (ejecuta a las 23:01 diariamente)
 require("./cron/recoveryJob");
+
+// ✅ Cron job para Reciclaje de Datos del Día (ejecuta a las 23:01 diariamente)
+require("./cron/leadAssignmentRecycleJob");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const errorHandler = require("./middlewares/errorHandler");

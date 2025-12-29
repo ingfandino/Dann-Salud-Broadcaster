@@ -1,10 +1,11 @@
-// backend/src/utils/stringUtils.js
-
 /**
- * Escapa caracteres especiales para usar en una expresión regular.
- * @param {string} string - La cadena a escapar.
- * @returns {string} - La cadena escapada.
+ * ============================================================
+ * UTILIDADES DE STRINGS (stringUtils.js)
+ * ============================================================
+ * Funciones auxiliares para manejo de cadenas de texto.
  */
+
+/** Escapa caracteres especiales para uso en expresiones regulares */
 function escapeRegex(string) {
     if (typeof string !== 'string') {
         return '';

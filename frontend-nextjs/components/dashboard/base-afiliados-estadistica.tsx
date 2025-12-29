@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * ESTADÍSTICAS DE AFILIADOS (base-afiliados-estadistica.tsx)
+ * ============================================================
+ * Dashboard de estadísticas de la base de afiliados.
+ * Muestra totales, obras sociales, datos frescos y reutilizables.
+ */
+
 "use client"
 
 import { BarChart3, Users, Sparkles, FolderOpen, FileSpreadsheet, Clock, Recycle } from "lucide-react"
@@ -87,7 +95,7 @@ export function BaseAfiliadosEstadistica() {
 
   return (
     <div className="animate-fade-in-up space-y-4">
-      {/* Header */}
+      {/* Encabezado de estadísticas */}
       <div
         className={cn(
           "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -108,7 +116,7 @@ export function BaseAfiliadosEstadistica() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Blue Card - Afiliados Totales */}
+        {/* Tarjeta azul: Afiliados totales */}
         <div
           className={cn(
             "rounded-xl p-5 transition-all duration-300 hover:scale-[1.02]",
@@ -126,7 +134,7 @@ export function BaseAfiliadosEstadistica() {
           </p>
         </div>
 
-        {/* Green Card - Disponibles (Frescos) */}
+        {/* Tarjeta verde: Datos frescos */}
         <div
           className={cn(
             "rounded-xl p-5 transition-all duration-300 hover:scale-[1.02]",
@@ -144,7 +152,7 @@ export function BaseAfiliadosEstadistica() {
           </p>
         </div>
 
-        {/* Orange Card - Ya Exportados */}
+        {/* Tarjeta naranja: Datos usados */}
         <div
           className={cn(
             "rounded-xl p-5 transition-all duration-300 hover:scale-[1.02]",
@@ -175,24 +183,24 @@ export function BaseAfiliadosEstadistica() {
           Estado de Uso
         </h3>
 
-        {/* Progress bar */}
+        {/* Barra de progreso de uso */}
         <div className="relative">
           <div className={cn("h-8 rounded-lg overflow-hidden flex", theme === "dark" ? "bg-gray-700" : "bg-gray-200")}>
-            {/* Green section - Frescos */}
+            {/* Sección verde: Frescos */}
             <div
               className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 flex items-center justify-center text-xs font-medium text-white"
               style={{ width: `${porcentajeFrescos}%` }}
             >
               {Number(porcentajeFrescos) > 5 && `${porcentajeFrescos}%`}
             </div>
-            {/* Purple section - Reutilizables */}
+            {/* Sección púrpura: Reutilizables */}
             <div
               className="h-full bg-gradient-to-r from-purple-500 to-purple-600 flex items-center justify-center text-xs font-medium text-white"
               style={{ width: `${porcentajeReutilizables}%` }}
             >
               {Number(porcentajeReutilizables) > 5 && `${porcentajeReutilizables}%`}
             </div>
-            {/* Orange section - Usados */}
+            {/* Sección naranja: Usados */}
             <div
               className="h-full bg-gradient-to-r from-orange-400 to-orange-500 flex items-center justify-center text-xs font-medium text-white"
               style={{ width: `${porcentajeUsados}%` }}
@@ -201,7 +209,7 @@ export function BaseAfiliadosEstadistica() {
             </div>
           </div>
 
-          {/* Labels below the bar */}
+          {/* Etiquetas debajo de la barra */}
           <div className="flex justify-between mt-2 text-xs flex-wrap gap-2">
             <div className="flex items-center gap-1">
               <span
@@ -251,7 +259,7 @@ export function BaseAfiliadosEstadistica() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Top Obras Sociales */}
+        {/* Top obras sociales */}
         <div
           className={cn(
             "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -292,7 +300,7 @@ export function BaseAfiliadosEstadistica() {
           </div>
         </div>
 
-        {/* Cargas Recientes */}
+        {/* Historial de cargas */}
         <div
           className={cn(
             "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",

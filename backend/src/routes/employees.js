@@ -1,4 +1,10 @@
-// backend/src/routes/employees.js
+/**
+ * ============================================================
+ * RUTAS DE EMPLEADOS (employees.js)
+ * ============================================================
+ * Gestión de información de RR.HH de empleados.
+ * Acceso para Gerencia, RR.HH y Supervisores.
+ */
 
 const express = require('express');
 const router = express.Router();

@@ -1,4 +1,10 @@
-// backend/src/routes/logRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE LOGS (logRoutes.js)
+ * ============================================================
+ * Acceso a logs del sistema y exportación.
+ * Incluye endpoint público para logs del frontend.
+ */
 
 const express = require("express");
 const router = express.Router();

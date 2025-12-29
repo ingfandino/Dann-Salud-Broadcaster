@@ -1,18 +1,20 @@
-// src/services/baileys/baileysManager.js
+/**
+ * ============================================================
+ * MANAGER BAILEYS (baileysManager.js)
+ * ============================================================
+ * Gestiona múltiples clientes Baileys (uno por usuario).
+ * Previene inicializaciones duplicadas con locks.
+ */
 
 const BaileysClient = require('./baileysClient');
 const logger = require('../../utils/logger');
 const { getIO } = require('../../config/socket');
 
-// Mapa de clientes: userId -> BaileysClient
+/* ========== ESTADO GLOBAL ========== */
 const clients = new Map();
+const initializingClients = new Map();
 
-// 🔒 Lock de inicialización para prevenir múltiples inicializaciones simultáneas
-const initializingClients = new Map(); // userId -> Promise
-
-/**
- * Obtener o inicializar cliente para un usuario
- */
+/** Obtiene o inicializa cliente para un usuario */
 async function getOrInitClient(userId) {
   const userIdStr = String(userId);
   

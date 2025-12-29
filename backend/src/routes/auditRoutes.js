@@ -1,4 +1,10 @@
-// backend/src/routes/auditRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE AUDITORÍAS (auditRoutes.js)
+ * ============================================================
+ * CRUD y operaciones de auditorías (ventas).
+ * Incluye estadísticas, exportación y gestión de multimedia.
+ */
 
 const express = require('express');
 const router = express.Router();
@@ -6,7 +12,7 @@ const auditCtrl = require('../controllers/auditController');
 const { requireAuth } = require('../middlewares/authMiddleware');
 const upload = require('../middlewares/uploadMiddleware');
 
-// 📌 Rutas específicas primero
+/* ========== RUTAS ESPECÍFICAS (antes de :id) ========== */
 router.get('/available-slots', requireAuth, auditCtrl.getAvailableSlots);
 router.get('/sales-stats', requireAuth, auditCtrl.getSalesStats);
 router.get('/by-cuil/:cuil', requireAuth, auditCtrl.getAuditByCuil);

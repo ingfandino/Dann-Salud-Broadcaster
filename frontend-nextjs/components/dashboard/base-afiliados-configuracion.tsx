@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * CONFIGURACIÓN DE AFILIADOS (base-afiliados-configuracion.tsx)
+ * ============================================================
+ * Configuración de exportación automática de afiliados.
+ * Permite asignar obras sociales a supervisores.
+ */
+
 "use client"
 
 import { useEffect, useState, useRef } from "react"
@@ -280,7 +288,7 @@ export function BaseAfiliadosConfiguracion() {
   if (isSupervisor) {
     return (
       <div className="animate-fade-in-up space-y-6">
-        {/* Stats Card */}
+        {/* Tarjeta de estadísticas */}
         <div className={cn(
           "rounded-2xl border p-6 backdrop-blur-sm",
           theme === "dark"
@@ -293,7 +301,7 @@ export function BaseAfiliadosConfiguracion() {
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Fresh Data */}
+            {/* Datos frescos */}
             <div className={cn(
               "p-6 rounded-2xl border transition-all duration-300",
               theme === "dark"
@@ -316,7 +324,7 @@ export function BaseAfiliadosConfiguracion() {
               </p>
             </div>
 
-            {/* Reusable Data */}
+            {/* Datos reutilizables */}
             <div className={cn(
               "p-6 rounded-2xl border transition-all duration-300",
               theme === "dark"
@@ -341,7 +349,7 @@ export function BaseAfiliadosConfiguracion() {
           </div>
         </div>
 
-        {/* Obra Social Breakdown */}
+        {/* Desglose por Obra Social */}
         <div className={cn(
           "rounded-2xl border p-6 backdrop-blur-sm",
           theme === "dark"
@@ -383,7 +391,7 @@ export function BaseAfiliadosConfiguracion() {
   // ========== GERENCIA VIEW (Existing) ==========
   return (
     <div className="animate-fade-in-up space-y-4">
-      {/* Header */}
+      {/* Encabezado de configuración */}
       <div
         className={cn(
           "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -415,7 +423,7 @@ export function BaseAfiliadosConfiguracion() {
         </div>
       </div>
 
-      {/* Tipo de Envío */}
+      {/* Selección tipo de envío */}
       <div
         className={cn(
           "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -505,7 +513,7 @@ export function BaseAfiliadosConfiguracion() {
         </div>
       </div>
 
-      {/* Configuración según tipo */}
+      {/* Configuración específica según tipo */}
       <div
         className={cn(
           "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -540,7 +548,7 @@ export function BaseAfiliadosConfiguracion() {
               />
             </div>
 
-            {/* Proporción de datos */}
+            {/* Control de proporción de datos */}
             <div>
               <label className={cn("text-sm mb-2 block font-medium", theme === "dark" ? "text-gray-300" : "text-gray-600")}>
                 Proporción de Datos (Fresh/Reusable)
@@ -771,7 +779,7 @@ export function BaseAfiliadosConfiguracion() {
         )}
       </div>
 
-      {/* Hora de envío */}
+      {/* Configuración de hora de envío */}
       <div
         className={cn(
           "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -794,7 +802,7 @@ export function BaseAfiliadosConfiguracion() {
         />
       </div>
 
-      {/* Configuración Actual */}
+      {/* Resumen de configuración actual */}
       {currentConfig && (
         <div
           className={cn(
@@ -830,7 +838,7 @@ export function BaseAfiliadosConfiguracion() {
         </div>
       )}
 
-      {/* Guardar Button */}
+      {/* Botón guardar */}
       <button
         onClick={handleSave}
         disabled={saving}
@@ -845,7 +853,7 @@ export function BaseAfiliadosConfiguracion() {
         {saving ? "Guardando..." : "Guardar Configuración"}
       </button>
 
-      {/* Cancelation Button */}
+      {/* Botón cancelar envío programado */}
       {currentConfig && (
         <button
           onClick={() => setShowCancelModal(true)}
@@ -862,7 +870,7 @@ export function BaseAfiliadosConfiguracion() {
         </button>
       )}
 
-      {/* Cancellation Modal */}
+      {/* Modal de confirmación de cancelación */}
       {showCancelModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowCancelModal(false)}>
           <div

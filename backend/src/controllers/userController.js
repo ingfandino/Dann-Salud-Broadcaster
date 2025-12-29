@@ -1,10 +1,19 @@
-// src/controllers/userController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE USUARIOS (userController)
+ * ============================================================
+ * Gestiona todas las operaciones CRUD de usuarios:
+ * - Crear, listar, actualizar y eliminar usuarios
+ * - Gestión de roles y permisos
+ * - Historial de cambios de equipo (teamHistory)
+ * - Activación/desactivación de cuentas
+ */
 
 const User = require("../models/User");
 const { buildOwnerFilter, getTeamUserIds } = require("../middlewares/roleMiddleware");
 const logger = require("../utils/logger");
 
-// Crear usuario
+/** Crea un nuevo usuario. Solo admin/gerencia pueden asignar roles. */
 async function createUser(req, res) {
     try {
         const { nombre, email, password, role, supervisor } = req.body;
@@ -52,6 +61,12 @@ async function createUser(req, res) {
     }
 }
 
+/**
+ * Lista usuarios según el rol del solicitante:
+ * - Gerencia/Admin: todos los usuarios
+ * - Supervisor: usuarios de su mismo equipo
+ * - Asesor/Auditor: solo su propio usuario
+ */
 async function getUsers(req, res) {
     try {
         let queryFilter = {};
@@ -91,8 +106,32 @@ async function getUsers(req, res) {
                 // Si no tiene numeroEquipo, solo devolver su propio usuario
                 queryFilter._id = _id;
             }
-        } else if (role === "asesor") {
-            queryFilter = { _id: _id, deletedAt: null };
+        } else if (role === "asesor" || role === "auditor") {
+            // ✅ Si pide supervisores para reasignación, devolver todos los supervisores
+            if (scope === "supervisors") {
+                queryFilter = { role: "supervisor", active: true, deletedAt: null };
+            } else if (includeAllAuditors === "true") {
+                // ✅ Para checkbox "Pertenece a otro equipo": devolver todos los usuarios
+                // El frontend filtrará por roles específicos
+                queryFilter = { deletedAt: null };
+            } else if (scope === "group" || scope === "all") {
+                // ✅ Para crear turnos: devolver usuarios del mismo equipo (validadores)
+                let myGroup = req.user.numeroEquipo;
+                if (!myGroup) {
+                    const me = await User.findById(_id).select("numeroEquipo");
+                    myGroup = me?.numeroEquipo || null;
+                }
+                queryFilter = { deletedAt: null };
+                if (myGroup !== null && myGroup !== undefined && myGroup !== "") {
+                    queryFilter.numeroEquipo = myGroup;
+                } else {
+                    // Si no tiene numeroEquipo, solo devolver su propio usuario
+                    queryFilter._id = _id;
+                }
+            } else {
+                // Por defecto solo devolver su propio usuario
+                queryFilter = { _id: _id, deletedAt: null };
+            }
         } else {
             // otros: sin filtro especial pero sin soft-deleted
             queryFilter = { deletedAt: null };
@@ -106,6 +145,7 @@ async function getUsers(req, res) {
     }
 }
 
+/** Obtiene un usuario por su ID */
 async function getUserById(req, res) {
     try {
         const user = await User.findById(req.params.id).select("-password");
@@ -116,6 +156,7 @@ async function getUserById(req, res) {
     }
 }
 
+/** Actualiza datos de un usuario. RR.HH solo puede modificar numeroEquipo. */
 async function updateUser(req, res) {
     try {
         const { id } = req.params;
@@ -156,7 +197,7 @@ async function updateUser(req, res) {
     }
 }
 
-// Eliminar usuario definitivamente (manteniendo relaciones intactas)
+/** Elimina un usuario definitivamente. Solo gerencia y RR.HH. */
 async function deleteUserAdmin(req, res) {
     try {
         const id = req.params.id;
@@ -184,7 +225,7 @@ async function deleteUserAdmin(req, res) {
     }
 }
 
-// Elimina físico (legacy)
+/** Elimina un usuario permanentemente (legacy). Solo gerencia. */
 async function deleteUser(req, res) {
     try {
         const { id } = req.params;
@@ -208,7 +249,7 @@ async function deleteUser(req, res) {
     }
 }
 
-// Toggle activo/inactivo (ahora atómico y devuelve el estado actualizado)
+/** Alterna el estado activo/inactivo de un usuario */
 async function toggleActiveUser(req, res) {
     try {
         const { id } = req.params;
@@ -230,7 +271,7 @@ async function toggleActiveUser(req, res) {
     }
 }
 
-// Admin con filtros (ahora excluye soft-deleted)
+/** Lista usuarios con filtros, paginación y ordenamiento. Solo admin/gerencia. */
 async function getUsersAdmin(req, res) {
     try {
         if (!(req.user.role === "administrativo" || req.user.role === "gerencia")) {
@@ -277,7 +318,7 @@ async function getUsersAdmin(req, res) {
     }
 }
 
-// 🔄 Cambiar rol de un usuario (solo admin)
+/** Cambia el rol de un usuario. No permite cambiar roles de Gerencia. */
 async function updateUserRole(req, res) {
     try {
         const { id } = req.params;
@@ -324,7 +365,7 @@ async function updateUserRole(req, res) {
     }
 }
 
-// 📋 Obtener lista de grupos únicos
+/** Obtiene lista de números de equipo únicos. Solo admin/gerencia. */
 async function getAvailableGroups(req, res) {
     try {
         if (!(req.user.role === "administrativo" || req.user.role === "gerencia")) {
@@ -346,7 +387,7 @@ async function getAvailableGroups(req, res) {
     }
 }
 
-// 🔑 Actualizar solo la contraseña de un usuario
+/** Actualiza solo la contraseña de un usuario */
 async function updateUserPassword(req, res) {
     try {
         const { id } = req.params;
@@ -380,7 +421,7 @@ async function updateUserPassword(req, res) {
     }
 }
 
-// ✅ POST /users/:id/team-change - Agregar cambio de equipo
+/** Registra un cambio de equipo en el historial del usuario */
 async function addTeamChange(req, res) {
     try {
         const { id } = req.params;
@@ -493,7 +534,7 @@ async function addTeamChange(req, res) {
     }
 }
 
-// ✅ PUT /users/:id/team-history/:periodId - Editar periodo existente
+/** Edita un periodo existente en el historial de equipos */
 async function editTeamPeriod(req, res) {
     try {
         const { id, periodId } = req.params;
@@ -536,7 +577,7 @@ async function editTeamPeriod(req, res) {
     }
 }
 
-// ✅ DELETE /users/:id/team-history/:periodId - Eliminar periodo
+/** Elimina un periodo del historial (no el actual/abierto) */
 async function deleteTeamPeriod(req, res) {
     try {
         const { id, periodId } = req.params;

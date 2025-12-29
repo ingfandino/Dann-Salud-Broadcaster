@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * RECUPERACIONES (auditorias-recuperaciones.tsx)
+ * ============================================================
+ * Vista de auditorías en estado de recuperación.
+ * Permite filtrar, editar y gestionar ventas fallidas.
+ */
+
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
@@ -126,7 +134,7 @@ export function AuditoriasRecuperaciones() {
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {/* Filters */}
+      {/* Sección de filtros */}
       <div className={cn(
         "rounded-2xl border p-6 backdrop-blur-sm",
         theme === "dark" ? "bg-gradient-to-br from-white/5 to-white/[0.02] border-white/10" : "bg-white border-gray-200 shadow-sm"
@@ -219,7 +227,7 @@ export function AuditoriasRecuperaciones() {
         </div>
       </div>
 
-      {/* Table */}
+      {/* Tabla de recuperaciones */}
       <div className={cn(
         "rounded-2xl border overflow-hidden",
         theme === "dark" ? "bg-gradient-to-br from-white/5 to-white/[0.02] border-white/10" : "bg-white border-gray-200 shadow-sm"
@@ -341,7 +349,7 @@ export function AuditoriasRecuperaciones() {
         </div>
       </div>
 
-      {/* Edit Modal */}
+      {/* Modal de edición */}
       {editModalOpen && selectedRecuperacion && (
         <RecoveryEditModal
           audit={selectedRecuperacion}

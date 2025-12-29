@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * PROVEEDOR DE TEMA (theme-provider.tsx)
+ * ============================================================
+ * Context provider para manejo de tema claro/oscuro.
+ * Controla acceso al modo oscuro por usuario permitido.
+ */
+
 "use client"
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
@@ -12,7 +20,7 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
-// Email del único usuario permitido para usar modo oscuro
+/* Email del único usuario permitido para usar modo oscuro */
 const ALLOWED_DARK_MODE_EMAIL = "ing.danielfandino@gmail.com"
 
 export function ThemeProvider({ children }: { children: ReactNode }) {

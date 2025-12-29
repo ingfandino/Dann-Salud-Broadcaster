@@ -1,8 +1,17 @@
+/**
+ * ============================================================
+ * CONTROLADOR DE RECOVERY (recoveryController)
+ * ============================================================
+ * Gestiona las auditorías marcadas para "recovery" (reintento).
+ * El cron job marca auditorías elegibles diariamente a las 23:01.
+ * Este controlador solo consulta y devuelve los datos.
+ */
+
 const Audit = require('../models/Audit');
 const { permit } = require('../middlewares/roleMiddleware');
 const logger = require('../utils/logger');
 
-// GET /api/recovery -> lista elegibles: estados target del día anterior
+/** Lista auditorías elegibles para recovery */
 exports.list = async (req, res) => {
     try {
         const now = new Date();

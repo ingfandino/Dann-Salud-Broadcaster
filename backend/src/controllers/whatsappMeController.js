@@ -1,6 +1,15 @@
-// backend/src/controllers/whatsappMeController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE WHATSAPP POR USUARIO (whatsappMeController)
+ * ============================================================
+ * Gestiona sesiones individuales de WhatsApp por usuario.
+ * Permite que cada usuario tenga su propia conexión de WhatsApp.
+ * 
+ * Soporta múltiples implementaciones:
+ * - whatsapp-web.js (Puppeteer)
+ * - Baileys (WebSocket directo)
+ */
 
-// Usar wrapper unificado que soporta whatsapp-web.js Y Baileys
 const {
   getOrInitClient,
   isReady,
@@ -13,9 +22,11 @@ const {
 } = require("../services/whatsappUnified");
 const { getIO } = require("../config/socket");
 const logger = require("../utils/logger");
+const QRCode = require("qrcode");
 
 logger.info(`[WA:me] Usando ${USE_BAILEYS ? 'Baileys' : 'whatsapp-web.js'}, Multi: ${USE_MULTI}`);
 
+/** Obtiene el estado de conexión del usuario */
 exports.getStatus = async (req, res) => {
   try {
     const userId = USE_MULTI ? req.user._id : null;
@@ -52,9 +63,20 @@ exports.getQR = async (req, res) => {
     }
     
     // Obtener QR actual si existe
-    const qr = getCurrentQR(userId);
-    if (qr) {
-      return res.json({ qr });
+    const qrText = getCurrentQR(userId);
+    if (qrText) {
+      // ✅ Convertir texto QR a imagen data URL
+      try {
+        const qrDataUrl = await QRCode.toDataURL(qrText, {
+          width: 256,
+          margin: 2,
+          color: { dark: '#000000', light: '#ffffff' }
+        });
+        return res.json({ qr: qrDataUrl });
+      } catch (qrErr) {
+        logger.error("[WA:me] Error generando imagen QR:", qrErr.message);
+        return res.json({ qr: null, error: "Error generando QR" });
+      }
     }
     
     // 🔒 Verificar si ya existe un cliente (aunque no esté listo aún)

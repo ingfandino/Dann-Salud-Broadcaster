@@ -1,7 +1,14 @@
-// backend/src/middlewares/validateRequest.js
+/**
+ * ============================================================
+ * MIDDLEWARE DE VALIDACIÓN (validateRequest.js)
+ * ============================================================
+ * Procesa errores de express-validator y devuelve
+ * respuesta estructurada con detalles de cada error.
+ */
 
 const { validationResult } = require("express-validator");
 
+/** Middleware que procesa errores de validación */
 const validateRequest = (req, res, next) => {
     const result = validationResult(req);
     if (result.isEmpty()) return next();

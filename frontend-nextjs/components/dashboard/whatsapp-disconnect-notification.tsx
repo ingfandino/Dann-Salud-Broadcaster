@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * NOTIFICACIÓN DESCONEXIÓN WHATSAPP (whatsapp-disconnect-notification.tsx)
+ * ============================================================
+ * Alerta cuando WhatsApp pierde conexión.
+ * Ofrece botón para reconectar o descartar.
+ */
+
 "use client"
 
 import { WifiOff, X, RefreshCw } from "lucide-react"
@@ -25,7 +33,7 @@ export function WhatsAppDisconnectNotification({
                         : "bg-gradient-to-br from-red-50 to-orange-50 border-red-400"
                 )}
             >
-                {/* Header */}
+                {/* Encabezado de notificación */}
                 <div className="flex items-start gap-3 mb-3">
                     <div
                         className={cn(
@@ -55,7 +63,7 @@ export function WhatsAppDisconnectNotification({
                     </button>
                 </div>
 
-                {/* Message */}
+                {/* Mensaje de alerta */}
                 <div
                     className={cn(
                         "p-3 rounded-lg mb-4 text-sm",
@@ -71,7 +79,7 @@ export function WhatsAppDisconnectNotification({
                     </p>
                 </div>
 
-                {/* Action Button */}
+                {/* Botón de acción */}
                 <button
                     onClick={onReconnect}
                     className={cn(
@@ -85,7 +93,7 @@ export function WhatsAppDisconnectNotification({
                     Vincular WhatsApp Ahora
                 </button>
 
-                {/* Pulse animation indicator */}
+                {/* Indicador de animación */}
                 <div className="flex items-center justify-center gap-1 mt-3">
                     <div className={cn("w-2 h-2 rounded-full animate-ping", theme === "dark" ? "bg-red-400" : "bg-red-600")} />
                     <span className={cn("text-[10px] font-medium", theme === "dark" ? "text-red-300" : "text-red-700")}>

@@ -1,4 +1,13 @@
-// src/controllers/whatsappController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE WHATSAPP (whatsappController)
+ * ============================================================
+ * Gestiona la conexión global de WhatsApp Web para mensajería masiva.
+ * Maneja eventos de mensajes entrantes y auto-respuestas.
+ * 
+ * Este controlador usa la sesión compartida (config/whatsapp.js).
+ * Para sesiones individuales por usuario, ver whatsappMeController.
+ */
 
 const Message = require("../models/Message");
 const Autoresponse = require("../models/Autoresponse");
@@ -14,7 +23,7 @@ const {
 const connectionManager = require('../services/connectionManager');
 const logger = require("../utils/logger");
 
-// Escucha de mensajes entrantes
+/** Listener de mensajes entrantes - procesa auto-respuestas */
 whatsappEvents.on("message", async (msg) => {
     try {
         if (msg.fromMe) return;

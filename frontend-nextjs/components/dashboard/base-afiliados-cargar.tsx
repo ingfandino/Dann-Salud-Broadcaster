@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * CARGAR AFILIADOS (base-afiliados-cargar.tsx)
+ * ============================================================
+ * Importación masiva de afiliados desde archivos Excel.
+ * Valida duplicados y genera reportes de rechazo.
+ */
+
 "use client"
 
 import type React from "react"
@@ -92,7 +100,7 @@ export function BaseAfiliadosCargar() {
 
   return (
     <div className="animate-fade-in-up space-y-4">
-      {/* Header */}
+      {/* Encabezado con instrucciones */}
       <div
         className={cn(
           "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
@@ -111,7 +119,7 @@ export function BaseAfiliadosCargar() {
           Cargar Archivo de Afiliados
         </h2>
 
-        {/* Requisitos */}
+        {/* Requisitos del archivo */}
         <div
           className={cn(
             "rounded-xl p-4 space-y-2",
@@ -155,7 +163,7 @@ export function BaseAfiliadosCargar() {
         </div>
       </div>
 
-      {/* Drop Zone */}
+      {/* Zona de arrastrar y soltar */}
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -225,7 +233,7 @@ export function BaseAfiliadosCargar() {
         )}
       </div>
 
-      {/* Result Message - Moved outside file conditional to persist after processing */}
+      {/* Mensaje de resultado - persiste después del procesamiento */}
       {result && (
         <div className="mt-4">
           <div
@@ -256,7 +264,7 @@ export function BaseAfiliadosCargar() {
               <div className="flex-1 space-y-3">
                 <p className="font-medium pt-1">{result.message}</p>
 
-                {/* Download Rejection Report */}
+                {/* Botón descargar reporte de rechazados */}
                 {result.stats?.duplicatesReportUrl && (
                   <button
                     onClick={async () => {

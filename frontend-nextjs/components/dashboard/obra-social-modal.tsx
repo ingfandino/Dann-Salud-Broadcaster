@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * MODAL DE OBRA SOCIAL (obra-social-modal.tsx)
+ * ============================================================
+ * Selector de obra social con cantidad a asignar.
+ * Se usa en la configuración de exportación de afiliados.
+ */
+
 "use client"
 
 import { useEffect, useRef, useState } from "react"

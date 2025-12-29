@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@floating-ui/react": "^0.27.16",
     "bcryptjs": "^3.0.2",
     "code": "^5.2.4",
     "dotenv": "^17.2.2",

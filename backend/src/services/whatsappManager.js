@@ -1,4 +1,10 @@
-// backend/src/services/whatsappManager.js
+/**
+ * ============================================================
+ * MANAGER DE WHATSAPP (whatsappManager.js)
+ * ============================================================
+ * Gestiona múltiples sesiones de WhatsApp usando whatsapp-web.js.
+ * Maneja conexión, reconexión, QR y mensajes entrantes.
+ */
 
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const EventEmitter = require("events");
@@ -13,7 +19,7 @@ const Autoresponse = require("../models/Autoresponse");
 const AutoResponseLog = require("../models/AutoResponseLog");
 const { getIO } = require("../config/socket");
 
-// Sistema de cola de conexiones
+/* ========== SISTEMA DE COLA DE CONEXIONES ========== */
 const connectionQueue = [];
 let activeConnections = 0;
 const MAX_CONCURRENT_CONNECTIONS = 5;
@@ -276,9 +282,13 @@ async function initClientForUser(userId) {
         logger.error(`[WA][${userId}] Error emitiendo mensaje: `, error.message);
       }
 
-      // Lógica de auto-respuestas
-      // ✅ MEJORA: Buscar el mensaje outbound MÁS RECIENTE para asociar job correctamente
-      const enviado = await Message.findOne({ to: msg.from, direction: "outbound" }).sort({ timestamp: -1 });
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const enviado = await Message.findOne({ 
+        to: msg.from, 
+        direction: "outbound",
+        timestamp: { $gte: twentyFourHoursAgo }
+      }).sort({ timestamp: -1 });
+      
       if (!enviado) {
         logger.info(`[WA][${userId}] Mensaje entrante ignorado(no corresponde a campaña): ${msg.from} `);
         return;
@@ -290,7 +300,6 @@ async function initClientForUser(userId) {
         { $set: { respondio: true } }
       );
 
-      // ✅ CORRECCIÓN BUG 5: Crear registro del mensaje inbound
       try {
         await Message.create({
           contact: enviado.contact,
@@ -300,20 +309,20 @@ async function initClientForUser(userId) {
           direction: 'inbound',
           status: 'recibido',
           timestamp: new Date(),
-          to: msg.from,
-          from: msg.to || userId
+          to: userId,
+          from: msg.from
         });
         logger.info(`[WA][${userId}] Mensaje inbound registrado de ${msg.from} (job: ${enviado.job})`);
 
-        // ✅ Emitir evento de respuesta de campaña
         try {
-          getIO().to(room).emit('campaign:response', {
+          getIO().to('jobs').emit('campaign:reply', {
+            campaignId: enviado.job,
             jobId: enviado.job,
             contact: enviado.contact,
             timestamp: new Date()
           });
         } catch (e) {
-          logger.warn(`[WA][${userId}] Error emitiendo evento campaign: response: `, e.message);
+          logger.warn(`[WA][${userId}] Error emitiendo evento campaign:reply:`, e.message);
         }
 
       } catch (e) {

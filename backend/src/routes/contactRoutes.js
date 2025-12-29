@@ -1,4 +1,10 @@
-// backend/src/routes/contactRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE CONTACTOS (contactRoutes.js)
+ * ============================================================
+ * Gestión de contactos para campañas de mensajería.
+ * Importación masiva desde archivos CSV/XLSX.
+ */
 
 const express = require("express");
 const router = express.Router();

@@ -1,4 +1,9 @@
-// backend/src/routes/reportRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE REPORTES (reportRoutes.js)
+ * ============================================================
+ * Generación y consulta de reportes de campañas.
+ */
 
 const express = require("express");
 const {
@@ -17,7 +22,7 @@ router.get("/", requireAuth, permit("gerencia"), getReports);
 router.post("/", requireAuth, permit("gerencia"), createReport);
 
 // ✅ CORRECCIÓN: Nuevas rutas para integración con mensajería masiva
-router.get("/summary", requireAuth, permit("gerencia", "supervisor", "revendedor"), getReportsSummary);
+router.get("/summary", requireAuth, permit("gerencia", "supervisor"), getReportsSummary);
 router.post("/generate/:jobId", requireAuth, permit("gerencia", "supervisor", "administrativo", "asesor"), generateReportsFromJob);
 
 module.exports = router;

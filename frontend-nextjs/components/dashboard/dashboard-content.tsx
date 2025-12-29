@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * CONTENIDO DEL DASHBOARD (dashboard-content.tsx)
+ * ============================================================
+ * Router de secciones del dashboard.
+ * Renderiza el componente correspondiente según activeSection.
+ */
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -171,10 +179,33 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
     }
 
     if (activeSection === "contactar-afiliados-administracion") {
+      // Solo supervisores y gerencia pueden ver Administración de datos
+      const role = user?.role?.toLowerCase()
+      if (role !== 'supervisor' && role !== 'gerencia' && role !== 'supervisor_reventa') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para supervisores.</p>
+          </div>
+        )
+      }
       return <ContactarAdministracion />
     }
 
     if (activeSection === "contactar-afiliados-datos-dia") {
+      // Acceso: asesor, supervisor, gerencia, auditor con equipo
+      const role = user?.role?.toLowerCase()
+      const hasTeam = !!user?.numeroEquipo
+      const canAccess = role === 'asesor' || role === 'gerencia' || role === 'supervisor' || 
+                        (role === 'auditor' && hasTeam)
+      if (!canAccess) {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">No tienes permisos para acceder a esta sección.</p>
+          </div>
+        )
+      }
       return <ContactarDatosDia />
     }
 
@@ -322,7 +353,7 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
 
   return (
     <main className="flex-1 p-4 pt-20 lg:pt-8 lg:p-8 overflow-auto w-full">
-      {/* Header */}
+      {/* Encabezado de bienvenida */}
       <div className="mb-6 lg:mb-8">
         <div className="flex items-center gap-3 mb-2">
           <div
@@ -348,7 +379,7 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
         </p>
       </div>
 
-      {/* Stats Cards - hidden for certain sections with animation */}
+      {/* Tarjetas de estadísticas - ocultas en ciertas secciones */}
       <div
         className={cn(
           "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 mb-6 lg:mb-8 transition-all duration-500 ease-out overflow-hidden",
@@ -360,10 +391,10 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
         <StatsCard title="Contactos cargados" value={383} icon={ContactRound} color="accent" delay={3} />
       </div>
 
-      {/* Dynamic Content */}
+      {/* Contenido dinámico según sección activa */}
       {renderContent()}
 
-      {/* FAB for Mensajería Interna - Visible for ALL roles */}
+      {/* Botón flotante para mensajería interna */}
       <button
         onClick={() => setIsMensajeriaInternaOpen(true)}
         className={cn(

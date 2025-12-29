@@ -1,6 +1,12 @@
-// src/utils/spintax.js
+/**
+ * ============================================================
+ * SPINTAX (spintax.js)
+ * ============================================================
+ * Procesa sintaxis de variación {opcion1|opcion2|opcion3}.
+ * Selecciona aleatoriamente una opción en cada grupo.
+ */
 
-// Función recursiva para procesar {a|b|c}
+/** Procesa recursivamente patrones {a|b|c} */
 function parseSpintax(text) {
     const regex = /\{([^{}]+)\}/;
 

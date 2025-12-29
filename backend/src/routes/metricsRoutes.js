@@ -1,4 +1,9 @@
-// backend/src/routes/metricsRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE MÉTRICAS (metricsRoutes.js)
+ * ============================================================
+ * Estadísticas del dashboard y métricas de envío.
+ */
 
 const express = require("express");
 const router = express.Router();
@@ -44,7 +49,7 @@ router.get("/dashboard", requireAuth, async (req, res) => {
                 // Si el supervisor no tiene numeroEquipo, al menos contar los propios
                 contactosQuery.createdBy = req.user._id;
             }
-        } else if (role === 'admin' || role === 'gerencia') {
+        } else if (role === 'administrativo' || role === 'gerencia') {
             // sin filtro por creador -> todos los contactos del día
         } else {
             // rol desconocido: por defecto, solo propios hoy

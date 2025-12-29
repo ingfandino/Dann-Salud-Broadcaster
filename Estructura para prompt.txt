@@ -1,0 +1,75 @@
+Actúa como un desarrollador senior.
+
+Analiza, planifica y aplica únicamente las modificaciones necesarias para cumplir con las tareas descritas a continuación.
+
+Evita refactors innecesarios o cambios fuera del alcance especificado.
+
+====================
+## CONTEXTO
+====================
+
+**Interfaz padre:**
+
+	**Interfaz hija:**
+		**Ruta principal:**
+
+====================
+## PROBLEMAS DETECTADOS
+====================
+
+**Lista de errores:**
+
+	**Error:**
+		__Tipo de error:__ (visual / funcional / lógico / performance)
+		__Caso de muestra:__
+			*
+		__Comportamiento actual:__
+			*
+		__Comportamiento correcto esperado:__
+			*
+
+====================
+## MODIFICACIONES REQUERIDAS
+====================
+
+**Lista de modificaciones:**
+
+	__Modificación:__
+		- Qué se debe cambiar
+		- Dónde se debe cambiar
+		- Qué NO debe verse afectado
+
+====================
+## ALCANCE PERMITIDO
+====================
+
+* Puedes modificar únicamente los archivos y funciones directamente involucrados.
+* No crees nuevos archivos salvo que sea completamente necesario para el cumplimiento de la solicitud.
+* No introduzcas nuevas dependencias.
+* Respeta el estilo y patrones existentes del proyecto.
+
+====================
+## CONDICIONES DE CÓDIGO
+====================
+
+* Código limpio y legible.
+* No añadas comentarios, salvo que expliquen lógica no evidente.
+* No modifiques otras funciones o archivos salvo que sea estrictamente indispensable.
+* Evita cambios colaterales.
+
+====================
+## CRITERIOS DE ÉXITO
+====================
+
+La tarea se considera correcta cuando:
+* El comportamiento esperado se cumple en todos los casos descritos.
+* No se introducen errores nuevos.
+* El código resultante es mínimo y coherente con el proyecto.
+
+====================
+## INSTRUCCIONES FINALES
+====================
+
+Si existe alguna duda que impida avanzar correctamente, realiza preguntas concretas y necesarias.  
+Si todo está claro, procede directamente con la implementación.
+

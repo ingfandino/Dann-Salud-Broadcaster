@@ -1,3 +1,4 @@
+/** Página: Crear/Pautar Turno de Auditoría */
 'use client';
 
 import { DashboardContent } from "@/components/dashboard/dashboard-content"

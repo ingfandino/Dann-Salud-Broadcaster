@@ -1,4 +1,17 @@
-// backend/src/controllers/internalMessageController.js
+/**
+ * ============================================================
+ * CONTROLADOR DE MENSAJES INTERNOS (internalMessageController)
+ * ============================================================
+ * Sistema de mensajería interna entre usuarios de la plataforma.
+ * Similar a un sistema de correo electrónico interno.
+ * 
+ * Funcionalidades:
+ * - Bandeja de entrada y enviados
+ * - Adjuntos de archivos
+ * - Marcar como leído/favorito
+ * - Archivar y eliminar
+ * - Responder y reenviar mensajes
+ */
 
 const InternalMessage = require("../models/InternalMessage");
 const User = require("../models/User");
@@ -6,7 +19,7 @@ const logger = require("../utils/logger");
 const path = require("path");
 const fs = require("fs");
 
-// 📬 Obtener bandeja de entrada
+/** Obtiene la bandeja de entrada del usuario */
 exports.getInbox = async (req, res) => {
     try {
         const userId = req.user._id;

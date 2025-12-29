@@ -1,10 +1,20 @@
-// backend/src/routes/index.js
+/**
+ * ============================================================
+ * RUTAS PRINCIPALES (routes/index.js)
+ * ============================================================
+ * Punto central de configuración de rutas de la API.
+ * Organiza las rutas en públicas y protegidas.
+ * 
+ * Prefijo: /api
+ * Públicas: /auth (login, registro, recuperación)
+ * Protegidas: Todas las demás (requieren JWT)
+ */
 
 const express = require("express");
 const router = express.Router();
 const { requireAuth } = require("../middlewares/authMiddleware");
 
-// Importar subrutas
+/* ========== IMPORTACIÓN DE SUBRUTAS ========== */
 const authRoutes = require("./authRoutes");
 const userRoutes = require("./userRoutes");
 const contactRoutes = require("./contactRoutes");

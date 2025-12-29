@@ -1,22 +1,30 @@
+/**
+ * ============================================================
+ * MIDDLEWARE DE AUTENTICACIÓN (middleware.ts)
+ * ============================================================
+ * Protege rutas que requieren autenticación.
+ * Redirige a /login si no hay token válido.
+ */
+
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Routes that don't require authentication
+/* Rutas que no requieren autenticación */
 const publicRoutes = ['/login', '/', '/register', '/recover'];
 
 export function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
-    // Allow public routes
+    /* Permitir rutas públicas */
     if (pathname === '/' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/recover')) {
         return NextResponse.next();
     }
 
-    // Check for auth token in cookies or headers
+    /* Verificar token de auth en cookies o headers */
     const token = request.cookies.get('token')?.value ||
         request.headers.get('Authorization')?.replace('Bearer ', '');
 
-    // Redirect to login if no token
+    /* Redirigir a login si no hay token */
     if (!token) {
         const loginUrl = new URL('/login', request.url);
         loginUrl.searchParams.set('from', pathname);
@@ -26,16 +34,16 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
 }
 
-// Configure which routes use this middleware
+/* Configurar qué rutas usan este middleware */
 export const config = {
     matcher: [
         /*
-         * Match all request paths except:
-         * - api routes (handled separately)
-         * - _next/static (static files)
-         * - _next/image (image optimization files)
-         * - favicon.ico (favicon file)
-         * - public files (public folder)
+         * Coincide con todas las rutas excepto:
+         * - rutas api (manejadas separadamente)
+         * - _next/static (archivos estáticos)
+         * - _next/image (optimización de imágenes)
+         * - favicon.ico
+         * - archivos públicos
          */
         '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],

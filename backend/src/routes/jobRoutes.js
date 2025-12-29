@@ -1,10 +1,16 @@
-// backend/src/routes/jobRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE JOBS (jobRoutes.js)
+ * ============================================================
+ * Alias alternativo para trabajos de envío masivo.
+ * Ver también sendJobRoutes.js para rutas completas.
+ */
 
 const express = require("express");
 const router = express.Router();
 const sendJobController = require("../controllers/sendJobController");
 
-// 🔹 Crear un job
+/* ========== CRUD DE JOBS ========== */
 router.post("/", sendJobController.startJob);
 
 // 🔹 Listar jobs

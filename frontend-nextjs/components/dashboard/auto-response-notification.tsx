@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * NOTIFICACIÓN AUTO-RESPUESTA (auto-response-notification.tsx)
+ * ============================================================
+ * Toast de notificación cuando se envía una auto-respuesta.
+ * Muestra el contacto, palabra clave y respuesta enviada.
+ */
+
 "use client"
 
 import { MessageSquare, X, ExternalLink } from "lucide-react"
@@ -30,7 +38,7 @@ export function AutoResponseNotification({
                         : "bg-white/95 border-purple-200"
                 )}
             >
-                {/* Header */}
+                {/* Encabezado de notificación */}
                 <div className="flex items-start justify-between mb-2">
                     <div className="flex items-center gap-2">
                         <div className={cn("p-1.5 rounded-lg", theme === "dark" ? "bg-purple-500/20" : "bg-purple-100")}>
@@ -56,7 +64,7 @@ export function AutoResponseNotification({
                     </button>
                 </div>
 
-                {/* Content */}
+                {/* Contenido de la notificación */}
                 <div className="space-y-2">
                     <div className={cn("text-xs p-2 rounded-lg", theme === "dark" ? "bg-white/5" : "bg-gray-50")}>
                         <p className={cn("font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>

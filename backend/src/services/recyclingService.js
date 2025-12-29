@@ -1,5 +1,13 @@
+/**
+ * ============================================================
+ * SERVICIO DE RECICLAJE (recyclingService.js)
+ * ============================================================
+ * Recicla leads inactivos después de X días sin respuesta.
+ */
+
 const LeadAssignment = require('../models/LeadAssignment');
 
+/** Recicla leads inactivos (default: 3 días) */
 exports.recycleLeads = async (daysThreshold = 3) => {
     try {
         const thresholdDate = new Date();
@@ -9,7 +17,7 @@ exports.recycleLeads = async (daysThreshold = 3) => {
         const query = {
             active: true,
             $or: [
-                { status: 'No Contesta', updatedAt: { $lt: thresholdDate } },
+                { status: 'No contesta', updatedAt: { $lt: thresholdDate } },
                 { status: 'Pendiente', assignedAt: { $lt: thresholdDate } }
             ]
         };

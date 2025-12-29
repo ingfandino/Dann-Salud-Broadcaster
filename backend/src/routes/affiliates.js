@@ -1,4 +1,10 @@
-// backend/src/routes/affiliates.js
+/**
+ * ============================================================
+ * RUTAS DE AFILIADOS (affiliates.js)
+ * ============================================================
+ * Gestión de la base de datos de afiliados.
+ * Importación, exportación, estadísticas y configuración.
+ */
 
 const express = require("express");
 const router = express.Router();
@@ -143,5 +149,8 @@ router.get("/fresh", affiliateController.requireSupervisorOrGerencia, affiliateC
 
 // Cancelar envíos programados (Gerencia)
 router.post("/cancel-exports", affiliateController.requireGerencia, affiliateController.cancelExports);
+
+// ✅ Limpiar datos frescos anteriores (Gerencia) - Útil antes de cargar nuevos datos
+router.post("/cleanup-fresh", affiliateController.requireGerencia, affiliateController.cleanupFreshData);
 
 module.exports = router;

@@ -1,10 +1,16 @@
-// backend/src/middlewares/uploadMiddleware.js
+/**
+ * ============================================================
+ * MIDDLEWARE DE UPLOAD (uploadMiddleware.js)
+ * ============================================================
+ * Configuración de multer para subir archivos de auditorías.
+ * Soporta imágenes y videos con límite de 50MB.
+ */
 
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Directorio donde guardamos uploads para auditorías
+/* ========== CONFIGURACIÓN DE DIRECTORIO ========== */
 const uploadDir = path.join(__dirname, '../../uploads/audits');
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });

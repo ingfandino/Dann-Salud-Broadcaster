@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * DETECCIONES DE PALABRAS (palabras-prohibidas-detecciones.tsx)
+ * ============================================================
+ * Historial de detecciones de palabras prohibidas.
+ * Muestra mensajes flaggeados y su estado de resolución.
+ */
+
 "use client"
 
 import { Shield, ShieldCheck, AlertTriangle, XCircle, CheckCircle2 } from "lucide-react"
@@ -46,7 +54,7 @@ export function PalabrasProhibidasDetecciones() {
 
   return (
     <div className="animate-fade-in-up space-y-6">
-      {/* Header */}
+      {/* Encabezado de detecciones */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <div
@@ -66,7 +74,7 @@ export function PalabrasProhibidasDetecciones() {
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {/* Tarjetas de estadísticas */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {statsData.map((stat, index) => {
           const Icon = stat.icon
@@ -92,7 +100,7 @@ export function PalabrasProhibidasDetecciones() {
         })}
       </div>
 
-      {/* Content Area - Empty State */}
+      {/* Área de contenido - Estado vacío */}
       <div
         className={cn(
           "rounded-2xl border p-6",

@@ -47,7 +47,7 @@ export function RegisterPage({ onRegister, onLogin }: RegisterPageProps) {
       <AnimatedBackground theme={theme} />
       <FloatingShapes theme={theme} />
 
-      {/* Theme toggle */}
+      {/* Botón de cambio de tema */}
       <button
         onClick={toggleTheme}
         className={`fixed top-4 right-4 p-2.5 rounded-full transition-all duration-300 hover:scale-110 z-50 ${
@@ -57,10 +57,10 @@ export function RegisterPage({ onRegister, onLogin }: RegisterPageProps) {
         {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
       </button>
 
-      {/* Main content */}
+      {/* Contenido principal */}
       <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-5xl flex flex-col lg:flex-row gap-6 lg:gap-8">
-          {/* Left card - Info */}
+          {/* Tarjeta izquierda - Información */}
           <div
             className={`flex-1 rounded-3xl p-8 lg:p-10 backdrop-blur-xl transition-all duration-500 animate-slide-in-left ${
               theme === "dark"
@@ -125,7 +125,7 @@ export function RegisterPage({ onRegister, onLogin }: RegisterPageProps) {
             </div>
           </div>
 
-          {/* Right card - Form */}
+          {/* Tarjeta derecha - Formulario */}
           <div
             className={`w-full lg:w-[420px] rounded-3xl p-8 backdrop-blur-xl transition-all duration-500 animate-fade-in-up ${
               theme === "dark"

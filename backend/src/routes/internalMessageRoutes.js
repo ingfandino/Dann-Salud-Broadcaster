@@ -1,4 +1,10 @@
-// backend/src/routes/internalMessageRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE MENSAJES INTERNOS (internalMessageRoutes.js)
+ * ============================================================
+ * Sistema de mensajería interna entre usuarios.
+ * Soporta adjuntos, respuestas y reenvíos.
+ */
 
 const express = require("express");
 const router = express.Router();

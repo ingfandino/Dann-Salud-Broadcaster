@@ -1,3 +1,4 @@
+/** Página: Afiliaciones Exitosas */
 'use client';
 
 import { DashboardContent } from '@/components/dashboard/dashboard-content';

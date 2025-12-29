@@ -1,8 +1,17 @@
+/**
+ * ============================================================
+ * STORE DE AUTENTICACIÓN (lib/auth.ts)
+ * ============================================================
+ * Estado global de autenticación usando Zustand.
+ * Persiste token y usuario en localStorage.
+ */
+
 'use client';
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+/** Estructura del usuario autenticado */
 interface User {
     _id: string;
     nombre: string;

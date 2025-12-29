@@ -1,9 +1,17 @@
-// backend/src/models/Employee.js
+/**
+ * ============================================================
+ * MODELO DE EMPLEADO (Employee)
+ * ============================================================
+ * Extiende la información del usuario con datos de Recursos Humanos.
+ * Almacena información laboral, documentación, y estado del empleado.
+ * 
+ * Usado por el módulo de RR.HH para gestión de personal.
+ */
 
 const mongoose = require('mongoose');
 
 const employeeSchema = new mongoose.Schema({
-    // Referencia al usuario en la plataforma
+    /** Referencia al usuario en la plataforma */
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -11,95 +19,104 @@ const employeeSchema = new mongoose.Schema({
         unique: true
     },
 
-    // Datos básicos
+    /* ========== DATOS PERSONALES ========== */
+    
+    /** Nombre completo del empleado */
     nombreCompleto: {
         type: String,
         required: true,
         trim: true
     },
-
-    // Teléfono personal (diferente del usuario si es necesario)
+    /** Teléfono personal de contacto */
     telefonoPersonal: {
         type: String,
         trim: true
     },
 
-    // Fechas importantes
+    /* ========== FECHAS LABORALES ========== */
+    
+    /** Fecha de la entrevista inicial */
     fechaEntrevista: {
         type: Date,
         default: null
     },
-
+    /** Fecha de ingreso a la empresa */
     fechaIngreso: {
         type: Date,
         default: Date.now
     },
 
-    // Información laboral
+    /* ========== INFORMACIÓN LABORAL ========== */
+    
+    /** Cargo o puesto del empleado */
     cargo: {
-        type: String, // Rol del usuario (asesor, supervisor, auditor, etc.)
+        type: String,
         required: true
     },
-
+    /** Número de equipo asignado */
     numeroEquipo: {
         type: String,
         default: ''
     },
 
-    // Documentación
+    /* ========== DOCUMENTACIÓN ========== */
+    
+    /** Indica si firmó el contrato */
     firmoContrato: {
         type: Boolean,
         default: false
     },
-
+    /** URL de la foto del DNI */
     fotoDNI: {
-        type: String, // URL o path de la imagen del DNI
+        type: String,
         default: ''
     },
 
-    // Estado laboral
+    /* ========== ESTADO LABORAL ========== */
+    
+    /** Estado activo/inactivo del empleado */
     activo: {
         type: Boolean,
         default: true
     },
-
+    /** Fecha de baja (si aplica) */
     fechaBaja: {
         type: Date,
         default: null
     },
-
+    /** Fecha de egreso definitivo */
     fechaEgreso: {
         type: Date,
         default: null
     },
-
+    /** Motivo de la baja */
     motivoBaja: {
         type: String,
         default: ''
     },
 
-    // Notas adicionales
+    /* ========== NOTAS Y METADATA ========== */
+    
+    /** Notas adicionales sobre el empleado */
     notas: {
         type: String,
         default: ''
     },
-
-    // Metadata
+    /** Usuario que creó el registro */
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     },
-
+    /** Usuario que realizó la última actualización */
     updatedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     }
 }, {
-    timestamps: true // Crea automáticamente createdAt y updatedAt
+    timestamps: true
 });
 
-// Índices para búsquedas rápidas
-// // employeeSchema.index({ userId: 1 }); // Removed to avoid duplicate index warning (unique: true already creates one) // Removed to avoid duplicate index warning (unique: true already creates one)
+/* ========== ÍNDICES PARA OPTIMIZACIÓN ========== */
 employeeSchema.index({ activo: 1 });
 employeeSchema.index({ cargo: 1 });
 employeeSchema.index({ numeroEquipo: 1 });

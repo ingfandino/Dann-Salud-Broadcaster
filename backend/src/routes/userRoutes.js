@@ -1,4 +1,15 @@
-// backend/src/routes/userRoutes.js
+/**
+ * ============================================================
+ * RUTAS DE USUARIOS (userRoutes.js)
+ * ============================================================
+ * CRUD de usuarios y gestión de equipos.
+ * 
+ * Permisos por rol:
+ * - Gerencia: acceso total
+ * - RR.HH: editar usuarios, cambiar equipos
+ * - Supervisores: ver usuarios de su equipo
+ * - Asesores: solo su propio usuario
+ */
 
 const express = require("express");
 const router = express.Router();
@@ -9,7 +20,7 @@ const validateRequest = require("../middlewares/validateRequest");
 const { requireAuth } = require("../middlewares/authMiddleware");
 const { permit } = require("../middlewares/roleMiddleware");
 
-// --- Rutas admin ---
+/* ========== RUTAS ADMIN ========== */
 router.get(
     "/admin/users",
     requireAuth,
@@ -62,7 +73,7 @@ router.put(
 router.get(
     "/",
     requireAuth,
-    permit("supervisor", "administrativo", "auditor", "gerencia", "RR.HH"),
+    permit("supervisor", "administrativo", "auditor", "gerencia", "RR.HH", "asesor"),
     userController.getUsers
 );
 

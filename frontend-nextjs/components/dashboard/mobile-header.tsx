@@ -1,3 +1,11 @@
+/**
+ * ============================================================
+ * ENCABEZADO MÓVIL (mobile-header.tsx)
+ * ============================================================
+ * Header para vista móvil con botón de menú hamburguesa.
+ * Controla apertura/cierre del sidebar en dispositivos móviles.
+ */
+
 "use client"
 
 import { Menu, X } from "lucide-react"
