@@ -73,6 +73,10 @@ export function RRHHActivos() {
   const { theme } = useTheme()
   const { user } = useAuth()
   const canEdit = ['rr.hh', 'gerencia'].includes(user?.role?.toLowerCase() || '');
+  
+  // Detectar si es supervisor para filtrar por equipo
+  const isSupervisor = ['supervisor', 'supervisor_reventa'].includes(user?.role?.toLowerCase() || '');
+  const myNumeroEquipo = user?.numeroEquipo ? String(user.numeroEquipo) : null;
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState("")
@@ -95,7 +99,16 @@ export function RRHHActivos() {
       setLoading(true)
       const response = await api.employees.list()
       // Filter only active employees
-      const activeEmployees = response.data.filter((e: Employee) => e.activo)
+      let activeEmployees = response.data.filter((e: Employee) => e.activo)
+      
+      // Si es supervisor, filtrar solo empleados de su equipo
+      if (isSupervisor && myNumeroEquipo) {
+        activeEmployees = activeEmployees.filter((e: Employee) => {
+          const empEquipo = e.userId?.numeroEquipo || e.numeroEquipo;
+          return empEquipo ? String(empEquipo) === myNumeroEquipo : false;
+        });
+      }
+      
       setEmployees(activeEmployees)
 
       // Update selectedEmpleado if modal is open (to refresh teamHistory)

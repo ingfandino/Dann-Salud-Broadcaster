@@ -25,6 +25,9 @@ router.get('/stats/obras-sociales', requireAuth, auditCtrl.getObraSocialStats);
 const { permit } = require('../middlewares/roleMiddleware');
 router.post('/recalculate-supervisors', requireAuth, permit('gerencia'), auditCtrl.recalculateSupervisors);
 
+// ✅ Carga masiva desde Excel (solo Gerencia)
+router.post('/bulk-import', requireAuth, permit('gerencia'), auditCtrl.bulkImportAudits);
+
 // 📌 CRUD y listados
 router.post('/', requireAuth, auditCtrl.createAudit);
 router.get('/', requireAuth, auditCtrl.getAuditsByDate);

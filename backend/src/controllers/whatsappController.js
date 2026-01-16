@@ -11,6 +11,8 @@
 
 const Message = require("../models/Message");
 const Autoresponse = require("../models/Autoresponse");
+const AutoResponseLog = require("../models/AutoResponseLog");
+const SendJob = require("../models/SendJob");
 const fs = require("fs");
 const {
     getWhatsappClient,
@@ -22,13 +24,20 @@ const {
 } = require("../config/whatsapp");
 const connectionManager = require('../services/connectionManager');
 const logger = require("../utils/logger");
+const { getIO } = require("../config/socket");
 
 /** Listener de mensajes entrantes - procesa auto-respuestas */
 whatsappEvents.on("message", async (msg) => {
     try {
         if (msg.fromMe) return;
 
-        const enviado = await Message.findOne({ to: msg.from, direction: "outbound" });
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const enviado = await Message.findOne({ 
+            to: msg.from, 
+            direction: "outbound",
+            timestamp: { $gte: twentyFourHoursAgo }
+        }).sort({ timestamp: -1 });
+        
         if (!enviado) {
             logger.info(`⚠️ Mensaje entrante ignorado (no corresponde a campaña): ${msg.from}`);
             return;
@@ -40,26 +49,112 @@ whatsappEvents.on("message", async (msg) => {
         );
         logger.info(`📩 Respuesta recibida de contacto de campaña: ${msg.from}`);
 
-        // ✅ CORRECCIÓN: Auto-respuestas con comparación exacta por defecto
-        const reglas = await Autoresponse.find({ active: true });
+        // Obtener el creador de la campaña para buscar sus auto-respuestas
+        let jobCreatorId = null;
+        if (enviado.job) {
+            const job = await SendJob.findById(enviado.job).select('createdBy').lean();
+            if (job?.createdBy) {
+                jobCreatorId = job.createdBy;
+                logger.info(`📌 Job ${enviado.job} creado por usuario ${jobCreatorId}`);
+            }
+        }
+
+        if (!jobCreatorId) {
+            logger.warn(`⚠️ No se pudo determinar el creador de la campaña para ${msg.from}`);
+            return;
+        }
+
+        // Registrar mensaje inbound
+        try {
+            await Message.create({
+                contact: enviado.contact,
+                createdBy: jobCreatorId,
+                job: enviado.job,
+                contenido: msg.body || '',
+                direction: 'inbound',
+                status: 'recibido',
+                timestamp: new Date(),
+                from: msg.from
+            });
+            logger.info(`📥 Mensaje inbound registrado de ${msg.from} (job: ${enviado.job})`);
+
+            try {
+                getIO().to('jobs').emit('campaign:reply', {
+                    campaignId: enviado.job,
+                    jobId: enviado.job,
+                    contact: enviado.contact,
+                    timestamp: new Date()
+                });
+            } catch (e) {
+                logger.warn(`⚠️ Error emitiendo evento campaign:reply:`, e.message);
+            }
+        } catch (e) {
+            logger.error(`❌ Error registrando mensaje inbound:`, e.message);
+        }
+
+        // Cargar reglas de auto-respuesta del creador de la campaña
+        const reglas = await Autoresponse.find({ createdBy: jobCreatorId, active: true });
         if (reglas.length) {
             const normalize = (s) => (s || "").toLowerCase().trim();
             const bodyNorm = normalize(msg.body);
             
-            // Buscar regla que coincida
             const matched = reglas.find(r => {
                 const kw = normalize(r.keyword);
                 if (!kw) return false;
-                const mt = r.matchType || "exact"; // Default a exact
-                return mt === "exact" ? bodyNorm === kw : bodyNorm.includes(kw);
+                const mt = r.matchType || "contains";
+                if (mt === "exact") return bodyNorm === kw;
+                if (mt === "startsWith") return bodyNorm.startsWith(kw);
+                if (mt === "endsWith") return bodyNorm.endsWith(kw);
+                return bodyNorm.includes(kw);
             });
             
             const rule = matched || reglas.find(r => r.isFallback);
             if (rule) {
-                const client = getWhatsappClient();
-                if (client) {
-                    await client.sendMessage(msg.from, rule.response);
-                    logger.info(`🤖 Auto-respuesta enviada (${rule.keyword || "fallback"}) - matchType: ${rule.matchType || "exact"}`);
+                // Anti-spam: verificar por creador de la campaña
+                const windowMinutes = Number(process.env.AUTORESPONSE_WINDOW_MINUTES || 30);
+                const since = new Date(Date.now() - windowMinutes * 60 * 1000);
+                const recent = await AutoResponseLog.findOne({
+                    createdBy: jobCreatorId,
+                    chatId: msg.from,
+                    respondedAt: { $gte: since },
+                }).sort({ respondedAt: -1 }).lean();
+
+                if (!recent) {
+                    const client = getWhatsappClient();
+                    if (client) {
+                        try {
+                            await client.sendMessage(msg.from, rule.response);
+                            logger.info(`🤖 Auto-respuesta enviada (${rule.keyword || "fallback"}) para campaña de usuario ${jobCreatorId}`);
+
+                            await AutoResponseLog.create({
+                                createdBy: jobCreatorId,
+                                chatId: msg.from,
+                                ruleId: rule._id,
+                                respondedAt: new Date(),
+                                job: enviado.job,
+                                contact: enviado.contact,
+                                keyword: rule.keyword || null,
+                                response: rule.response,
+                                isFallback: rule.isFallback || false,
+                                userMessage: msg.body || ''
+                            });
+
+                            try {
+                                getIO().emit('auto_response:sent', {
+                                    contact: enviado.contact,
+                                    keyword: rule.keyword || "Fallback",
+                                    response: rule.response,
+                                    timestamp: new Date()
+                                });
+                            } catch (e) {
+                                logger.warn(`⚠️ Error emitiendo evento auto_response:sent:`, e.message);
+                            }
+                        } catch (e) {
+                            logger.warn(`⚠️ Error enviando auto-respuesta:`, e.message);
+                        }
+                    }
+                } else {
+                    logger.info(`⏸️ Auto-respuesta omitida (anti-spam) para ${msg.from}`);
                 }
             }
         }

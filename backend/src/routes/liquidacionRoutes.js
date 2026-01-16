@@ -12,7 +12,7 @@ const { permit } = require('../middlewares/roleMiddleware');
 const liquidacion = require('../controllers/liquidacionController');
 
 /* ========== RUTAS PROTEGIDAS ========== */
-router.use(requireAuth, permit('administrativo', 'auditor', 'gerencia', 'supervisor', 'asesor'));
+router.use(requireAuth, permit('administrativo', 'auditor', 'gerencia', 'supervisor', 'asesor', 'recuperador'));
 
 router.get('/', liquidacion.list);
 

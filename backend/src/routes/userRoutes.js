@@ -61,6 +61,13 @@ router.put(
     userController.updateUser
 );
 
+router.delete(
+    "/:id",
+    requireAuth,
+    permit("gerencia"),
+    userController.deleteUser
+);
+
 // Ruta específica para actualizar solo la contraseña
 router.put(
     "/:id/password",
@@ -73,7 +80,7 @@ router.put(
 router.get(
     "/",
     requireAuth,
-    permit("supervisor", "administrativo", "auditor", "gerencia", "RR.HH", "asesor"),
+    permit("supervisor", "administrativo", "auditor", "gerencia", "RR.HH", "asesor", "recuperador"),
     userController.getUsers
 );
 

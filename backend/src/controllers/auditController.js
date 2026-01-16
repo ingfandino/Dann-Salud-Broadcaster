@@ -295,8 +295,33 @@ exports.getAuditsByDate = async (req, res) => {
 
         /* Visibilidad por rol */
         const expRole = (req.user?.role || '').toLowerCase();
-        if (expRole === 'supervisor' || expRole === 'asesor') {
-            /* Supervisores y Asesores ven TODAS las auditorías
+        if (expRole === 'asesor') {
+            /* ✅ RESTRICCIÓN ASESOR: Solo ve ventas donde es el asesor asignado O fue el creador */
+            const asesorId = req.user._id;
+            
+            // Combinar el filtro existente con la restricción de asesor usando $and
+            const asesorFilter = {
+                $or: [
+                    { asesor: asesorId },
+                    { createdBy: asesorId }
+                ]
+            };
+            
+            // Si ya hay un filtro $or existente (ej. por fecha), necesitamos usar $and
+            if (filter.$or) {
+                const existingFilter = { ...filter };
+                filter = {
+                    $and: [
+                        existingFilter,
+                        asesorFilter
+                    ]
+                };
+            } else {
+                // Si no hay $or, simplemente agregamos el filtro de asesor
+                filter.$or = asesorFilter.$or;
+            }
+        } else if (expRole === 'supervisor') {
+            /* Supervisores ven TODAS las auditorías
                El frontend ocultará teléfonos de otros grupos */
         }
 
@@ -440,14 +465,29 @@ exports.getAuditsByDate = async (req, res) => {
 
             if (queries.length) {
                 audits = audits.filter(a => {
+                    // ✅ PRIORIDAD 1: supervisorSnapshot (asignación manual, incluye Gerencia)
+                    if (a.supervisorSnapshot?.nombre) {
+                        const snapCandidates = [a.supervisorSnapshot.nombre]
+                            .map((value) => (value || "").toLowerCase())
+                            .filter(Boolean);
+                        if (snapCandidates.length && queries.some(q => snapCandidates.some(c => c.includes(q)))) {
+                            return true;
+                        }
+                    }
+                    
+                    // ✅ FALLBACK: asesor.supervisor (supervisor del equipo)
                     const as = a.asesor;
-                    if (!as || !as.supervisor) return false;
-                    const sup = as.supervisor;
-                    const candidates = [sup.email, sup.nombre, sup.name]
-                        .map((value) => (value || "").toLowerCase())
-                        .filter(Boolean);
-                    if (!candidates.length) return false;
-                    return queries.some(q => candidates.some(candidate => candidate.includes(q)));
+                    if (as?.supervisor) {
+                        const sup = as.supervisor;
+                        const candidates = [sup.email, sup.nombre, sup.name]
+                            .map((value) => (value || "").toLowerCase())
+                            .filter(Boolean);
+                        if (candidates.length && queries.some(q => candidates.some(c => c.includes(q)))) {
+                            return true;
+                        }
+                    }
+                    
+                    return false;
                 });
             }
         }
@@ -640,7 +680,10 @@ exports.updateAudit = async (req, res) => {
         const updates = req.body;
 
         // Solo administrativo/auditor/supervisor/gerencia/RR.HH pueden editar
-        if (!['administrativo', 'auditor', 'supervisor', 'gerencia', 'RR.HH'].includes(req.user.role)) {
+        const userRole = (req.user.role || '').toLowerCase();
+        logger.info(`[updateAudit] Usuario: ${req.user.nombre}, Rol original: "${req.user.role}", Rol normalizado: "${userRole}"`);
+        if (!['administrativo', 'auditor', 'supervisor', 'gerencia', 'rr.hh'].includes(userRole)) {
+            logger.warn(`[updateAudit] Acceso denegado para rol: "${userRole}"`);
             return res.status(403).json({ message: 'No autorizado' });
         }
 
@@ -1533,5 +1576,213 @@ exports.getObraSocialStats = async (req, res) => {
     } catch (err) {
         logger.error("Error en getObraSocialStats:", err);
         res.status(500).json({ message: "Error al obtener estadísticas de obras sociales" });
+    }
+};
+
+/**
+ * Carga masiva de auditorías desde Excel (solo Gerencia)
+ * Campos esperados: nombre, cuil, telefono, tipoVenta, obraSocialAnterior, obraSocialVendida,
+ *                   supervisor, asesor, administrativo, estado, aporte, cuit, datosExtra,
+ *                   observacionPrivada, clave, email, fechaTurno
+ */
+exports.bulkImportAudits = async (req, res) => {
+    try {
+        const { records } = req.body;
+
+        if (!records || !Array.isArray(records) || records.length === 0) {
+            return res.status(400).json({ message: 'No se recibieron registros para importar' });
+        }
+
+        const results = {
+            success: [],
+            errors: []
+        };
+
+        const allUsers = await User.find({ active: { $ne: false } }).select('_id nombre email role numeroEquipo').lean();
+        
+        const supervisorMap = new Map();
+        const asesorMap = new Map();
+        const adminMap = new Map();
+
+        allUsers.forEach(u => {
+            const nombre = (u.nombre || '').toLowerCase().trim();
+            const role = (u.role || '').toLowerCase();
+            
+            if (role === 'supervisor') {
+                supervisorMap.set(nombre, u);
+            }
+            if (role === 'asesor' || role === 'auditor') {
+                asesorMap.set(nombre, u);
+            }
+            if (role === 'administrativo' || role === 'admin') {
+                adminMap.set(nombre, u);
+            }
+        });
+
+        const validStatuses = [
+            "QR hecho", "QR hecho (Temporal)", "QR hecho, pero pendiente de aprobación",
+            "Hacer QR", "Aprobada", "Pendiente", "Cargada", "Falta clave", "AFIP",
+            "Rechazada", "Padrón", "Remuneración no válida", "Autovinculación",
+            "En revisión", "Caída", "Completa"
+        ];
+        const validStatusesLower = validStatuses.map(s => s.toLowerCase());
+
+        for (let i = 0; i < records.length; i++) {
+            const record = records[i];
+            const rowNum = i + 2;
+            const errors = [];
+
+            if (!record.nombre || !record.nombre.trim()) {
+                errors.push('Nombre es requerido');
+            }
+
+            if (!record.telefono || !record.telefono.trim()) {
+                errors.push('Teléfono es requerido');
+            }
+
+            if (!record.obraSocialVendida || !record.obraSocialVendida.trim()) {
+                errors.push('Obra Social Vendida es requerida');
+            }
+
+            let supervisorUser = null;
+            let asesorUser = null;
+            let adminUser = null;
+
+            if (record.supervisor) {
+                const supName = (record.supervisor || '').toLowerCase().trim();
+                supervisorUser = supervisorMap.get(supName);
+                if (!supervisorUser) {
+                    errors.push(`Supervisor "${record.supervisor}" no encontrado`);
+                }
+            }
+
+            if (record.asesor) {
+                const asesorName = (record.asesor || '').toLowerCase().trim();
+                asesorUser = asesorMap.get(asesorName);
+                if (!asesorUser) {
+                    errors.push(`Asesor "${record.asesor}" no encontrado`);
+                }
+            }
+
+            if (record.administrativo) {
+                const adminName = (record.administrativo || '').toLowerCase().trim();
+                adminUser = adminMap.get(adminName);
+                if (!adminUser) {
+                    errors.push(`Administrativo "${record.administrativo}" no encontrado`);
+                }
+            }
+
+            let status = 'Completa';
+            if (record.estado) {
+                const estadoLower = (record.estado || '').toLowerCase().trim();
+                const foundIdx = validStatusesLower.findIndex(s => s === estadoLower);
+                if (foundIdx >= 0) {
+                    status = validStatuses[foundIdx];
+                } else {
+                    errors.push(`Estado "${record.estado}" no es válido`);
+                }
+            }
+
+            if (record.cuil && record.cuil.trim()) {
+                const existingAudit = await Audit.findOne({ cuil: record.cuil.trim(), status: { $ne: 'Rechazada' } });
+                if (existingAudit) {
+                    errors.push(`CUIL "${record.cuil}" ya existe en el sistema`);
+                }
+            }
+
+            if (errors.length > 0) {
+                results.errors.push({
+                    row: rowNum,
+                    data: record,
+                    reasons: errors
+                });
+                continue;
+            }
+
+            let scheduledAt = new Date();
+            if (record.fechaTurno) {
+                const parsed = new Date(record.fechaTurno);
+                if (!isNaN(parsed.getTime())) {
+                    scheduledAt = parsed;
+                }
+            }
+
+            const auditData = {
+                nombre: (record.nombre || '').trim(),
+                cuil: (record.cuil || '').trim() || undefined,
+                telefono: (record.telefono || '').trim(),
+                tipoVenta: (record.tipoVenta || 'alta').trim(),
+                obraSocialAnterior: (record.obraSocialAnterior || '').trim() || undefined,
+                obraSocialVendida: (record.obraSocialVendida || '').trim(),
+                scheduledAt,
+                status,
+                statusAdministrativo: status,
+                createdBy: req.user._id,
+                aporte: record.aporte ? parseFloat(record.aporte) : undefined,
+                cuit: (record.cuit || '').trim() || undefined,
+                datosExtra: (record.datosExtra || '').trim() || undefined,
+                observacionPrivada: (record.observacionPrivada || '').trim() || undefined,
+                clave: (record.clave || '').trim() || undefined,
+                email: (record.email || '').trim() || undefined,
+                migrada: true,
+                statusHistory: [{
+                    value: status,
+                    updatedBy: req.user._id,
+                    updatedAt: new Date()
+                }]
+            };
+
+            if (asesorUser) {
+                auditData.asesor = asesorUser._id;
+            }
+
+            if (adminUser) {
+                auditData.administrador = adminUser._id;
+            }
+
+            if (supervisorUser) {
+                auditData.supervisorSnapshot = {
+                    _id: supervisorUser._id,
+                    nombre: supervisorUser.nombre,
+                    numeroEquipo: supervisorUser.numeroEquipo
+                };
+            } else if (asesorUser && asesorUser.numeroEquipo) {
+                const sup = allUsers.find(u => 
+                    (u.role || '').toLowerCase() === 'supervisor' && 
+                    u.numeroEquipo === asesorUser.numeroEquipo
+                );
+                if (sup) {
+                    auditData.supervisorSnapshot = {
+                        _id: sup._id,
+                        nombre: sup.nombre,
+                        numeroEquipo: sup.numeroEquipo
+                    };
+                }
+            }
+
+            try {
+                const newAudit = new Audit(auditData);
+                await newAudit.save();
+                results.success.push({ row: rowNum, _id: newAudit._id });
+            } catch (err) {
+                results.errors.push({
+                    row: rowNum,
+                    data: record,
+                    reasons: [err.message]
+                });
+            }
+        }
+
+        res.json({
+            message: `Importación completada: ${results.success.length} exitosos, ${results.errors.length} errores`,
+            totalProcessed: records.length,
+            successCount: results.success.length,
+            errorCount: results.errors.length,
+            errors: results.errors
+        });
+
+    } catch (err) {
+        logger.error("Error en bulkImportAudits:", err);
+        res.status(500).json({ message: "Error al importar registros: " + err.message });
     }
 };

@@ -60,7 +60,10 @@ const ARGENTINE_OBRAS_SOCIALES = [
   "OSG (109202)",
   "OSPERYH (106500)",
   "OSPCRA (104009)",
-  "OSPMA (700108)"
+  "OSPMA (700108)",
+  "HOMINIS (901501)",
+  "OSCTCP (121606)",
+  "OSMA (112509)"
 ]
 
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]

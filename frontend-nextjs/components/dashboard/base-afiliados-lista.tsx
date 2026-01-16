@@ -9,11 +9,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Search, RefreshCw, Trash2, Filter } from "lucide-react"
+import { Search, RefreshCw, Trash2, Filter, Download } from "lucide-react"
 import { useTheme } from "./theme-provider"
 import { cn } from "@/lib/utils"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
+import { useAuth } from "@/lib/auth"
 
 interface Affiliate {
   _id: string
@@ -27,12 +28,41 @@ interface Affiliate {
 
 export function BaseAfiliadosLista() {
   const { theme } = useTheme()
+  const { user } = useAuth()
   const [afiliados, setAfiliados] = useState<Affiliate[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [obraSocialFilter, setObraSocialFilter] = useState("")
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
+  const [downloadingAll, setDownloadingAll] = useState(false)
+
+  const isDanielFandino = user?.nombre?.toLowerCase().includes("daniel") && 
+                          user?.nombre?.toLowerCase().includes("fandiño")
+
+  const handleDownloadAll = async () => {
+    try {
+      setDownloadingAll(true)
+      const response = await api.affiliates.exportAll()
+      const blob = new Blob([response.data], { 
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
+      })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `base_afiliados_completa_${new Date().toISOString().split('T')[0]}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+      toast.success("Base de afiliados descargada correctamente")
+    } catch (error: any) {
+      console.error("Error downloading all affiliates:", error)
+      toast.error(error.response?.data?.error || "Error al descargar la base de afiliados")
+    } finally {
+      setDownloadingAll(false)
+    }
+  }
 
   const loadAfiliados = async () => {
     try {
@@ -142,6 +172,25 @@ export function BaseAfiliadosLista() {
       )}>
         Mostrando {afiliados.length} afiliados
       </div>
+
+      {/* Botón descargar base completa - Solo para Daniel Fandiño */}
+      {isDanielFandino && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleDownloadAll}
+            disabled={downloadingAll}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200 hover:scale-105 disabled:opacity-50",
+              theme === "dark"
+                ? "bg-gradient-to-r from-green-600 to-green-500 text-white"
+                : "bg-gradient-to-r from-green-500 to-green-400 text-white",
+            )}
+          >
+            <Download className={cn("w-4 h-4", downloadingAll && "animate-pulse")} />
+            {downloadingAll ? "Descargando..." : "Descargar Base Completa"}
+          </button>
+        </div>
+      )}
 
       {/* Tabla de afiliados */}
       <div

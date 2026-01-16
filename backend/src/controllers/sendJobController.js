@@ -102,9 +102,8 @@ exports.startJob = async (req, res) => {
         const detectedWords = await bannedWordController.detectBannedWords(finalMessage);
 
         if (detectedWords.length > 0) {
-            logger.warn(`⚠️ Palabras prohibidas detectadas en campaña: ${detectedWords.map(w => w.word).join(", ")}`);
+            logger.warn(`🚫 Palabras prohibidas detectadas en campaña: ${detectedWords.map(w => w.word).join(", ")}`);
 
-            // Notificar a gerencia y supervisores
             for (const detected of detectedWords) {
                 await bannedWordController.notifyBannedWordDetection({
                     word: detected.word,
@@ -116,9 +115,11 @@ exports.startJob = async (req, res) => {
                 });
             }
 
-            // OPCIONAL: Decidir si bloquear el envío o solo alertar
-            // Por ahora solo alertamos, pero la campaña continúa
-            logger.info(`✅ Notificaciones de palabras prohibidas enviadas. Campaña continúa.`);
+            return res.status(400).json({
+                error: "El mensaje contiene palabras o frases prohibidas",
+                bannedWords: detectedWords.map(w => w.word),
+                message: `Elimina las siguientes palabras/frases para continuar: ${detectedWords.map(w => `"${w.word}"`).join(", ")}`
+            });
         }
 
         // parámetros de envío

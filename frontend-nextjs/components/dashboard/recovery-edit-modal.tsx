@@ -145,48 +145,62 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
     const { createPortal } = require('react-dom')
 
     return createPortal(
-        <div className="fixed inset-0 flex items-center justify-center z-[9999] p-4 animate-in fade-in duration-200">
-            <div className={cn(
-                "w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl border",
-                theme === "dark" ? "bg-gray-900 border-white/10" : "bg-white border-gray-200"
-            )}>
-                {/* Header */}
-                <div className="sticky top-0 z-10 bg-gradient-to-r from-purple-600 to-blue-600 p-6 flex justify-between items-center text-white">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div
+                className={cn(
+                    "w-full max-w-2xl rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]",
+                    theme === "dark" ? "bg-[#1a1333] border border-white/10" : "bg-white"
+                )}
+            >
+                {/* Encabezado del modal */}
+                <div className={cn(
+                    "px-6 py-4 border-b flex items-center justify-between",
+                    theme === "dark" ? "border-white/10" : "border-gray-100"
+                )}>
                     <div>
-                        <h2 className="text-xl font-bold">Editar Recuperación</h2>
-                        <p className="text-sm text-purple-100 mt-1 opacity-90">
+                        <h2 className={cn("text-lg font-semibold", theme === "dark" ? "text-white" : "text-gray-800")}>
+                            Editar Recuperación
+                        </h2>
+                        <p className={cn("text-sm", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
                             {audit.nombre} - {audit.cuil}
                         </p>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                    <button
+                        onClick={onClose}
+                        className={cn(
+                            "p-2 rounded-lg transition-colors",
+                            theme === "dark" ? "hover:bg-white/10 text-gray-400" : "hover:bg-gray-100 text-gray-500"
+                        )}
+                    >
                         <X className="w-5 h-5" />
                     </button>
                 </div>
 
-                {/* Body */}
-                <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                {/* Contenido principal */}
+                <div className="flex-1 overflow-y-auto p-6">
+                <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Read-only Info */}
                     <div className={cn(
-                        "p-4 rounded-xl text-sm space-y-3",
-                        theme === "dark" ? "bg-white/5" : "bg-gray-50"
+                        "p-4 rounded-lg border text-sm space-y-3",
+                        theme === "dark" ? "bg-white/5 border-white/10" : "bg-gray-50 border-gray-200"
                     )}>
-                        <h3 className="font-semibold opacity-70">📋 Información Original</h3>
+                        <h3 className={cn("font-semibold text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>📋 Información Original</h3>
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <span className="opacity-60 block text-xs">Asesor original</span>
-                                <span className="font-medium">{audit.asesor?.nombre || audit.asesor?.email || '-'}</span>
+                                <span className={cn("block text-xs mb-1", theme === "dark" ? "text-gray-500" : "text-gray-500")}>Asesor original</span>
+                                <span className={cn("font-medium text-sm", theme === "dark" ? "text-white" : "text-gray-800")}>{audit.asesor?.nombre || audit.asesor?.email || '-'}</span>
                             </div>
                             <div>
-                                <span className="opacity-60 block text-xs">Supervisor original</span>
-                                <span className="font-medium">{audit.asesor?.supervisor?.nombre || '-'}</span>
+                                <span className={cn("block text-xs mb-1", theme === "dark" ? "text-gray-500" : "text-gray-500")}>Supervisor original</span>
+                                <span className={cn("font-medium text-sm", theme === "dark" ? "text-white" : "text-gray-800")}>{audit.asesor?.supervisor?.nombre || '-'}</span>
                             </div>
                             <div>
-                                <span className="opacity-60 block text-xs">Grupo original</span>
-                                <span className="font-medium">{audit.asesor?.numeroEquipo || '-'}</span>
+                                <span className={cn("block text-xs mb-1", theme === "dark" ? "text-gray-500" : "text-gray-500")}>Grupo original</span>
+                                <span className={cn("font-medium text-sm", theme === "dark" ? "text-white" : "text-gray-800")}>{audit.asesor?.numeroEquipo || '-'}</span>
                             </div>
                             <div>
-                                <span className="opacity-60 block text-xs">Fecha inicio</span>
-                                <span className="font-medium">
+                                <span className={cn("block text-xs mb-1", theme === "dark" ? "text-gray-500" : "text-gray-500")}>Fecha inicio</span>
+                                <span className={cn("font-medium text-sm", theme === "dark" ? "text-white" : "text-gray-800")}>
                                     {audit.scheduledAt ? new Date(audit.scheduledAt).toLocaleDateString('es-AR') : '-'}
                                 </span>
                             </div>
@@ -196,74 +210,74 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
                     {/* Editable Fields */}
                     <div className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium mb-1">Nombre *</label>
+                            <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>Nombre *</label>
                             <input
                                 type="text"
                                 value={form.nombre}
                                 onChange={(e) => setForm({ ...form, nombre: e.target.value })}
                                 className={cn(
                                     "w-full px-3 py-2 rounded-lg border text-sm",
-                                    theme === "dark" ? "bg-black/20 border-white/10 text-white" : "bg-white border-gray-200"
+                                    theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                 )}
                                 required
                             />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium mb-1">CUIL *</label>
+                                <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>CUIL *</label>
                                 <input
                                     type="text"
                                     value={form.cuil}
                                     onChange={(e) => setForm({ ...form, cuil: e.target.value })}
                                     className={cn(
                                         "w-full px-3 py-2 rounded-lg border text-sm",
-                                        theme === "dark" ? "bg-black/20 border-white/10 text-white" : "bg-white border-gray-200"
+                                        theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                     )}
                                     required
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium mb-1">Teléfono *</label>
+                                <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>Teléfono *</label>
                                 <input
                                     type="text"
                                     value={form.telefono}
                                     onChange={(e) => setForm({ ...form, telefono: e.target.value })}
                                     className={cn(
                                         "w-full px-3 py-2 rounded-lg border text-sm",
-                                        theme === "dark" ? "bg-black/20 border-white/10 text-white" : "bg-white border-gray-200"
+                                        theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                     )}
                                     required
                                 />
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium mb-1">Obra Social Vendida *</label>
+                                <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>Obra Social Vendida *</label>
                                 <select
                                     value={form.obraSocialVendida}
                                     onChange={(e) => setForm({ ...form, obraSocialVendida: e.target.value })}
                                     className={cn(
                                         "w-full px-3 py-2 rounded-lg border text-sm",
-                                        theme === "dark" ? "bg-black/20 border-white/10 text-white" : "bg-white border-gray-200"
+                                        theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                     )}
                                     required
                                 >
-                                    <option value="">Seleccionar...</option>
+                                    <option value="">-- Seleccionar --</option>
                                     {OBRAS_VENDIDAS.map(os => (
                                         <option key={os} value={os}>{os}</option>
                                     ))}
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium mb-1">Estado *</label>
+                                <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>Estado *</label>
                                 <select
                                     value={form.status}
                                     onChange={(e) => setForm({ ...form, status: e.target.value })}
                                     className={cn(
                                         "w-full px-3 py-2 rounded-lg border text-sm",
-                                        theme === "dark" ? "bg-black/20 border-white/10 text-white" : "bg-white border-gray-200"
+                                        theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                     )}
                                     required
                                 >
@@ -280,13 +294,13 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-1">Administrador (opcional)</label>
+                            <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>Administrador (opcional)</label>
                             <select
                                 value={form.administrador}
                                 onChange={(e) => setForm({ ...form, administrador: e.target.value })}
                                 className={cn(
                                     "w-full px-3 py-2 rounded-lg border text-sm",
-                                    theme === "dark" ? "bg-black/20 border-white/10 text-white" : "bg-white border-gray-200"
+                                    theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                 )}
                             >
                                 <option value="">Sin asignar</option>
@@ -299,21 +313,24 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-1">Datos Extra / Notas</label>
+                            <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>Datos Extra / Notas</label>
                             <textarea
                                 value={form.datosExtra}
                                 onChange={(e) => setForm({ ...form, datosExtra: e.target.value })}
                                 rows={3}
                                 className={cn(
                                     "w-full px-3 py-2 rounded-lg border text-sm resize-none",
-                                    theme === "dark" ? "bg-black/20 border-white/10 text-white" : "bg-white border-gray-200"
+                                    theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                 )}
                             />
                         </div>
                     </div>
 
                     {/* Footer Actions */}
-                    <div className="flex justify-between items-center pt-6 border-t border-gray-200 dark:border-white/10">
+                    <div className={cn(
+                        "flex justify-between items-center pt-4 mt-4 border-t",
+                        theme === "dark" ? "border-white/10" : "border-gray-200"
+                    )}>
                         <button
                             type="button"
                             onClick={handleDelete}
@@ -329,8 +346,10 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
                                 type="button"
                                 onClick={onClose}
                                 className={cn(
-                                    "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-                                    theme === "dark" ? "bg-white/10 hover:bg-white/20 text-white" : "bg-gray-100 hover:bg-gray-200 text-gray-700"
+                                    "px-4 py-2 rounded-lg text-sm font-medium transition-colors border",
+                                    theme === "dark"
+                                        ? "border-white/10 text-gray-400 hover:bg-white/5"
+                                        : "border-gray-200 text-gray-600 hover:bg-gray-50"
                                 )}
                             >
                                 Cancelar
@@ -338,14 +357,20 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
                             <button
                                 type="submit"
                                 disabled={loading || deleting}
-                                className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg text-sm font-medium transition-all shadow-lg shadow-purple-500/20"
+                                className={cn(
+                                    "flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-colors",
+                                    theme === "dark"
+                                        ? "bg-purple-600 hover:bg-purple-700 text-white"
+                                        : "bg-purple-600 hover:bg-purple-700 text-white"
+                                )}
                             >
                                 <Save className="w-4 h-4" />
-                                {loading ? "Guardando..." : "Guardar Cambios"}
+                                {loading ? "Guardando..." : "Guardar"}
                             </button>
                         </div>
                     </div>
                 </form>
+                </div>
             </div>
         </div>,
         document.body

@@ -30,6 +30,7 @@ import {
   Sparkles,
   X,
   CheckCheck,
+  AlertTriangle,
 } from "lucide-react"
 import { useTheme } from "./theme-provider"
 import { cn } from "@/lib/utils"
@@ -72,6 +73,12 @@ interface Template {
   _id: string
   nombre: string
   contenido: string
+}
+
+interface BannedWord {
+  _id: string
+  word: string
+  active: boolean
 }
 
 const getStatusStyles = (estado: string, theme: string) => {
@@ -166,6 +173,8 @@ export function MensajeriaMasiva() {
   const [showRejectedAlert, setShowRejectedAlert] = useState(false)
   const [rejectedCount, setRejectedCount] = useState(0)
   const [autoResponseNotification, setAutoResponseNotification] = useState<any>(null)
+  const [bannedWords, setBannedWords] = useState<BannedWord[]>([])
+  const [detectedBannedWords, setDetectedBannedWords] = useState<string[]>([])
 
   const [metrics, setMetrics] = useState({
     mensajesHoy: 0,
@@ -334,6 +343,7 @@ export function MensajeriaMasiva() {
     fetchCampaigns()
     fetchTemplates()
     fetchMetrics()
+    fetchBannedWords()
 
     return () => {
       socket.off('whatsapp:disconnected')
@@ -440,6 +450,44 @@ export function MensajeriaMasiva() {
       console.error("Error fetching templates:", error)
       toast.error("Error al cargar plantillas")
     }
+  }
+
+  const fetchBannedWords = async () => {
+    try {
+      const response = await api.bannedWords.list()
+      const words = response.data?.bannedWords || []
+      setBannedWords(words.filter((w: BannedWord) => w.active))
+    } catch (error) {
+      console.error("Error fetching banned words:", error)
+    }
+  }
+
+  const detectBannedWordsInMessage = (text: string): string[] => {
+    if (!text || bannedWords.length === 0) return []
+    const textLower = text.toLowerCase()
+    const detected: string[] = []
+    for (const bannedWord of bannedWords) {
+      const regex = new RegExp(`\\b${bannedWord.word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi')
+      if (regex.test(textLower)) {
+        detected.push(bannedWord.word)
+      }
+    }
+    return detected
+  }
+
+  useEffect(() => {
+    const detected = detectBannedWordsInMessage(message)
+    setDetectedBannedWords(detected)
+  }, [message, bannedWords])
+
+  const getHighlightedMessage = () => {
+    if (!message || detectedBannedWords.length === 0) return null
+    let html = message.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    for (const word of detectedBannedWords) {
+      const regex = new RegExp(`\\b(${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b`, 'gi')
+      html = html.replace(regex, '<mark class="bg-red-500/30 text-red-600 dark:text-red-400 rounded px-0.5">$1</mark>')
+    }
+    return html
   }
 
   // ✅ Text formatting: Insert text at cursor position
@@ -1170,21 +1218,47 @@ export function MensajeriaMasiva() {
                 </>
               )}
             </div>
-            <textarea
-              name="mensaje"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Escribe tu mensaje aquí... (se ignora si seleccionas plantilla)"
-              rows={4}
-              spellCheck={true}
-              lang="es"
-              className={cn(
-                "w-full px-3 py-2 rounded-b-lg text-sm border border-t-0 transition-all focus:ring-2 resize-none",
-                theme === "dark"
-                  ? "bg-white/5 border-white/10 text-white placeholder-gray-500 focus:border-purple-500/50 focus:ring-purple-500/20"
-                  : "bg-white border-purple-200/50 text-gray-700 placeholder-gray-400 focus:border-purple-400 focus:ring-purple-200/50",
+            <div className="relative">
+              <textarea
+                name="mensaje"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="Escribe tu mensaje aquí... (se ignora si seleccionas plantilla)"
+                rows={4}
+                spellCheck={true}
+                lang="es"
+                className={cn(
+                  "w-full px-3 py-2 rounded-b-lg text-sm border border-t-0 transition-all focus:ring-2 resize-none",
+                  theme === "dark"
+                    ? "bg-white/5 border-white/10 text-white placeholder-gray-500 focus:border-purple-500/50 focus:ring-purple-500/20"
+                    : "bg-white border-purple-200/50 text-gray-700 placeholder-gray-400 focus:border-purple-400 focus:ring-purple-200/50",
+                  detectedBannedWords.length > 0 && "border-red-400 focus:border-red-500 focus:ring-red-200/50"
+                )}
+              />
+              {detectedBannedWords.length > 0 && (
+                <div
+                  aria-hidden="true"
+                  className="absolute inset-0 px-3 py-2 text-sm pointer-events-none overflow-hidden whitespace-pre-wrap break-words rounded-b-lg"
+                  style={{ color: 'transparent' }}
+                  dangerouslySetInnerHTML={{ __html: getHighlightedMessage() || '' }}
+                />
               )}
-            />
+            </div>
+            {detectedBannedWords.length > 0 && (
+              <div className={cn(
+                "flex items-start gap-2 p-3 rounded-lg border mt-2",
+                theme === "dark"
+                  ? "bg-red-500/10 border-red-500/30 text-red-400"
+                  : "bg-red-50 border-red-200 text-red-700"
+              )}>
+                <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <div className="text-xs">
+                  <p className="font-semibold">⚠️ Palabras/frases prohibidas detectadas:</p>
+                  <p className="mt-1">{detectedBannedWords.map(w => `"${w}"`).join(", ")}</p>
+                  <p className="mt-1 opacity-80">Debes eliminarlas para poder enviar la campaña.</p>
+                </div>
+              </div>
+            )}
             <button
               onClick={handlePreview}
               className={cn(
@@ -1313,16 +1387,29 @@ export function MensajeriaMasiva() {
         {/* Botón de envío */}
         <button
           onClick={handleStartCampaign}
-          disabled={loading}
+          disabled={loading || detectedBannedWords.length > 0}
           className={cn(
-            "w-full mt-4 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold transition-all transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed",
-            theme === "dark"
-              ? "bg-gradient-to-r from-[#17C787] to-[#1E88E5] hover:from-[#17C787]/90 hover:to-[#1E88E5]/90 text-white shadow-lg shadow-[#17C787]/20"
-              : "bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white shadow-lg shadow-emerald-200/50",
+            "w-full mt-4 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold transition-all transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100",
+            detectedBannedWords.length > 0
+              ? theme === "dark"
+                ? "bg-gradient-to-r from-red-600 to-red-500 text-white"
+                : "bg-gradient-to-r from-red-400 to-red-500 text-white"
+              : theme === "dark"
+                ? "bg-gradient-to-r from-[#17C787] to-[#1E88E5] hover:from-[#17C787]/90 hover:to-[#1E88E5]/90 text-white shadow-lg shadow-[#17C787]/20"
+                : "bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white shadow-lg shadow-emerald-200/50",
           )}
         >
-          <Sparkles className="w-4 h-4" />
-          {loading ? "Iniciando..." : "Iniciar envío"}
+          {detectedBannedWords.length > 0 ? (
+            <>
+              <AlertTriangle className="w-4 h-4" />
+              Elimina las palabras prohibidas
+            </>
+          ) : (
+            <>
+              <Sparkles className="w-4 h-4" />
+              {loading ? "Iniciando..." : "Iniciar envío"}
+            </>
+          )}
         </button>
       </div>
 

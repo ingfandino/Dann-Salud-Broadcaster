@@ -15,6 +15,22 @@ const logger = require("../utils/logger");
 const path = require("path");
 const fs = require("fs").promises;
 const ExcelJS = require("exceljs");
+const mongoose = require("mongoose");
+
+/**
+ * ========== HELPER: CONVERTIR SET DE IDs A ObjectIds ==========
+ * Convierte un Set de IDs (pueden ser strings u ObjectIds) a un array de ObjectIds
+ * para usar en queries de MongoDB. Esto garantiza compatibilidad de tipos.
+ * @param {Set} idSet - Set de IDs a convertir
+ * @returns {Array} Array de ObjectIds válidos
+ */
+function setToObjectIds(idSet) {
+    return Array.from(idSet).map(id => {
+        if (id instanceof mongoose.Types.ObjectId) return id;
+        if (mongoose.Types.ObjectId.isValid(id)) return new mongoose.Types.ObjectId(id);
+        return id; // Fallback para IDs no válidos
+    }).filter(Boolean);
+}
 
 /**
  * ========== LIMPIEZA DE DATOS POR SUPERVISOR ==========
@@ -133,185 +149,461 @@ function shuffleArray(array) {
 }
 
 /**
- * Obtener afiliados mezclados de fuentes frescas y reutilizables
- * ✅ FIX: Con fallback para garantizar cantidad configurada
+ * ============================================================
+ * DISTRIBUCIÓN PROPORCIONAL POR OBRA SOCIAL - ENVÍO MASIVO
+ * ============================================================
+ * Mezcla datos de TODAS las obras sociales disponibles de forma proporcional.
+ * - Distribuye según stock disponible de cada obra social
+ * - Respeta porcentajes frescos/reutilizables
+ * - Garantiza que toda obra social con stock aporte al menos 1 dato
+ * - Compensa solo cuando falta stock
+ * 
  * @param {Object} mixConfig - Configuración {freshPercentage, reusablePercentage}
  * @param {Number} totalCount - Total de afiliados necesarios
- * @param {Set} usedIds - IDs de Affiliates ya usados (para evitar duplicados)
- * @param {Set} usedReusableCuils - CUILs de audits ya usadas como reutilizables (para evitar compartir entre supervisores)
- * @returns {Object} { affiliates, usedAuditIds, auditsWithoutBase }
+ * @param {Set} usedIds - IDs de Affiliates ya usados (para evitar duplicados entre supervisores)
+ * @param {Set} usedReusableCuils - CUILs de audits ya usadas como reutilizables
+ * @returns {Object} { affiliates, usedAuditIds, auditsWithoutBase, usedReusableCuilsInThisCall }
  */
 async function getMixedAffiliates(mixConfig, totalCount, usedIds = new Set(), usedReusableCuils = new Set()) {
     try {
         const freshPercentage = mixConfig.freshPercentage || 50;
         const reusablePercentage = mixConfig.reusablePercentage || 50;
 
-        // Calcular cantidades objetivo
+        // Calcular cantidades objetivo por tipo
         const targetFresh = Math.floor(totalCount * (freshPercentage / 100));
         const targetReusable = totalCount - targetFresh;
 
-        logger.info(`📊 ========== INICIO MEZCLA DE DATOS ==========`);
+        logger.info(`📊 ========== INICIO DISTRIBUCIÓN PROPORCIONAL ==========`);
         logger.info(`📊 Configuración: ${totalCount} total (${freshPercentage}% fresh = ${targetFresh}, ${reusablePercentage}% reusable = ${targetReusable})`);
 
-        // ========== PASO 1: OBTENER DATOS FRESCOS ==========
-        // Obtener CUILs que YA están en auditorías
+        // ========== PASO 1: OBTENER STOCK POR OBRA SOCIAL (FRESCOS) ==========
+        // Obtener CUILs que YA están en auditorías (para excluir de frescos)
         const auditsWithCuil = await Audit.find({
             cuil: { $exists: true, $ne: null }
         }).distinct('cuil').lean();
 
-        logger.info(`📋 CUILs ya en auditorías: ${auditsWithCuil.length}`);
+        // Agrupar stock fresco por obra social
+        const freshStockByOS = await Affiliate.aggregate([
+            {
+                $match: {
+                    active: true,
+                    cuil: { $nin: auditsWithCuil, $exists: true, $ne: null },
+                    _id: { $nin: setToObjectIds(usedIds) },
+                    dataSource: { $ne: 'reusable' },
+                    isUsed: { $ne: true },
+                    obraSocial: { $exists: true, $ne: null, $ne: '' }
+                }
+            },
+            {
+                $group: {
+                    _id: '$obraSocial',
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { count: -1 } }
+        ]);
 
-        // Buscar afiliados cuyo CUIL NO esté en auditorías (datos "frescos")
-        // ✅ FIX: Excluir los que fueron marcados como 'reusable' por limpieza
-        const freshAffiliates = await Affiliate.find({
-            active: true,
-            cuil: { $nin: auditsWithCuil, $exists: true, $ne: null },
-            _id: { $nin: Array.from(usedIds) },
-            dataSource: { $ne: 'reusable' },  // ✅ Excluir datos limpiados
-            isUsed: { $ne: true }             // ✅ Excluir datos ya usados
-        })
-            .limit(targetFresh)
-            .sort({ uploadDate: -1 })
-            .lean();
+        const totalFreshStock = freshStockByOS.reduce((sum, os) => sum + os.count, 0);
+        logger.info(`✨ Stock fresco total: ${totalFreshStock} en ${freshStockByOS.length} obras sociales`);
+        freshStockByOS.forEach(os => logger.info(`   - ${os._id}: ${os.count}`));
 
-        // Marcar frescos como _source: 'fresh'
-        freshAffiliates.forEach(a => {
-            a._source = 'fresh';
-            usedIds.add(a._id.toString());
-        });
+        // ========== PASO 2: OBTENER STOCK POR OBRA SOCIAL (REUTILIZABLES) ==========
+        const reusableStatuses = ['No atendió', 'Tiene dudas', 'Reprogramada (falta confirmar hora)'];
+        const usedCuilsSet = new Set([...Array.from(usedReusableCuils)]);
+
+        const reusableStockByOS = await Audit.aggregate([
+            {
+                $match: {
+                    status: { $in: reusableStatuses },
+                    cuil: { $exists: true, $ne: null, $nin: Array.from(usedCuilsSet) },
+                    reusableExportedAt: { $exists: false }
+                }
+            },
+            {
+                $group: {
+                    _id: { $ifNull: ['$obraSocialAnterior', '$obraSocialVendida'] },
+                    count: { $sum: 1 }
+                }
+            },
+            {
+                $match: { _id: { $ne: null } }
+            },
+            { $sort: { count: -1 } }
+        ]);
+
+        const totalReusableStock = reusableStockByOS.reduce((sum, os) => sum + os.count, 0);
+        logger.info(`♻️  Stock reutilizable total: ${totalReusableStock} en ${reusableStockByOS.length} obras sociales`);
+        reusableStockByOS.forEach(os => logger.info(`   - ${os._id}: ${os.count}`));
+
+        // ========== PASO 3: CALCULAR DISTRIBUCIÓN PROPORCIONAL ==========
+        /**
+         * Calcula cuántos datos tomar de cada obra social proporcionalmente
+         * Garantiza que toda OS con stock aporte al menos 1 dato
+         */
+        function calculateProportionalDistribution(stockByOS, totalNeeded) {
+            if (stockByOS.length === 0 || totalNeeded <= 0) return [];
+            
+            const totalStock = stockByOS.reduce((sum, os) => sum + os.count, 0);
+            if (totalStock === 0) return [];
+
+            // Si hay más obras que datos necesarios, priorizar las de mayor stock
+            if (stockByOS.length > totalNeeded) {
+                const sorted = [...stockByOS].sort((a, b) => b.count - a.count);
+                return sorted.slice(0, totalNeeded).map(os => ({
+                    obraSocial: os._id,
+                    cantidad: 1,
+                    stockDisponible: os.count
+                }));
+            }
+
+            // Calcular distribución proporcional
+            const distribution = [];
+            let remaining = totalNeeded;
+            let remainingStock = totalStock;
+
+            // Primero: asignar al menos 1 a cada OS con stock
+            for (const os of stockByOS) {
+                if (os.count > 0 && remaining > 0) {
+                    distribution.push({
+                        obraSocial: os._id,
+                        cantidad: 1,
+                        stockDisponible: os.count
+                    });
+                    remaining--;
+                    remainingStock -= os.count;
+                }
+            }
+
+            // Segundo: distribuir el resto proporcionalmente
+            if (remaining > 0) {
+                // Calcular proporciones basadas en stock restante (stock - 1 ya asignado)
+                const stockForProportions = stockByOS.map(os => ({
+                    obraSocial: os._id,
+                    availableForMore: Math.max(0, os.count - 1)
+                })).filter(os => os.availableForMore > 0);
+
+                const totalAvailable = stockForProportions.reduce((sum, os) => sum + os.availableForMore, 0);
+                
+                if (totalAvailable > 0) {
+                    // Distribuir proporcionalmente con decimales
+                    let fractionalParts = [];
+                    
+                    for (const os of stockForProportions) {
+                        const proportion = os.availableForMore / totalAvailable;
+                        const exactAmount = remaining * proportion;
+                        const wholeAmount = Math.floor(exactAmount);
+                        const fractional = exactAmount - wholeAmount;
+
+                        // Encontrar en distribution y sumar
+                        const existing = distribution.find(d => d.obraSocial === os.obraSocial);
+                        if (existing) {
+                            const canAdd = Math.min(wholeAmount, os.availableForMore);
+                            existing.cantidad += canAdd;
+                            fractionalParts.push({
+                                obraSocial: os.obraSocial,
+                                fractional,
+                                canAddMore: os.availableForMore - canAdd
+                            });
+                        }
+                    }
+
+                    // Asignar sobrantes (decimales) a las OS con mayor stock disponible
+                    const totalAssigned = distribution.reduce((sum, d) => sum + d.cantidad, 0);
+                    let stillRemaining = totalNeeded - totalAssigned;
+
+                    if (stillRemaining > 0) {
+                        // Ordenar por parte fraccionaria descendente, luego por stock disponible
+                        fractionalParts.sort((a, b) => {
+                            if (b.fractional !== a.fractional) return b.fractional - a.fractional;
+                            return b.canAddMore - a.canAddMore;
+                        });
+
+                        for (const fp of fractionalParts) {
+                            if (stillRemaining <= 0) break;
+                            if (fp.canAddMore > 0) {
+                                const existing = distribution.find(d => d.obraSocial === fp.obraSocial);
+                                if (existing) {
+                                    existing.cantidad++;
+                                    stillRemaining--;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Verificar que ninguna OS exceda su stock
+            for (const d of distribution) {
+                const original = stockByOS.find(os => os._id === d.obraSocial);
+                if (original && d.cantidad > original.count) {
+                    d.cantidad = original.count;
+                }
+            }
+
+            return distribution.filter(d => d.cantidad > 0);
+        }
+
+        // Calcular distribución para frescos
+        const freshDistribution = calculateProportionalDistribution(freshStockByOS, targetFresh);
+        const plannedFresh = freshDistribution.reduce((sum, d) => sum + d.cantidad, 0);
+        logger.info(`📋 Distribución frescos planeada: ${plannedFresh}/${targetFresh}`);
+        freshDistribution.forEach(d => logger.info(`   - ${d.obraSocial}: ${d.cantidad}/${d.stockDisponible}`));
+
+        // Calcular distribución para reutilizables
+        const reusableDistribution = calculateProportionalDistribution(reusableStockByOS, targetReusable);
+        const plannedReusable = reusableDistribution.reduce((sum, d) => sum + d.cantidad, 0);
+        logger.info(`📋 Distribución reutilizables planeada: ${plannedReusable}/${targetReusable}`);
+        reusableDistribution.forEach(d => logger.info(`   - ${d.obraSocial}: ${d.cantidad}/${d.stockDisponible}`));
+
+        // ========== PASO 4: OBTENER DATOS FRESCOS SEGÚN DISTRIBUCIÓN ==========
+        let freshAffiliates = [];
+
+        for (const dist of freshDistribution) {
+            if (dist.cantidad <= 0) continue;
+
+            const affiliates = await Affiliate.find({
+                active: true,
+                obraSocial: dist.obraSocial,
+                cuil: { $nin: auditsWithCuil, $exists: true, $ne: null },
+                _id: { $nin: setToObjectIds(usedIds) },
+                dataSource: { $ne: 'reusable' },
+                isUsed: { $ne: true }
+            })
+                .limit(dist.cantidad)
+                .sort({ uploadDate: -1 })
+                .lean();
+
+            affiliates.forEach(a => {
+                a._source = 'fresh';
+                usedIds.add(a._id); // ✅ FIX: Sin toString() para mantener ObjectId
+            });
+
+            freshAffiliates.push(...affiliates);
+        }
 
         const freshObtained = freshAffiliates.length;
         logger.info(`✨ Fresh obtenidos: ${freshObtained}/${targetFresh}`);
 
-        // ========== PASO 2: OBTENER DATOS REUTILIZABLES ==========
-        // Calcular cuántos reutilizables necesitamos (puede ser más si faltan frescos)
-        const reusableNeeded = Math.max(targetReusable, totalCount - freshObtained);
-
-        // Estados para reutilizables (mismos que usa la interfaz "Datos Reutilizables")
-        const reusableStatuses = [
-            'No atendió', 
-            'Tiene dudas', 
-            'Reprogramada (falta confirmar hora)'
-        ];
-
-        // ✅ FIX: Buscar en Audits (fuente de reutilizables)
-        // Excluir: CUILs usados como frescos + CUILs ya usados por otros supervisores + Audits ya exportadas
-        const usedCuils = new Set([
-            ...freshAffiliates.map(a => a.cuil).filter(Boolean),
-            ...Array.from(usedReusableCuils) // ✅ CUILs ya usados por otros supervisores en esta ejecución
-        ]);
-
-        const audits = await Audit.find({
-            status: { $in: reusableStatuses },
-            cuil: { $exists: true, $ne: null, $nin: Array.from(usedCuils) },
-            // ✅ SEGURIDAD: Excluir Audits ya exportadas como reutilizables
-            reusableExportedAt: { $exists: false }
-        })
-            .sort({ scheduledAt: -1 }) // Más recientes primero
-            .limit(reusableNeeded * 2) // Pedir más porque algunos se filtrarán
-            .lean();
-
-        logger.info(`♻️  Audits reutilizables disponibles (no exportadas antes): ${audits.length}`);
-
-        // Obtener datos de Affiliates para los CUILs de auditorías
-        const cuilList = audits.map(a => a.cuil).filter(Boolean);
-        const affiliatesForReusable = await Affiliate.find({
-            cuil: { $in: cuilList },
-            _id: { $nin: Array.from(usedIds) }
-        }).select('_id cuil localidad edad nombre telefono1 obraSocial').lean();
-
-        logger.info(`♻️  Affiliates base para reutilizables: ${affiliatesForReusable.length}`);
-
-        // Crear mapa para búsqueda rápida
-        const affiliateMap = {};
-        affiliatesForReusable.forEach(a => {
-            if (a.cuil) affiliateMap[a.cuil] = a;
-        });
-
-        // Debug: Ver qué CUILs hay en el mapa vs qué CUILs tienen los audits
-        const mapCuils = Object.keys(affiliateMap);
-        const auditCuils = audits.slice(0, 20).map(a => a.cuil).filter(Boolean);
-        const matchingCuils = auditCuils.filter(c => affiliateMap[c]);
-        logger.info(`🔍 Debug: Map tiene ${mapCuils.length} CUILs, Audits tienen ${auditCuils.length} CUILs, Coincidencias: ${matchingCuils.length}`);
-        if (matchingCuils.length === 0 && mapCuils.length > 0 && auditCuils.length > 0) {
-            logger.info(`🔍 Muestra Map CUILs: ${mapCuils.slice(0, 3).join(', ')}`);
-            logger.info(`🔍 Muestra Audit CUILs: ${auditCuils.slice(0, 3).join(', ')}`);
-        }
-
-        // Normalizar datos reutilizables
-        // Guardar IDs de Audits usadas para marcarlas después
+        // ========== PASO 5: OBTENER DATOS REUTILIZABLES SEGÚN DISTRIBUCIÓN ==========
         let reusableAffiliates = [];
         const localReusableCuils = new Set();
-        const usedAuditIds = []; // ✅ Para marcar Audits como exportadas
-        const auditsWithoutBase = []; // ✅ Para crear Affiliates nuevos
+        const usedAuditIds = [];
+        const auditsWithoutBase = [];
         let withBase = 0;
         let withoutBase = 0;
 
-        for (const audit of audits) {
-            if (reusableAffiliates.length >= reusableNeeded) break;
-            if (!audit.cuil || localReusableCuils.has(audit.cuil)) continue;
-            
-            const baseAffiliate = affiliateMap[audit.cuil];
-            
-            // Guardar ID de Audit para marcarla después
-            usedAuditIds.push(audit._id);
-            
-            if (baseAffiliate) {
-                // Tiene affiliate base - usar datos combinados
-                const affiliateData = {
-                    _id: baseAffiliate._id,
-                    _hasBase: true,
-                    _auditId: audit._id,
-                    nombre: audit.nombre || baseAffiliate.nombre,
-                    cuil: audit.cuil,
-                    telefono1: audit.telefono || baseAffiliate.telefono1,
-                    obraSocial: audit.obraSocialAnterior || audit.obraSocialVendida || baseAffiliate.obraSocial || '-',
-                    localidad: baseAffiliate.localidad || 'DESCONOCIDO',
-                    edad: baseAffiliate.edad || '',
-                    _source: 'reusable'
-                };
-                reusableAffiliates.push(affiliateData);
-                usedIds.add(baseAffiliate._id.toString());
-                withBase++;
-            } else {
-                // No tiene affiliate base - guardar para crear después
-                auditsWithoutBase.push(audit);
-                // Placeholder temporal (se reemplazará con el ID real después de crear)
-                reusableAffiliates.push({
-                    _id: `pending_${audit._id}`,
-                    _hasBase: false,
-                    _auditId: audit._id,
-                    _pendingCreate: true, // Marcar para crear
-                    nombre: audit.nombre || 'Sin nombre',
-                    cuil: audit.cuil,
-                    telefono1: audit.telefono,
-                    obraSocial: audit.obraSocialAnterior || audit.obraSocialVendida || '-',
-                    localidad: 'DESCONOCIDO',
-                    edad: '',
-                    _source: 'reusable'
-                });
-                withoutBase++;
+        // Agregar CUILs de frescos a exclusión
+        freshAffiliates.forEach(a => {
+            if (a.cuil) usedCuilsSet.add(a.cuil);
+        });
+
+        for (const dist of reusableDistribution) {
+            if (dist.cantidad <= 0) continue;
+
+            const audits = await Audit.find({
+                status: { $in: reusableStatuses },
+                $or: [
+                    { obraSocialAnterior: dist.obraSocial },
+                    { obraSocialVendida: dist.obraSocial }
+                ],
+                cuil: { $exists: true, $ne: null, $nin: Array.from(usedCuilsSet) },
+                reusableExportedAt: { $exists: false }
+            })
+                .sort({ scheduledAt: -1 })
+                .limit(dist.cantidad * 2) // Buscar más por si hay duplicados
+                .lean();
+
+            // Obtener Affiliates base para estos CUILs
+            const cuilList = audits.map(a => a.cuil).filter(Boolean);
+            let affiliatesForReusable = [];
+            if (cuilList.length > 0) {
+                affiliatesForReusable = await Affiliate.find({
+                    cuil: { $in: cuilList },
+                    _id: { $nin: setToObjectIds(usedIds) }
+                }).select('_id cuil localidad edad nombre telefono1 obraSocial').lean();
             }
-            
-            localReusableCuils.add(audit.cuil);
+
+            const affiliateMap = {};
+            affiliatesForReusable.forEach(a => {
+                if (a.cuil) affiliateMap[a.cuil] = a;
+            });
+
+            let countForThisOS = 0;
+            for (const audit of audits) {
+                if (countForThisOS >= dist.cantidad) break;
+                if (!audit.cuil || localReusableCuils.has(audit.cuil) || usedCuilsSet.has(audit.cuil)) continue;
+
+                const baseAffiliate = affiliateMap[audit.cuil];
+                usedAuditIds.push(audit._id);
+                usedCuilsSet.add(audit.cuil);
+                localReusableCuils.add(audit.cuil);
+
+                if (baseAffiliate) {
+                    reusableAffiliates.push({
+                        _id: baseAffiliate._id,
+                        _affiliateId: baseAffiliate._id,
+                        _hasBase: true,
+                        _auditId: audit._id,
+                        nombre: audit.nombre || baseAffiliate.nombre,
+                        cuil: audit.cuil,
+                        telefono1: audit.telefono || baseAffiliate.telefono1,
+                        obraSocial: audit.obraSocialAnterior || audit.obraSocialVendida || baseAffiliate.obraSocial || '-',
+                        localidad: baseAffiliate.localidad || 'DESCONOCIDO',
+                        edad: baseAffiliate.edad || '',
+                        _source: 'reusable'
+                    });
+                    usedIds.add(baseAffiliate._id); // ✅ FIX: Sin toString()
+                    withBase++;
+                } else {
+                    auditsWithoutBase.push(audit);
+                    reusableAffiliates.push({
+                        _id: `pending_${audit._id}`,
+                        _hasBase: false,
+                        _auditId: audit._id,
+                        _pendingCreate: true,
+                        nombre: audit.nombre || 'Sin nombre',
+                        cuil: audit.cuil,
+                        telefono1: audit.telefono,
+                        obraSocial: audit.obraSocialAnterior || audit.obraSocialVendida || '-',
+                        localidad: 'DESCONOCIDO',
+                        edad: '',
+                        _source: 'reusable'
+                    });
+                    withoutBase++;
+                }
+                countForThisOS++;
+            }
         }
 
-        logger.info(`♻️  Reutilizables: ${withBase} con base, ${withoutBase} sin base (se crearán)`);
         const reusableObtained = reusableAffiliates.length;
-        logger.info(`♻️  Reusable obtenidos: ${reusableObtained}/${reusableNeeded}`);
+        logger.info(`♻️  Reutilizables obtenidos: ${reusableObtained}/${targetReusable} (${withBase} con base, ${withoutBase} sin base)`);
 
-        // ========== PASO 3: FALLBACK FINAL - COMPLETAR CON CUALQUIER AFILIADO ==========
-        const currentTotal = freshObtained + reusableObtained;
+        // ========== PASO 6: COMPENSACIÓN (solo si falta stock) ==========
+        let currentTotal = freshObtained + reusableObtained;
+        let compensationAffiliates = [];
+
+        // Compensar frescos faltantes con reutilizables adicionales
+        if (freshObtained < targetFresh && currentTotal < totalCount) {
+            const freshDeficit = targetFresh - freshObtained;
+            const canCompensate = Math.min(freshDeficit, totalCount - currentTotal);
+            
+            if (canCompensate > 0) {
+                logger.info(`🔄 Compensando ${canCompensate} frescos faltantes con reutilizables adicionales...`);
+                
+                // Buscar reutilizables adicionales de cualquier OS
+                const extraAudits = await Audit.find({
+                    status: { $in: reusableStatuses },
+                    cuil: { $exists: true, $ne: null, $nin: Array.from(usedCuilsSet) },
+                    reusableExportedAt: { $exists: false }
+                })
+                    .sort({ scheduledAt: -1 })
+                    .limit(canCompensate * 2)
+                    .lean();
+
+                const extraCuils = extraAudits.map(a => a.cuil).filter(Boolean);
+                let extraAffiliatesBase = [];
+                if (extraCuils.length > 0) {
+                    extraAffiliatesBase = await Affiliate.find({
+                        cuil: { $in: extraCuils },
+                        _id: { $nin: setToObjectIds(usedIds) }
+                    }).select('_id cuil localidad edad nombre telefono1 obraSocial').lean();
+                }
+
+                const extraMap = {};
+                extraAffiliatesBase.forEach(a => {
+                    if (a.cuil) extraMap[a.cuil] = a;
+                });
+
+                let compensated = 0;
+                for (const audit of extraAudits) {
+                    if (compensated >= canCompensate) break;
+                    if (!audit.cuil || localReusableCuils.has(audit.cuil) || usedCuilsSet.has(audit.cuil)) continue;
+
+                    const baseAffiliate = extraMap[audit.cuil];
+                    usedAuditIds.push(audit._id);
+                    usedCuilsSet.add(audit.cuil);
+                    localReusableCuils.add(audit.cuil);
+
+                    if (baseAffiliate) {
+                        compensationAffiliates.push({
+                            _id: baseAffiliate._id,
+                            _affiliateId: baseAffiliate._id,
+                            _hasBase: true,
+                            _auditId: audit._id,
+                            nombre: audit.nombre || baseAffiliate.nombre,
+                            cuil: audit.cuil,
+                            telefono1: audit.telefono || baseAffiliate.telefono1,
+                            obraSocial: audit.obraSocialAnterior || audit.obraSocialVendida || baseAffiliate.obraSocial || '-',
+                            localidad: baseAffiliate.localidad || 'DESCONOCIDO',
+                            edad: baseAffiliate.edad || '',
+                            _source: 'compensation_reusable'
+                        });
+                        usedIds.add(baseAffiliate._id); // ✅ FIX: Sin toString()
+                        withBase++;
+                    } else {
+                        auditsWithoutBase.push(audit);
+                        compensationAffiliates.push({
+                            _id: `pending_${audit._id}`,
+                            _hasBase: false,
+                            _auditId: audit._id,
+                            _pendingCreate: true,
+                            nombre: audit.nombre || 'Sin nombre',
+                            cuil: audit.cuil,
+                            telefono1: audit.telefono,
+                            obraSocial: audit.obraSocialAnterior || audit.obraSocialVendida || '-',
+                            localidad: 'DESCONOCIDO',
+                            edad: '',
+                            _source: 'compensation_reusable'
+                        });
+                        withoutBase++;
+                    }
+                    compensated++;
+                }
+                logger.info(`🔄 Compensados: ${compensated} reutilizables adicionales`);
+            }
+        }
+
+        // Compensar reutilizables faltantes con frescos adicionales
+        currentTotal = freshObtained + reusableObtained + compensationAffiliates.length;
+        if (reusableObtained < targetReusable && currentTotal < totalCount) {
+            const reusableDeficit = targetReusable - reusableObtained - compensationAffiliates.length;
+            const canCompensate = Math.min(reusableDeficit, totalCount - currentTotal);
+            
+            if (canCompensate > 0) {
+                logger.info(`🔄 Compensando ${canCompensate} reutilizables faltantes con frescos adicionales...`);
+                
+                const extraFresh = await Affiliate.find({
+                    active: true,
+                    cuil: { $nin: [...auditsWithCuil, ...Array.from(usedCuilsSet)], $exists: true, $ne: null },
+                    _id: { $nin: setToObjectIds(usedIds) },
+                    dataSource: { $ne: 'reusable' },
+                    isUsed: { $ne: true }
+                })
+                    .limit(canCompensate)
+                    .sort({ uploadDate: -1 })
+                    .lean();
+
+                extraFresh.forEach(a => {
+                    a._source = 'compensation_fresh';
+                    usedIds.add(a._id); // ✅ FIX: Sin toString() para compatibilidad ObjectId
+                });
+
+                compensationAffiliates.push(...extraFresh);
+                logger.info(`🔄 Compensados: ${extraFresh.length} frescos adicionales`);
+            }
+        }
+
+        // ========== PASO 7: FALLBACK FINAL ==========
+        currentTotal = freshObtained + reusableObtained + compensationAffiliates.length;
         let extraAffiliates = [];
 
         if (currentTotal < totalCount) {
             const stillNeeded = totalCount - currentTotal;
-            logger.warn(`⚠️ DÉFICIT: Faltan ${stillNeeded} afiliados. Buscando extras...`);
+            logger.warn(`⚠️ DÉFICIT FINAL: Faltan ${stillNeeded} afiliados. Buscando extras...`);
 
-            // Buscar cualquier afiliado activo que no se haya usado
             extraAffiliates = await Affiliate.find({
                 active: true,
-                _id: { $nin: Array.from(usedIds) }
+                _id: { $nin: setToObjectIds(usedIds) }
             })
                 .limit(stillNeeded)
                 .sort({ uploadDate: -1 })
@@ -319,24 +611,36 @@ async function getMixedAffiliates(mixConfig, totalCount, usedIds = new Set(), us
 
             extraAffiliates.forEach(a => {
                 a._source = 'extra';
-                usedIds.add(a._id.toString());
+                usedIds.add(a._id); // ✅ FIX: Sin toString() para compatibilidad ObjectId
             });
 
             logger.info(`📦 Extras obtenidos (fallback): ${extraAffiliates.length}/${stillNeeded}`);
         }
 
-        // ========== PASO 4: COMBINAR Y MEZCLAR ==========
-        const combined = [...freshAffiliates, ...reusableAffiliates, ...extraAffiliates];
+        // ========== PASO 8: COMBINAR Y MEZCLAR ==========
+        const combined = [...freshAffiliates, ...reusableAffiliates, ...compensationAffiliates, ...extraAffiliates];
         const shuffled = shuffleArray(combined);
 
         // ========== LOGGING FINAL ==========
         const finalFresh = combined.filter(a => a._source === 'fresh').length;
         const finalReusable = combined.filter(a => a._source === 'reusable').length;
+        const finalCompensation = combined.filter(a => a._source?.startsWith('compensation')).length;
         const finalExtra = combined.filter(a => a._source === 'extra').length;
+
+        // Contar por obra social para verificar distribución
+        const byObraSocial = {};
+        combined.forEach(a => {
+            const os = a.obraSocial || 'Sin OS';
+            byObraSocial[os] = (byObraSocial[os] || 0) + 1;
+        });
 
         logger.info(`📊 ========== RESUMEN FINAL ==========`);
         logger.info(`📊 Objetivo: ${totalCount} | Obtenido: ${shuffled.length}`);
-        logger.info(`📊 Composición: Fresh=${finalFresh}, Reusable=${finalReusable}, Extra=${finalExtra}`);
+        logger.info(`📊 Composición: Fresh=${finalFresh}, Reusable=${finalReusable}, Compensación=${finalCompensation}, Extra=${finalExtra}`);
+        logger.info(`📊 Distribución por Obra Social:`);
+        Object.entries(byObraSocial).sort((a, b) => b[1] - a[1]).forEach(([os, count]) => {
+            logger.info(`   - ${os}: ${count} (${Math.round(count/shuffled.length*100)}%)`);
+        });
         
         if (shuffled.length < totalCount) {
             logger.warn(`⚠️ NO SE ALCANZÓ EL OBJETIVO: ${shuffled.length}/${totalCount} (${Math.round(shuffled.length/totalCount*100)}%)`);
@@ -348,9 +652,9 @@ async function getMixedAffiliates(mixConfig, totalCount, usedIds = new Set(), us
         // ✅ Retornar objeto con metadata para procesamiento posterior
         return {
             affiliates: shuffled,
-            usedAuditIds,        // IDs de Audits a marcar como exportadas
-            auditsWithoutBase,   // Datos de Audits para crear Affiliates nuevos
-            usedReusableCuilsInThisCall: localReusableCuils // CUILs usados en esta llamada (para compartir entre supervisores)
+            usedAuditIds,
+            auditsWithoutBase,
+            usedReusableCuilsInThisCall: localReusableCuils
         };
 
     } catch (error) {
@@ -375,7 +679,7 @@ async function getAffiliatesByDistribution(distribution, baseQuery, usedIds = ne
     }
 
     for (const dist of distribution) {
-        const query = { ...baseQuery, _id: { $nin: Array.from(usedIds) } };
+        const query = { ...baseQuery, _id: { $nin: setToObjectIds(usedIds) } };
 
         if (dist.obraSocial === "*") {
             // Obtener afiliados de obras sociales NO especificadas
@@ -405,6 +709,453 @@ async function getAffiliatesByDistribution(distribution, baseQuery, usedIds = ne
     }
 
     return affiliates;
+}
+
+/**
+ * ============================================================
+ * DISTRIBUCIÓN DINÁMICA POR OBRA SOCIAL - ENVÍOS AVANZADOS
+ * ============================================================
+ * Obtiene datos para una obra social específica con proporción
+ * fresco/reutilizable calculada dinámicamente según stock real.
+ * 
+ * Algoritmo:
+ * 1. Obtener stock real (frescos y reutilizables) de la obra social
+ * 2. Calcular proporción dinámica: fresco% = frescos / total
+ * 3. Asignar cantidades según proporción
+ * 4. Si falta de un tipo, compensar con el otro tipo
+ * 5. Si aún falta, activar fallback por otra obra social
+ * 
+ * @param {Object} obraSocialConfig - {obraSocial, cantidad}
+ * @param {Set} usedIds - IDs de Affiliates ya usados
+ * @param {Set} usedReusableCuils - CUILs de reutilizables ya usados
+ * @param {Array} allObrasSociales - Todas las OS disponibles (para fallback)
+ * @returns {Object} { affiliates, usedAuditIds, auditsWithoutBase, usedReusableCuilsInThisCall }
+ */
+async function getAdvancedDistribution(obraSocialConfig, usedIds = new Set(), usedReusableCuils = new Set(), allObrasSociales = []) {
+    const { obraSocial, cantidad } = obraSocialConfig;
+    
+    logger.info(`📊 ========== DISTRIBUCIÓN AVANZADA: ${obraSocial} ==========`);
+    logger.info(`📊 Cantidad solicitada: ${cantidad}`);
+
+    // Obtener CUILs que YA están en auditorías (para excluir de frescos)
+    const auditsWithCuil = await Audit.find({
+        cuil: { $exists: true, $ne: null }
+    }).distinct('cuil').lean();
+
+    // ========== PASO 1: OBTENER STOCK REAL ==========
+    // Stock Fresco
+    const freshStock = await Affiliate.countDocuments({
+        active: true,
+        obraSocial: obraSocial,
+        cuil: { $nin: auditsWithCuil, $exists: true, $ne: null },
+        _id: { $nin: setToObjectIds(usedIds) },
+        dataSource: { $ne: 'reusable' },
+        isUsed: { $ne: true }
+    });
+
+    // Stock Reutilizable
+    const reusableStatuses = ['No atendió', 'Tiene dudas', 'Reprogramada (falta confirmar hora)'];
+    const reusableStock = await Audit.countDocuments({
+        status: { $in: reusableStatuses },
+        $or: [
+            { obraSocialAnterior: obraSocial },
+            { obraSocialVendida: obraSocial }
+        ],
+        cuil: { $exists: true, $ne: null, $nin: Array.from(usedReusableCuils) },
+        reusableExportedAt: { $exists: false }
+    });
+
+    const totalStock = freshStock + reusableStock;
+    logger.info(`📊 Stock disponible: Fresh=${freshStock}, Reusable=${reusableStock}, Total=${totalStock}`);
+
+    if (totalStock === 0) {
+        logger.warn(`⚠️ Sin stock disponible para ${obraSocial}`);
+        return { affiliates: [], usedAuditIds: [], auditsWithoutBase: [], usedReusableCuilsInThisCall: new Set() };
+    }
+
+    // ========== PASO 2: CALCULAR PROPORCIÓN DINÁMICA ==========
+    const freshProportion = totalStock > 0 ? freshStock / totalStock : 0.5;
+    const targetFresh = Math.round(cantidad * freshProportion);
+    const targetReusable = cantidad - targetFresh;
+
+    logger.info(`📊 Proporción dinámica: ${Math.round(freshProportion * 100)}% fresco, ${Math.round((1 - freshProportion) * 100)}% reutilizable`);
+    logger.info(`📊 Objetivo: Fresh=${targetFresh}, Reusable=${targetReusable}`);
+
+    // ========== PASO 3: OBTENER DATOS FRESCOS ==========
+    let freshAffiliates = [];
+    const actualFreshToGet = Math.min(targetFresh, freshStock);
+
+    if (actualFreshToGet > 0) {
+        freshAffiliates = await Affiliate.find({
+            active: true,
+            obraSocial: obraSocial,
+            cuil: { $nin: auditsWithCuil, $exists: true, $ne: null },
+            _id: { $nin: setToObjectIds(usedIds) },
+            dataSource: { $ne: 'reusable' },
+            isUsed: { $ne: true }
+        })
+            .limit(actualFreshToGet)
+            .sort({ uploadDate: -1 })
+            .lean();
+
+        freshAffiliates.forEach(a => {
+            a._source = 'fresh';
+            usedIds.add(a._id); // ✅ FIX: Sin toString() para compatibilidad ObjectId
+        });
+    }
+
+    const freshObtained = freshAffiliates.length;
+    logger.info(`✨ Frescos obtenidos: ${freshObtained}/${targetFresh}`);
+
+    // ========== PASO 4: OBTENER DATOS REUTILIZABLES ==========
+    let reusableAffiliates = [];
+    const localReusableCuils = new Set();
+    const usedAuditIds = [];
+    const auditsWithoutBase = [];
+    let withBase = 0;
+    let withoutBase = 0;
+
+    // Agregar CUILs de frescos a exclusión
+    const usedCuilsSet = new Set([...Array.from(usedReusableCuils)]);
+    freshAffiliates.forEach(a => {
+        if (a.cuil) usedCuilsSet.add(a.cuil);
+    });
+
+    const actualReusableToGet = Math.min(targetReusable, reusableStock);
+
+    if (actualReusableToGet > 0) {
+        const audits = await Audit.find({
+            status: { $in: reusableStatuses },
+            $or: [
+                { obraSocialAnterior: obraSocial },
+                { obraSocialVendida: obraSocial }
+            ],
+            cuil: { $exists: true, $ne: null, $nin: Array.from(usedCuilsSet) },
+            reusableExportedAt: { $exists: false }
+        })
+            .sort({ scheduledAt: -1 })
+            .limit(actualReusableToGet * 2)
+            .lean();
+
+        const cuilList = audits.map(a => a.cuil).filter(Boolean);
+        let affiliatesForReusable = [];
+        if (cuilList.length > 0) {
+            affiliatesForReusable = await Affiliate.find({
+                cuil: { $in: cuilList },
+                _id: { $nin: setToObjectIds(usedIds) }
+            }).select('_id cuil localidad edad nombre telefono1 obraSocial').lean();
+        }
+
+        const affiliateMap = {};
+        affiliatesForReusable.forEach(a => {
+            if (a.cuil) affiliateMap[a.cuil] = a;
+        });
+
+        let countReusable = 0;
+        for (const audit of audits) {
+            if (countReusable >= actualReusableToGet) break;
+            if (!audit.cuil || localReusableCuils.has(audit.cuil) || usedCuilsSet.has(audit.cuil)) continue;
+
+            const baseAffiliate = affiliateMap[audit.cuil];
+            usedAuditIds.push(audit._id);
+            usedCuilsSet.add(audit.cuil);
+            localReusableCuils.add(audit.cuil);
+
+            if (baseAffiliate) {
+                reusableAffiliates.push({
+                    _id: baseAffiliate._id,
+                    _affiliateId: baseAffiliate._id,
+                    _hasBase: true,
+                    _auditId: audit._id,
+                    nombre: audit.nombre || baseAffiliate.nombre,
+                    cuil: audit.cuil,
+                    telefono1: audit.telefono || baseAffiliate.telefono1,
+                    obraSocial: obraSocial,
+                    localidad: baseAffiliate.localidad || 'DESCONOCIDO',
+                    edad: baseAffiliate.edad || '',
+                    _source: 'reusable'
+                });
+                usedIds.add(baseAffiliate._id); // ✅ FIX: Sin toString() para compatibilidad ObjectId
+                withBase++;
+            } else {
+                auditsWithoutBase.push(audit);
+                reusableAffiliates.push({
+                    _id: `pending_${audit._id}`,
+                    _hasBase: false,
+                    _auditId: audit._id,
+                    _pendingCreate: true,
+                    nombre: audit.nombre || 'Sin nombre',
+                    cuil: audit.cuil,
+                    telefono1: audit.telefono,
+                    obraSocial: obraSocial,
+                    localidad: 'DESCONOCIDO',
+                    edad: '',
+                    _source: 'reusable'
+                });
+                withoutBase++;
+            }
+            countReusable++;
+        }
+    }
+
+    const reusableObtained = reusableAffiliates.length;
+    logger.info(`♻️  Reutilizables obtenidos: ${reusableObtained}/${targetReusable} (${withBase} con base, ${withoutBase} sin base)`);
+
+    // ========== PASO 5: COMPENSACIÓN INTERNA (mismo tipo) ==========
+    let currentTotal = freshObtained + reusableObtained;
+    let compensationAffiliates = [];
+
+    // Si faltan frescos, compensar con más reutilizables de la misma OS
+    if (freshObtained < targetFresh && currentTotal < cantidad) {
+        const freshDeficit = targetFresh - freshObtained;
+        const canCompensate = Math.min(freshDeficit, cantidad - currentTotal);
+        
+        if (canCompensate > 0) {
+            logger.info(`🔄 Compensando ${canCompensate} frescos faltantes con reutilizables de ${obraSocial}...`);
+            
+            const extraAudits = await Audit.find({
+                status: { $in: reusableStatuses },
+                $or: [
+                    { obraSocialAnterior: obraSocial },
+                    { obraSocialVendida: obraSocial }
+                ],
+                cuil: { $exists: true, $ne: null, $nin: Array.from(usedCuilsSet) },
+                reusableExportedAt: { $exists: false }
+            })
+                .sort({ scheduledAt: -1 })
+                .limit(canCompensate * 2)
+                .lean();
+
+            const extraCuils = extraAudits.map(a => a.cuil).filter(Boolean);
+            let extraAffiliatesBase = [];
+            if (extraCuils.length > 0) {
+                extraAffiliatesBase = await Affiliate.find({
+                    cuil: { $in: extraCuils },
+                    _id: { $nin: setToObjectIds(usedIds) }
+                }).select('_id cuil localidad edad nombre telefono1 obraSocial').lean();
+            }
+
+            const extraMap = {};
+            extraAffiliatesBase.forEach(a => {
+                if (a.cuil) extraMap[a.cuil] = a;
+            });
+
+            let compensated = 0;
+            for (const audit of extraAudits) {
+                if (compensated >= canCompensate) break;
+                if (!audit.cuil || localReusableCuils.has(audit.cuil) || usedCuilsSet.has(audit.cuil)) continue;
+
+                const baseAffiliate = extraMap[audit.cuil];
+                usedAuditIds.push(audit._id);
+                usedCuilsSet.add(audit.cuil);
+                localReusableCuils.add(audit.cuil);
+
+                if (baseAffiliate) {
+                    compensationAffiliates.push({
+                        _id: baseAffiliate._id,
+                        _affiliateId: baseAffiliate._id,
+                        _hasBase: true,
+                        _auditId: audit._id,
+                        nombre: audit.nombre || baseAffiliate.nombre,
+                        cuil: audit.cuil,
+                        telefono1: audit.telefono || baseAffiliate.telefono1,
+                        obraSocial: obraSocial,
+                        localidad: baseAffiliate.localidad || 'DESCONOCIDO',
+                        edad: baseAffiliate.edad || '',
+                        _source: 'compensation_reusable'
+                    });
+                    usedIds.add(baseAffiliate._id); // ✅ FIX: Sin toString() para compatibilidad ObjectId
+                } else {
+                    auditsWithoutBase.push(audit);
+                    compensationAffiliates.push({
+                        _id: `pending_${audit._id}`,
+                        _hasBase: false,
+                        _auditId: audit._id,
+                        _pendingCreate: true,
+                        nombre: audit.nombre || 'Sin nombre',
+                        cuil: audit.cuil,
+                        telefono1: audit.telefono,
+                        obraSocial: obraSocial,
+                        localidad: 'DESCONOCIDO',
+                        edad: '',
+                        _source: 'compensation_reusable'
+                    });
+                }
+                compensated++;
+            }
+            logger.info(`🔄 Compensados: ${compensated} reutilizables adicionales de ${obraSocial}`);
+        }
+    }
+
+    // Si faltan reutilizables, compensar con más frescos de la misma OS
+    currentTotal = freshObtained + reusableObtained + compensationAffiliates.length;
+    if (reusableObtained < targetReusable && currentTotal < cantidad) {
+        const reusableDeficit = targetReusable - reusableObtained - compensationAffiliates.filter(a => a._source?.includes('reusable')).length;
+        const canCompensate = Math.min(reusableDeficit, cantidad - currentTotal);
+        
+        if (canCompensate > 0) {
+            logger.info(`🔄 Compensando ${canCompensate} reutilizables faltantes con frescos de ${obraSocial}...`);
+            
+            const extraFresh = await Affiliate.find({
+                active: true,
+                obraSocial: obraSocial,
+                cuil: { $nin: [...auditsWithCuil, ...Array.from(usedCuilsSet)], $exists: true, $ne: null },
+                _id: { $nin: setToObjectIds(usedIds) },
+                dataSource: { $ne: 'reusable' },
+                isUsed: { $ne: true }
+            })
+                .limit(canCompensate)
+                .sort({ uploadDate: -1 })
+                .lean();
+
+            extraFresh.forEach(a => {
+                a._source = 'compensation_fresh';
+                usedIds.add(a._id); // ✅ FIX: Sin toString() para compatibilidad ObjectId
+            });
+
+            compensationAffiliates.push(...extraFresh);
+            logger.info(`🔄 Compensados: ${extraFresh.length} frescos adicionales de ${obraSocial}`);
+        }
+    }
+
+    // ========== PASO 6: FALLBACK POR OTRA OBRA SOCIAL ==========
+    currentTotal = freshObtained + reusableObtained + compensationAffiliates.length;
+    let fallbackAffiliates = [];
+
+    if (currentTotal < cantidad && allObrasSociales.length > 0) {
+        const stillNeeded = cantidad - currentTotal;
+        logger.warn(`⚠️ Faltan ${stillNeeded} datos. Buscando en otras obras sociales...`);
+
+        // Obtener otras OS con stock, priorizando mayor stock
+        const otherOS = allObrasSociales.filter(os => os !== obraSocial);
+        
+        for (const os of otherOS) {
+            if (fallbackAffiliates.length >= stillNeeded) break;
+            
+            // Buscar frescos de esta OS
+            const osFresh = await Affiliate.find({
+                active: true,
+                obraSocial: os,
+                cuil: { $nin: auditsWithCuil, $exists: true, $ne: null },
+                _id: { $nin: setToObjectIds(usedIds) },
+                dataSource: { $ne: 'reusable' },
+                isUsed: { $ne: true }
+            })
+                .limit(stillNeeded - fallbackAffiliates.length)
+                .sort({ uploadDate: -1 })
+                .lean();
+
+            osFresh.forEach(a => {
+                a._source = 'fallback_fresh';
+                usedIds.add(a._id); // ✅ FIX: Sin toString() para compatibilidad ObjectId
+            });
+            
+            fallbackAffiliates.push(...osFresh);
+            
+            if (fallbackAffiliates.length >= stillNeeded) break;
+
+            // Buscar reutilizables de esta OS
+            const osAudits = await Audit.find({
+                status: { $in: reusableStatuses },
+                $or: [
+                    { obraSocialAnterior: os },
+                    { obraSocialVendida: os }
+                ],
+                cuil: { $exists: true, $ne: null, $nin: Array.from(usedCuilsSet) },
+                reusableExportedAt: { $exists: false }
+            })
+                .sort({ scheduledAt: -1 })
+                .limit((stillNeeded - fallbackAffiliates.length) * 2)
+                .lean();
+
+            const osCuils = osAudits.map(a => a.cuil).filter(Boolean);
+            let osAffiliatesBase = [];
+            if (osCuils.length > 0) {
+                osAffiliatesBase = await Affiliate.find({
+                    cuil: { $in: osCuils },
+                    _id: { $nin: setToObjectIds(usedIds) }
+                }).select('_id cuil localidad edad nombre telefono1 obraSocial').lean();
+            }
+
+            const osMap = {};
+            osAffiliatesBase.forEach(a => {
+                if (a.cuil) osMap[a.cuil] = a;
+            });
+
+            for (const audit of osAudits) {
+                if (fallbackAffiliates.length >= stillNeeded) break;
+                if (!audit.cuil || localReusableCuils.has(audit.cuil) || usedCuilsSet.has(audit.cuil)) continue;
+
+                const baseAffiliate = osMap[audit.cuil];
+                usedAuditIds.push(audit._id);
+                usedCuilsSet.add(audit.cuil);
+                localReusableCuils.add(audit.cuil);
+
+                if (baseAffiliate) {
+                    fallbackAffiliates.push({
+                        _id: baseAffiliate._id,
+                        _affiliateId: baseAffiliate._id,
+                        _hasBase: true,
+                        _auditId: audit._id,
+                        nombre: audit.nombre || baseAffiliate.nombre,
+                        cuil: audit.cuil,
+                        telefono1: audit.telefono || baseAffiliate.telefono1,
+                        obraSocial: os,
+                        localidad: baseAffiliate.localidad || 'DESCONOCIDO',
+                        edad: baseAffiliate.edad || '',
+                        _source: 'fallback_reusable'
+                    });
+                    usedIds.add(baseAffiliate._id); // ✅ FIX: Sin toString() para compatibilidad ObjectId
+                } else {
+                    auditsWithoutBase.push(audit);
+                    fallbackAffiliates.push({
+                        _id: `pending_${audit._id}`,
+                        _hasBase: false,
+                        _auditId: audit._id,
+                        _pendingCreate: true,
+                        nombre: audit.nombre || 'Sin nombre',
+                        cuil: audit.cuil,
+                        telefono1: audit.telefono,
+                        obraSocial: os,
+                        localidad: 'DESCONOCIDO',
+                        edad: '',
+                        _source: 'fallback_reusable'
+                    });
+                }
+            }
+        }
+        
+        if (fallbackAffiliates.length > 0) {
+            logger.info(`📦 Fallback: ${fallbackAffiliates.length} datos de otras obras sociales`);
+        }
+    }
+
+    // ========== COMBINAR RESULTADOS ==========
+    const combined = [...freshAffiliates, ...reusableAffiliates, ...compensationAffiliates, ...fallbackAffiliates];
+    const shuffled = shuffleArray(combined);
+
+    // ========== LOGGING FINAL ==========
+    const finalFresh = combined.filter(a => a._source === 'fresh').length;
+    const finalReusable = combined.filter(a => a._source === 'reusable').length;
+    const finalCompensation = combined.filter(a => a._source?.startsWith('compensation')).length;
+    const finalFallback = combined.filter(a => a._source?.startsWith('fallback')).length;
+
+    logger.info(`📊 ========== RESUMEN ${obraSocial} ==========`);
+    logger.info(`📊 Solicitado: ${cantidad} | Obtenido: ${shuffled.length}`);
+    logger.info(`📊 Composición: Fresh=${finalFresh}, Reusable=${finalReusable}, Compensación=${finalCompensation}, Fallback=${finalFallback}`);
+    
+    if (shuffled.length < cantidad) {
+        logger.warn(`⚠️ NO SE ALCANZÓ EL OBJETIVO: ${shuffled.length}/${cantidad}`);
+    } else {
+        logger.info(`✅ OBJETIVO ALCANZADO: ${shuffled.length}/${cantidad}`);
+    }
+
+    return {
+        affiliates: shuffled,
+        usedAuditIds,
+        auditsWithoutBase,
+        usedReusableCuilsInThisCall: localReusableCuils
+    };
 }
 
 /**
@@ -672,8 +1423,45 @@ async function generateAndSendAffiliateCSVs() {
                 let affiliates = [];
                 let mixResult = null; // Para guardar metadata de mezcla
 
-                // ===== NUEVA LÓGICA: MEZCLA DE DATOS POR SUPERVISOR =====
-                if (supConfig.dataSourceMix) {
+                // ===== DISTRIBUCIÓN AVANZADA POR OBRA SOCIAL (NUEVA LÓGICA) =====
+                // Usa proporción dinámica fresco/reutilizable basada en stock real
+                if (supConfig.obraSocialDistribution && supConfig.obraSocialDistribution.length > 0) {
+                    logger.info(`📊 Distribución avanzada para ${supervisor.nombre}`);
+                    
+                    // Obtener todas las obras sociales para fallback
+                    const allObrasSociales = await Affiliate.distinct("obraSocial", {
+                        active: true,
+                        exported: { $ne: true }
+                    });
+                    
+                    // Procesar cada obra social configurada
+                    for (const osConfig of supConfig.obraSocialDistribution) {
+                        const osResult = await getAdvancedDistribution(
+                            { obraSocial: osConfig.obraSocial, cantidad: osConfig.cantidad },
+                            usedAffiliateIds,
+                            sharedUsedReusableCuils,
+                            allObrasSociales
+                        );
+                        
+                        affiliates.push(...osResult.affiliates);
+                        
+                        // Agregar CUILs usados al Set compartido
+                        if (osResult.usedReusableCuilsInThisCall) {
+                            osResult.usedReusableCuilsInThisCall.forEach(cuil => sharedUsedReusableCuils.add(cuil));
+                        }
+                        
+                        // Guardar metadata de mezcla (usar el último)
+                        if (!mixResult) {
+                            mixResult = { usedAuditIds: [], auditsWithoutBase: [], usedReusableCuilsInThisCall: new Set() };
+                        }
+                        if (osResult.usedAuditIds) mixResult.usedAuditIds.push(...osResult.usedAuditIds);
+                        if (osResult.auditsWithoutBase) mixResult.auditsWithoutBase.push(...osResult.auditsWithoutBase);
+                    }
+                    
+                    logger.info(`📊 Total para ${supervisor.nombre}: ${affiliates.length} afiliados de ${supConfig.obraSocialDistribution.length} obras sociales`);
+                }
+                // Con mezcla de datos personalizada (porcentaje fijo)
+                else if (supConfig.dataSourceMix) {
                     logger.info(`🎲 Usando mezcla personalizada para ${supervisor.nombre}`);
                     mixResult = await getMixedAffiliates(
                         {
@@ -690,15 +1478,6 @@ async function generateAndSendAffiliateCSVs() {
                     if (mixResult.usedReusableCuilsInThisCall) {
                         mixResult.usedReusableCuilsInThisCall.forEach(cuil => sharedUsedReusableCuils.add(cuil));
                     }
-                }
-                // Con distribución de obras sociales (modo antiguo)
-                else if (supConfig.obraSocialDistribution && supConfig.obraSocialDistribution.length > 0) {
-                    logger.info(`📊 Distribución personalizada para ${supervisor.nombre}`);
-                    affiliates = await getAffiliatesByDistribution(
-                        supConfig.obraSocialDistribution,
-                        baseQuery,
-                        usedAffiliateIds
-                    );
                 } else {
                     // Sin distribución: aleatorio (modo antiguo)
                     const query = { ...baseQuery, _id: { $nin: Array.from(usedAffiliateIds) } };

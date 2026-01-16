@@ -7,6 +7,7 @@
  */
 
 const Audit = require('../models/Audit');
+const Employee = require('../models/Employee');
 const logger = require('../utils/logger');
 
 /** Lista auditorías con estado "QR hecho" listas para liquidación */
@@ -355,12 +356,28 @@ exports.exportLiquidation = (req, res) => {
             workbook.creator = 'Dann Salud';
             workbook.created = new Date();
 
+            // ✅ Obtener fechas de ingreso de todos los asesores
+            const asesorIds = [...new Set(audits.map(a => a.asesor?._id?.toString()).filter(Boolean))];
+            let empleadosPorAsesor = {};
+            
+            if (asesorIds.length > 0) {
+                const empleados = await Employee.find({
+                    userId: { $in: asesorIds }
+                }).select('userId fechaIngreso').lean();
+                
+                empleadosPorAsesor = empleados.reduce((acc, emp) => {
+                    acc[emp.userId.toString()] = emp.fechaIngreso;
+                    return acc;
+                }, {});
+            }
+
             const columns = [
                 { header: 'Fecha', key: 'fecha', width: 15 },
                 { header: 'Afiliado', key: 'afiliado', width: 30 },
                 { header: 'CUIL', key: 'cuil', width: 15 },
                 { header: 'O.S. Vendida', key: 'os', width: 15 },
                 { header: 'Asesor', key: 'asesor', width: 25 },
+                { header: 'Fecha de ingreso del asesor', key: 'fechaIngresoAsesor', width: 22 },
                 { header: 'Supervisor', key: 'supervisor', width: 25 },
                 { header: 'Auditor', key: 'auditor', width: 20 },
                 { header: 'Admin', key: 'admin', width: 20 },
@@ -382,12 +399,21 @@ exports.exportLiquidation = (req, res) => {
                         fechaStr = `${d.getUTCDate().toString().padStart(2, '0')}/${(d.getUTCMonth() + 1).toString().padStart(2, '0')}/${d.getUTCFullYear()}`;
                     }
 
+                    // ✅ Obtener fecha de ingreso del asesor desde Employee
+                    let fechaIngresoStr = '';
+                    const asesorId = item.asesor?._id?.toString();
+                    if (asesorId && empleadosPorAsesor[asesorId]) {
+                        const fechaIngreso = new Date(empleadosPorAsesor[asesorId]);
+                        fechaIngresoStr = `${fechaIngreso.getUTCDate().toString().padStart(2, '0')}/${(fechaIngreso.getUTCMonth() + 1).toString().padStart(2, '0')}/${fechaIngreso.getUTCFullYear()}`;
+                    }
+
                     sheet.addRow({
                         fecha: fechaStr,
                         afiliado: item.nombre || '',
                         cuil: item.cuil || '',
                         os: item.obraSocialVendida || '',
                         asesor: item.asesor?.nombre || '',
+                        fechaIngresoAsesor: fechaIngresoStr,
                         supervisor: item.supervisorSnapshot?.nombre || item.asesor?.supervisor?.nombre || item.asesor?.numeroEquipo || 'Sin Supervisor',
                         auditor: item.auditor?.nombre || '',
                         admin: item.administrador?.nombre || '',

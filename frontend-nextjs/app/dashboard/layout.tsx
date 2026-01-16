@@ -48,12 +48,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         'palabras-prohibidas-agregar': '/dashboard/banned-words/add',
         'auditorias-seguimiento': '/dashboard/audits/follow-up',
         'auditorias-crear-turno': '/dashboard/audits/create',
-        'auditorias-recuperaciones': '/dashboard/audits/recovery',
         'auditorias-liquidacion': '/dashboard/audits/liquidation',
+        'auditorias-falta-clave': '/dashboard/audits/falta-clave',
+        'auditorias-rechazada': '/dashboard/audits/rechazada',
+        'auditorias-pendiente': '/dashboard/audits/pendiente',
+        'auditorias-afip-padron': '/dashboard/audits/afip-padron',
         'rrhh-estadisticas': '/dashboard/hr/stats',
         'rrhh-activos': '/dashboard/hr/active',
         'rrhh-inactivos': '/dashboard/hr/inactive',
         'rrhh-agregar': '/dashboard/hr/add',
+        'rrhh-telefonos': '/dashboard/hr/phones',
+        'administracion-registro-ventas': '/dashboard/admin/sales-record',
         'gestion-usuarios': '/dashboard/users',
     };
 

@@ -31,7 +31,6 @@ import {
   AlertTriangle,
   Search,
   CalendarPlus,
-  RotateCcw,
   DollarSign,
   UserPlus,
   UserCheck,
@@ -40,6 +39,11 @@ import {
   Recycle,
   Phone,
   XCircle,
+  Building2,
+  FileText,
+  KeyRound,
+  Clock,
+  FileCheck,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ThemeToggle } from "./theme-toggle"
@@ -98,8 +102,19 @@ const menuItems = [
     submenu: [
       { id: "auditorias-seguimiento", label: "Seguimiento", icon: Search },
       { id: "auditorias-crear-turno", label: "Crear turno", icon: CalendarPlus },
-      { id: "auditorias-recuperaciones", label: "Recuperaciones", icon: RotateCcw },
       { id: "auditorias-liquidacion", label: "Liquidación", icon: DollarSign },
+      { id: "auditorias-falta-clave", label: "Falta clave", icon: KeyRound },
+      { id: "auditorias-rechazada", label: "Rechazada", icon: XCircle },
+      { id: "auditorias-pendiente", label: "Pendiente", icon: Clock },
+      { id: "auditorias-afip-padron", label: "AFIP y Padrón", icon: FileCheck },
+    ],
+  },
+  {
+    id: "administracion",
+    label: "Administración",
+    icon: Building2,
+    submenu: [
+      { id: "administracion-registro-ventas", label: "Registro de ventas", icon: FileText },
     ],
   },
   {
@@ -111,6 +126,7 @@ const menuItems = [
       { id: "rrhh-activos", label: "Activos", icon: UserCheck },
       { id: "rrhh-inactivos", label: "Inactivos", icon: UserX },
       { id: "rrhh-agregar", label: "Añadir empleado", icon: UserPlus },
+      { id: "rrhh-telefonos", label: "Teléfonos", icon: Phone },
     ],
   },
   { id: "gestion-usuarios", label: "Gestión de Usuarios", icon: UserCog },
@@ -195,7 +211,8 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
             submenu: item.submenu?.filter(sub =>
               sub.id === 'rrhh-estadisticas' ||
               sub.id === 'rrhh-activos' ||
-              sub.id === 'rrhh-inactivos'
+              sub.id === 'rrhh-inactivos' ||
+              sub.id === 'rrhh-telefonos' // ✅ Supervisor ve Teléfonos
             )
           }
         }
@@ -234,7 +251,8 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
             submenu: item.submenu.filter(sub =>
               sub.id === 'rrhh-estadisticas' ||
               sub.id === 'rrhh-activos' ||
-              sub.id === 'rrhh-inactivos'
+              sub.id === 'rrhh-inactivos' ||
+              sub.id === 'rrhh-telefonos' // ✅ Supervisor ve Teléfonos
             )
           }
         }
@@ -245,23 +263,15 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
     if (role === 'administrativo') {
       return menuItems.filter(item => {
         if (item.id === 'mensajeria-interna') return true
-        if (item.id === 'auditorias') {
-          return {
-            ...item,
-            submenu: item.submenu?.filter(sub =>
-              sub.id === 'auditorias-seguimiento' ||
-              sub.id === 'auditorias-recuperaciones'
-            )
-          }
-        }
+        if (item.id === 'auditorias') return true
+        if (item.id === 'administracion') return true
         return false
       }).map(item => {
         if (item.id === 'auditorias' && item.submenu) {
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
-              sub.id === 'auditorias-seguimiento' ||
-              sub.id === 'auditorias-recuperaciones'
+              sub.id === 'auditorias-seguimiento'
             )
           }
         }
@@ -318,6 +328,34 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
       return menuItems.filter(item => item.id === 'recursos-humanos' || item.id === 'mensajeria-interna')
     }
 
+    if (role === 'recuperador') {
+      return menuItems.filter(item => {
+        // Acceso a Reportes de Mensajería (solo sus propias campañas - filtrado en backend)
+        if (item.id === 'reportes-globales') return true
+        // Acceso a Mensajería Masiva (solo sus propias campañas - filtrado en backend)
+        if (item.id === 'mensajeria-masiva') return true
+        // Acceso a Auditorías (Seguimiento solo lectura + interfaces de recuperación + Liquidación)
+        if (item.id === 'auditorias') return true
+        return false
+      }).map(item => {
+        if (item.id === 'auditorias' && item.submenu) {
+          // Recuperador: Seguimiento (lectura), Falta clave, Rechazada, Pendiente, AFIP y Padrón, Liquidación
+          return {
+            ...item,
+            submenu: item.submenu.filter(sub =>
+              sub.id === 'auditorias-seguimiento' ||
+              sub.id === 'auditorias-falta-clave' ||
+              sub.id === 'auditorias-rechazada' ||
+              sub.id === 'auditorias-pendiente' ||
+              sub.id === 'auditorias-afip-padron' ||
+              sub.id === 'auditorias-liquidacion'
+            )
+          }
+        }
+        return item
+      })
+    }
+
     // Default: show nothing if role is not recognized
     return []
   }
@@ -329,6 +367,8 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
     if (activeSection.startsWith("palabras-prohibidas")) return "palabras-prohibidas"
     if (activeSection.startsWith("auditorias")) return "auditorias"
     if (activeSection.startsWith("rrhh")) return "recursos-humanos"
+    if (activeSection.startsWith("administracion")) return "administracion"
+    if (activeSection.startsWith("contactar-afiliados")) return "contactar-afiliados"
     return null
   }
   const [expandedMenu, setExpandedMenu] = useState<string | null>(getInitialExpandedMenu())

@@ -1128,7 +1128,65 @@ exports.cancelExports = async (req, res) => {
     }
 };
 
-// 10. Limpiar datos frescos anteriores (marcarlos como reutilizables)
+// 10. Exportar TODA la base de afiliados a .xlsx (solo para usuario específico)
+exports.exportAllAffiliates = async (req, res) => {
+    try {
+        const userName = req.user?.nombre || req.user?.name || "";
+        if (!userName.toLowerCase().includes("daniel") || !userName.toLowerCase().includes("fandiño")) {
+            return res.status(403).json({ error: "No autorizado para esta exportación" });
+        }
+
+        logger.info(`📊 Exportando TODA la base de afiliados por ${userName}`);
+
+        const affiliates = await Affiliate.find({})
+            .sort({ uploadDate: -1 })
+            .lean();
+
+        if (affiliates.length === 0) {
+            return res.status(404).json({ error: "No hay afiliados en la base de datos" });
+        }
+
+        const data = affiliates.map((a, index) => ({
+            "N°": index + 1,
+            "Nombre": a.nombre || "-",
+            "CUIL": a.cuil || "-",
+            "Obra Social": a.obraSocial || "-",
+            "Teléfono 1": a.telefono1 || "-",
+            "Teléfono 2": a.telefono2 || "-",
+            "Teléfono 3": a.telefono3 || "-",
+            "Localidad": a.localidad || "-",
+            "Edad": a.edad || "-",
+            "Código O.S.": a.codigoObraSocial || "-",
+            "Estado": a.active ? "Activo" : "Inactivo",
+            "Origen": a.dataSource || "fresh",
+            "Exportado": a.exported ? "Sí" : "No",
+            "Usado": a.isUsed ? "Sí" : "No",
+            "Lead Status": a.leadStatus || "-",
+            "Fecha Carga": a.uploadDate ? new Date(a.uploadDate).toLocaleDateString("es-AR") : "-",
+            "Archivo Origen": a.sourceFile || "-"
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Afiliados");
+
+        const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+        const filename = `base_afiliados_completa_${new Date().toISOString().split('T')[0]}.xlsx`;
+        
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.send(buffer);
+
+        logger.info(`✅ Exportación completa: ${affiliates.length} afiliados`);
+
+    } catch (error) {
+        logger.error("Error exportando base completa:", error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// 11. Limpiar datos frescos anteriores (marcarlos como reutilizables)
 exports.cleanupFreshData = async (req, res) => {
     try {
         const batchId = `cleanup_${Date.now()}`;
@@ -1167,6 +1225,70 @@ exports.cleanupFreshData = async (req, res) => {
 
     } catch (error) {
         logger.error("Error cleaning up fresh data:", error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+/**
+ * ============================================================
+ * OBTENER STOCK POR OBRA SOCIAL - ENVÍOS AVANZADOS
+ * ============================================================
+ * Devuelve la disponibilidad de datos frescos y reutilizables
+ * para una obra social específica, en tiempo real.
+ * 
+ * @param {string} obraSocial - Nombre de la obra social (query param)
+ * @returns {Object} { obraSocial, freshCount, reusableCount, totalCount }
+ */
+exports.getStockByObraSocial = async (req, res) => {
+    try {
+        const { obraSocial } = req.query;
+
+        if (!obraSocial) {
+            return res.status(400).json({ error: "Falta el parámetro obraSocial" });
+        }
+
+        // Obtener CUILs que YA están en auditorías (para excluir de frescos)
+        const auditsWithCuil = await Audit.find({
+            cuil: { $exists: true, $ne: null }
+        }).distinct('cuil').lean();
+
+        // ========== STOCK FRESCO ==========
+        // Affiliates activos cuyo CUIL no está en Auditorías y pertenecen a la obra social
+        const freshCount = await Affiliate.countDocuments({
+            active: true,
+            obraSocial: obraSocial,
+            cuil: { $nin: auditsWithCuil, $exists: true, $ne: null },
+            dataSource: { $ne: 'reusable' },
+            isUsed: { $ne: true }
+        });
+
+        // ========== STOCK REUTILIZABLE ==========
+        // Audits con estados reutilizables que no han sido exportadas como reutilizables
+        const reusableStatuses = ['No atendió', 'Tiene dudas', 'Reprogramada (falta confirmar hora)'];
+        
+        const reusableCount = await Audit.countDocuments({
+            status: { $in: reusableStatuses },
+            $or: [
+                { obraSocialAnterior: obraSocial },
+                { obraSocialVendida: obraSocial }
+            ],
+            cuil: { $exists: true, $ne: null },
+            reusableExportedAt: { $exists: false }
+        });
+
+        const totalCount = freshCount + reusableCount;
+
+        logger.info(`📊 Stock para ${obraSocial}: Fresh=${freshCount}, Reusable=${reusableCount}, Total=${totalCount}`);
+
+        res.json({
+            obraSocial,
+            freshCount,
+            reusableCount,
+            totalCount
+        });
+
+    } catch (error) {
+        logger.error("Error obteniendo stock por obra social:", error);
         res.status(500).json({ error: error.message });
     }
 };

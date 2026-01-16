@@ -15,9 +15,11 @@ const bannedWordDetectionSchema = new mongoose.Schema(
         /** Referencia a la regla de palabra prohibida */
         wordId: { type: mongoose.Schema.Types.ObjectId, ref: "BannedWord", required: true },
         /** Contexto donde se detectó */
-        detectedIn: { type: String, enum: ["bulk_message", "campaign", "template"], required: true },
+        detectedIn: { type: String, enum: ["bulk_message", "campaign", "template", "individual_message"], required: true },
         /** Usuario que intentó usar la palabra */
         userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
+        /** Teléfono del afiliado destinatario (para mensajes individuales) */
+        affiliatePhone: { type: String, trim: true },
         /** Nombre de la campaña (si aplica) */
         campaignName: { type: String, trim: true },
         /** Fragmento del mensaje donde se detectó */

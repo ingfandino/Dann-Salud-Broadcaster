@@ -300,10 +300,20 @@ async function initClientForUser(userId) {
         { $set: { respondio: true } }
       );
 
+      // Obtener el creador de la campaña para buscar sus auto-respuestas
+      let jobCreatorId = userId;
+      if (enviado.job) {
+        const job = await SendJob.findById(enviado.job).select('createdBy').lean();
+        if (job?.createdBy) {
+          jobCreatorId = job.createdBy;
+          logger.info(`[WA][${userId}] Job ${enviado.job} creado por usuario ${jobCreatorId}`);
+        }
+      }
+
       try {
         await Message.create({
           contact: enviado.contact,
-          createdBy: userId,
+          createdBy: jobCreatorId,
           job: enviado.job,
           contenido: msg.body || '',
           direction: 'inbound',
@@ -329,8 +339,8 @@ async function initClientForUser(userId) {
         logger.error(`[WA][${userId}] Error registrando mensaje inbound: `, e.message);
       }
 
-      // Cargar reglas de auto-respuesta
-      const reglas = await Autoresponse.find({ createdBy: userId, active: true });
+      // Cargar reglas de auto-respuesta del creador de la campaña
+      const reglas = await Autoresponse.find({ createdBy: jobCreatorId, active: true });
       if (reglas.length) {
         const normalize = (s) => (s || "").toLowerCase().trim();
         const bodyNorm = normalize(msg.body);
@@ -346,11 +356,11 @@ async function initClientForUser(userId) {
         const rule = matched || reglas.find(r => r.isFallback);
 
         if (rule) {
-          // Anti-spam
+          // Anti-spam: verificar por creador de la campaña
           const windowMinutes = Number(process.env.AUTORESPONSE_WINDOW_MINUTES || 30);
           const since = new Date(Date.now() - windowMinutes * 60 * 1000);
           const recent = await AutoResponseLog.findOne({
-            createdBy: userId,
+            createdBy: jobCreatorId,
             chatId: msg.from,
             respondedAt: { $gte: since },
           }).sort({ respondedAt: -1 }).lean();
@@ -358,11 +368,11 @@ async function initClientForUser(userId) {
           if (!recent) {
             try {
               await client.sendMessage(msg.from, rule.response);
-              logger.info(`[WA][${userId}]Auto - respuesta enviada(${rule.keyword || "fallback"})`);
+              logger.info(`[WA][${userId}] Auto-respuesta enviada (${rule.keyword || "fallback"}) para campaña de usuario ${jobCreatorId}`);
 
               // Registrar en log con detalles completos
               const logEntry = await AutoResponseLog.create({
-                createdBy: userId,
+                createdBy: jobCreatorId,
                 chatId: msg.from,
                 ruleId: rule._id,
                 respondedAt: new Date(),

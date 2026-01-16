@@ -77,6 +77,8 @@ const AuditSchema = new Schema({
     recoveryDeletedAt: { type: Date, default: null },
     /** Indica si fue recuperada exitosamente (solo Gerencia) */
     isRecuperada: { type: Boolean, default: false },
+    /** Indica si la venta está disponible para venta (usado en AFIP/Padrón) */
+    disponibleParaVenta: { type: Boolean, default: false },
     
     /* ========== LIQUIDACIÓN ========== */
     
@@ -106,6 +108,23 @@ const AuditSchema = new Schema({
     
     /** Notas adicionales sobre la auditoría */
     datosExtra: { type: String, default: "" },
+    
+    /* ========== CAMPOS REGISTRO DE VENTAS ========== */
+    
+    /** Aporte monetario del afiliado */
+    aporte: { type: Number, default: null },
+    /** CUIT del empleador */
+    cuit: { type: String, default: "" },
+    /** Observación privada (solo visible en Registro de Ventas) */
+    observacionPrivada: { type: String, default: "" },
+    /** Clave del afiliado */
+    clave: { type: String, default: "" },
+    /** Email del afiliado */
+    email: { type: String, default: "" },
+    /** Mes de liberación del padrón (si estado es Padrón) */
+    mesPadron: { type: String, default: null },
+    /** Estado específico de Registro de Ventas (sin mapear) */
+    statusAdministrativo: { type: String, default: null },
     /** Historial de cambios en datosExtra */
     datosExtraHistory: {
         type: [{

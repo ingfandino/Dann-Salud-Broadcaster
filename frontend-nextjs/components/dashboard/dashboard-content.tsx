@@ -27,13 +27,18 @@ import { PalabrasProhibidasDetecciones } from "./palabras-prohibidas-detecciones
 import { PalabrasProhibidasAgregar } from "./palabras-prohibidas-agregar"
 import { AuditoriasSeguimiento } from "./auditorias-seguimiento"
 import { AuditoriasCrearTurno } from "./auditorias-crear-turno"
-import { AuditoriasRecuperaciones } from "./auditorias-recuperaciones"
 import { AuditoriasLiquidacion } from "./auditorias-liquidacion"
+import { AuditoriasFaltaClave } from "./auditorias-falta-clave"
+import { AuditoriasRechazada } from "./auditorias-rechazada"
+import { AuditoriasPendiente } from "./auditorias-pendiente"
+import { AuditoriasAfipPadron } from "./auditorias-afip-padron"
 import { RRHHEstadisticas } from "./rrhh-estadisticas"
 import { RRHHActivos } from "./rrhh-activos"
 import { RRHHInactivos } from "./rrhh-inactivos"
 import { RRHHAgregar } from "./rrhh-agregar"
+import { RRHHTelefonos } from "./rrhh-telefonos"
 import { GestionUsuarios } from "./gestion-usuarios"
+import { RegistroVentas } from "./registro-ventas"
 import { FreshData } from "./fresh-data"
 import { ReusableData } from "./reusable-data"
 import { ContactAffiliates } from "./contact-affiliates"
@@ -73,13 +78,19 @@ const sectionTitles: Record<string, string> = {
   auditorias: "Auditorías",
   "auditorias-seguimiento": "Seguimiento",
   "auditorias-crear-turno": "Crear turno",
-  "auditorias-recuperaciones": "Recuperaciones",
   "auditorias-liquidacion": "Liquidación",
+  "auditorias-falta-clave": "Falta Clave",
+  "auditorias-rechazada": "Rechazada",
+  "auditorias-pendiente": "Pendiente",
+  "auditorias-afip-padron": "AFIP y Padrón",
   "recursos-humanos": "Recursos Humanos",
   "rrhh-estadisticas": "Estadísticas de Empleados",
   "rrhh-activos": "Personal Activo",
   "rrhh-inactivos": "Personal Inactivo",
   "rrhh-agregar": "Añadir Empleado",
+  "rrhh-telefonos": "Teléfonos Corporativos",
+  "administracion": "Administración",
+  "administracion-registro-ventas": "Registro de Ventas",
   "gestion-usuarios": "Gestión de Usuarios",
 }
 
@@ -97,7 +108,8 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
     safeActiveSection.startsWith("auditorias") ||
     safeActiveSection.startsWith("rrhh") ||
     safeActiveSection === "gestion-usuarios" ||
-    safeActiveSection.startsWith("mensajeria")
+    safeActiveSection.startsWith("mensajeria") ||
+    safeActiveSection.startsWith("administracion")
   const isMensajeriaMasiva = safeActiveSection === "mensajeria-masiva"
   const [isMensajeriaInternaOpen, setIsMensajeriaInternaOpen] = useState(false)
   const socket = useSocket()
@@ -229,12 +241,64 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
       return <AuditoriasCrearTurno />
     }
 
-    if (activeSection === "auditorias-recuperaciones") {
-      return <AuditoriasRecuperaciones />
-    }
-
     if (activeSection === "auditorias-liquidacion") {
       return <AuditoriasLiquidacion />
+    }
+
+    if (activeSection === "auditorias-falta-clave") {
+      // Acceso: Gerencia y Recuperador
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia' && role !== 'recuperador') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia y Recuperadores.</p>
+          </div>
+        )
+      }
+      return <AuditoriasFaltaClave />
+    }
+
+    if (activeSection === "auditorias-rechazada") {
+      // Acceso: Gerencia y Recuperador
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia' && role !== 'recuperador') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia y Recuperadores.</p>
+          </div>
+        )
+      }
+      return <AuditoriasRechazada />
+    }
+
+    if (activeSection === "auditorias-pendiente") {
+      // Acceso: Gerencia y Recuperador
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia' && role !== 'recuperador') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia y Recuperadores.</p>
+          </div>
+        )
+      }
+      return <AuditoriasPendiente />
+    }
+
+    if (activeSection === "auditorias-afip-padron") {
+      // Acceso: Gerencia y Recuperador
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia' && role !== 'recuperador') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia y Recuperadores.</p>
+          </div>
+        )
+      }
+      return <AuditoriasAfipPadron />
     }
 
     if (activeSection === "rrhh-estadisticas") {
@@ -253,8 +317,35 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
       return <RRHHAgregar />
     }
 
+    if (activeSection === "rrhh-telefonos") {
+      // Acceso: solo Supervisor y Gerencia
+      const role = user?.role?.toLowerCase()
+      if (role !== 'supervisor' && role !== 'gerencia') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Supervisores y Gerencia.</p>
+          </div>
+        )
+      }
+      return <RRHHTelefonos />
+    }
+
     if (activeSection === "gestion-usuarios") {
       return <GestionUsuarios />
+    }
+
+    if (activeSection === "administracion-registro-ventas") {
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia' && role !== 'administrativo') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia y Administrativos.</p>
+          </div>
+        )
+      }
+      return <RegistroVentas />
     }
 
     if (safeActiveSection.startsWith("base-afiliados")) {

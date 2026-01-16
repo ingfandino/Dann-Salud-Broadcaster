@@ -32,11 +32,12 @@ const rolColors: Record<string, string> = {
   administrativo: "#9C27B0", // Purple
   gerencia: "#C8376B",
   "rr.hh": "#607D8B", // Blue Grey
+  recuperador: "#FF5722", // Deep Orange
 }
 
 
 
-const roles = ["asesor", "supervisor", "auditor", "administrativo", "gerencia", "RR.HH"]
+const roles = ["asesor", "supervisor", "auditor", "administrativo", "gerencia", "RR.HH", "recuperador"]
 
 export function GestionUsuarios() {
   const { theme } = useTheme()
@@ -103,29 +104,27 @@ export function GestionUsuarios() {
       const updateData: any = {
         nombre: formData.nombre,
         email: formData.email,
-        role: formData.role,
-        numeroEquipo: formData.numeroEquipo
+        role: formData.role
       }
 
-      // Only send password if it's not empty
-      if (formData.password) {
-        // If the backend supports password update in the same endpoint
+      // Solo enviar numeroEquipo si tiene valor
+      if (formData.numeroEquipo && formData.numeroEquipo.trim() !== "") {
+        updateData.numeroEquipo = formData.numeroEquipo
+      }
+
+      // Solo enviar password si no está vacío
+      if (formData.password && formData.password.trim() !== "") {
         updateData.password = formData.password
       }
 
       await api.users.update(selectedUsuario._id, updateData)
-
-      // If password was changed separately (depending on backend implementation)
-      if (formData.password) {
-        await api.users.changePassword(selectedUsuario._id, { password: formData.password })
-      }
 
       toast.success("Usuario actualizado correctamente")
       setEditModalOpen(false)
       fetchUsuarios()
     } catch (error: any) {
       console.error("Error updating user:", error)
-      toast.error(error.response?.data?.message || "Error al actualizar usuario")
+      toast.error(error.response?.data?.error || error.response?.data?.message || "Error al actualizar usuario")
     }
   }
 

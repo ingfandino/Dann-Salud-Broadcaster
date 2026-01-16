@@ -33,6 +33,9 @@ require("./cron/recoveryJob");
 
 // ✅ Cron job para Reciclaje de Datos del Día (ejecuta a las 23:01 diariamente)
 require("./cron/leadAssignmentRecycleJob");
+
+// ✅ Cron job para notificación de vencimiento de recargas de teléfonos (cada hora)
+require("./cron/phoneRechargeNotificationJob");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const errorHandler = require("./middlewares/errorHandler");

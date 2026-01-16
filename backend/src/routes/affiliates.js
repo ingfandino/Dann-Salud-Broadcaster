@@ -72,6 +72,9 @@ router.get("/supervisor-stats", affiliateController.requireSupervisorOrGerencia,
 // 📋 Obtener obras sociales disponibles (solo Gerencia)
 router.get("/obras-sociales", affiliateController.requireGerencia, affiliateController.getAvailableObrasSociales);
 
+// 📊 Obtener stock por obra social (Gerencia) - Para Envíos Avanzados
+router.get("/stock-by-obra-social", affiliateController.requireGerencia, affiliateController.getStockByObraSocial);
+
 // 📁 Obtener lista de exportaciones disponibles (Gerencia y Supervisores)
 router.get("/exports", async (req, res) => {
     try {
@@ -152,5 +155,8 @@ router.post("/cancel-exports", affiliateController.requireGerencia, affiliateCon
 
 // ✅ Limpiar datos frescos anteriores (Gerencia) - Útil antes de cargar nuevos datos
 router.post("/cleanup-fresh", affiliateController.requireGerencia, affiliateController.cleanupFreshData);
+
+// 📥 Exportar TODA la base de afiliados (solo usuario específico)
+router.get("/export-all", affiliateController.exportAllAffiliates);
 
 module.exports = router;

@@ -66,6 +66,12 @@
       "namedRegex": "^/dashboard(?:/)?$"
     },
     {
+      "page": "/dashboard/admin/sales-record",
+      "regex": "^/dashboard/admin/sales\\-record(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/admin/sales\\-record(?:/)?$"
+    },
+    {
       "page": "/dashboard/affiliates/config",
       "regex": "^/dashboard/affiliates/config(?:/)?$",
       "routeKeys": {},
@@ -126,10 +132,22 @@
       "namedRegex": "^/dashboard/affiliates/upload(?:/)?$"
     },
     {
+      "page": "/dashboard/audits/afip-padron",
+      "regex": "^/dashboard/audits/afip\\-padron(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/audits/afip\\-padron(?:/)?$"
+    },
+    {
       "page": "/dashboard/audits/create",
       "regex": "^/dashboard/audits/create(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/dashboard/audits/create(?:/)?$"
+    },
+    {
+      "page": "/dashboard/audits/falta-clave",
+      "regex": "^/dashboard/audits/falta\\-clave(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/audits/falta\\-clave(?:/)?$"
     },
     {
       "page": "/dashboard/audits/follow-up",
@@ -144,10 +162,16 @@
       "namedRegex": "^/dashboard/audits/liquidation(?:/)?$"
     },
     {
-      "page": "/dashboard/audits/recovery",
-      "regex": "^/dashboard/audits/recovery(?:/)?$",
+      "page": "/dashboard/audits/pendiente",
+      "regex": "^/dashboard/audits/pendiente(?:/)?$",
       "routeKeys": {},
-      "namedRegex": "^/dashboard/audits/recovery(?:/)?$"
+      "namedRegex": "^/dashboard/audits/pendiente(?:/)?$"
+    },
+    {
+      "page": "/dashboard/audits/rechazada",
+      "regex": "^/dashboard/audits/rechazada(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/audits/rechazada(?:/)?$"
     },
     {
       "page": "/dashboard/banned-words",
@@ -196,6 +220,12 @@
       "regex": "^/dashboard/hr/inactive(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/dashboard/hr/inactive(?:/)?$"
+    },
+    {
+      "page": "/dashboard/hr/phones",
+      "regex": "^/dashboard/hr/phones(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/hr/phones(?:/)?$"
     },
     {
       "page": "/dashboard/hr/stats",

@@ -216,7 +216,7 @@ exports.detectBannedWords = async (text) => {
 // 📢 Notificar detección de palabra prohibida
 exports.notifyBannedWordDetection = async (detectionData) => {
     try {
-        const { word, wordId, userId, campaignName, messageContent, detectedIn } = detectionData;
+        const { word, wordId, userId, campaignName, messageContent, detectedIn, affiliatePhone } = detectionData;
 
         // Guardar detección en BD
         const detection = new BannedWordDetection({
@@ -226,6 +226,7 @@ exports.notifyBannedWordDetection = async (detectionData) => {
             campaignName,
             messageContent,
             detectedIn,
+            affiliatePhone: affiliatePhone || null,
             fullContext: messageContent,
             notifiedUsers: []
         });

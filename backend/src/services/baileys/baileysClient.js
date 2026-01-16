@@ -15,6 +15,9 @@ const mongoose = require('mongoose');
 const logger = require('../../utils/logger');
 const { getIO } = require('../../config/socket');
 
+// Almacenamiento global de mapeos LID -> PN (compartido entre instancias)
+const lidPnMapping = new Map();
+
 /** Cliente de WhatsApp usando Baileys */
 class BaileysClient {
   constructor(userId) {
@@ -82,6 +85,18 @@ class BaileysClient {
       // ✅ Manejar actualizaciones de presencia
       this.sock.ev.on('presence.update', (update) => {
         logger.debug(`[Baileys][${this.userId}] Presencia actualizada:`, update.id);
+      });
+
+      // ✅ Manejar mapeos LID -> PN
+      this.sock.ev.on('lid-mapping.update', (mappings) => {
+        if (mappings && typeof mappings === 'object') {
+          for (const [key, value] of Object.entries(mappings)) {
+            if (key && value) {
+              lidPnMapping.set(key, value);
+              logger.info(`[Baileys][${this.userId}] 📍 Mapeo LID guardado: ${key} -> ${value}`);
+            }
+          }
+        }
       });
 
       return this.sock;
@@ -187,6 +202,7 @@ class BaileysClient {
     const Message = require('../../models/Message');
     const Autoresponse = require('../../models/Autoresponse');
     const AutoResponseLog = require('../../models/AutoResponseLog');
+    const SendJob = require('../../models/SendJob');
 
     for (const msg of messages) {
       // Ignorar mensajes vacíos o propios
@@ -195,6 +211,7 @@ class BaileysClient {
       try {
         const from = msg.key.remoteJid;
         const isGroup = from.endsWith('@g.us');
+        const isLid = from.endsWith('@lid');
 
         // Extraer texto del mensaje
         const text =
@@ -208,17 +225,70 @@ class BaileysClient {
 
         // ✅ LÓGICA DE AUTO-RESPUESTAS
         try {
-          // Normalizar JID para búsqueda (quitar @s.whatsapp.net)
-          const phoneNumber = from.split('@')[0];
+          // Obtener número de teléfono real (manejar @lid)
+          let phoneNumber = null;
+          
+          if (isLid) {
+            const lid = from.split('@')[0];
+            logger.info(`[Baileys][${this.userId}] 🔍 Mensaje LID detectado: ${lid}. Campos: remoteJidAlt=${msg.key.remoteJidAlt || 'N/A'}, participantAlt=${msg.key.participantAlt || 'N/A'}`);
+            
+            // 1. Intentar obtener el PN desde remoteJidAlt o participantAlt
+            const altJid = msg.key.remoteJidAlt || msg.key.participantAlt;
+            if (altJid && (altJid.includes('@s.whatsapp.net') || altJid.includes('@c.us'))) {
+              phoneNumber = altJid.split('@')[0];
+              logger.info(`[Baileys][${this.userId}] LID ${lid} -> PN ${phoneNumber} (via Alt)`);
+              // Guardar en mapeo global
+              lidPnMapping.set(lid, phoneNumber);
+            }
+            
+            // 2. Intentar obtener del mapeo global
+            if (!phoneNumber && lidPnMapping.has(lid)) {
+              phoneNumber = lidPnMapping.get(lid);
+              logger.info(`[Baileys][${this.userId}] LID ${lid} -> PN ${phoneNumber} (via cache global)`);
+            }
+            
+            // 3. Intentar obtener de lidMapping del socket
+            if (!phoneNumber) {
+              try {
+                if (this.sock?.signalRepository?.lidMapping) {
+                  const pn = await this.sock.signalRepository.lidMapping.getPNForLID(lid);
+                  if (pn) {
+                    phoneNumber = pn.split('@')[0];
+                    logger.info(`[Baileys][${this.userId}] LID ${lid} -> PN ${phoneNumber} (via signalRepository)`);
+                    lidPnMapping.set(lid, phoneNumber);
+                  }
+                }
+              } catch (lidErr) {
+                logger.debug(`[Baileys][${this.userId}] No se pudo resolver LID via signalRepository: ${lidErr.message}`);
+              }
+            }
+            
+            // Si no se pudo resolver, emitir al frontend y continuar
+            if (!phoneNumber) {
+              logger.warn(`[Baileys][${this.userId}] ⚠️ No se pudo resolver LID ${lid} a número de teléfono`);
+              try {
+                getIO().to(`user_${this.userId}`).emit('message_received', {
+                  from,
+                  text,
+                  isGroup,
+                  isLid: true,
+                  timestamp: msg.messageTimestamp,
+                });
+              } catch (e) { }
+              continue;
+            }
+          } else {
+            phoneNumber = from.split('@')[0];
+          }
+          
           const searchJid = `${phoneNumber}@c.us`; // Formato de BD
 
-          const userObjectId = new mongoose.Types.ObjectId(this.userId);
           const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
           
+          // Buscar mensaje outbound SIN filtrar por createdBy (para encontrar campañas de cualquier usuario)
           const enviado = await Message.findOne({
             to: searchJid,
             direction: "outbound",
-            createdBy: userObjectId,
             timestamp: { $gte: twentyFourHoursAgo }
           }).sort({ timestamp: -1 });
 
@@ -236,17 +306,28 @@ class BaileysClient {
             continue;
           }
 
+          // Obtener el creador de la campaña para buscar sus auto-respuestas
+          let jobCreatorId = enviado.createdBy;
+          if (enviado.job) {
+            const job = await SendJob.findById(enviado.job).select('createdBy').lean();
+            if (job?.createdBy) {
+              jobCreatorId = job.createdBy;
+              logger.info(`[Baileys][${this.userId}] Job ${enviado.job} creado por usuario ${jobCreatorId}`);
+            }
+          }
+          const jobCreatorObjectId = new mongoose.Types.ObjectId(jobCreatorId);
+
           await Message.updateMany(
-            { to: searchJid, direction: "outbound", createdBy: userObjectId },
+            { to: searchJid, direction: "outbound" },
             { $set: { respondio: true } }
           );
           logger.info(`[Baileys][${this.userId}] ✓ Contacto ${phoneNumber} marcado como respondido`);
 
-          // ✅ CORRECCIÓN BUG 5: Crear registro del mensaje inbound
+          // Crear registro del mensaje inbound con el createdBy del job
           try {
             await Message.create({
               contact: enviado.contact,
-              createdBy: this.userId,
+              createdBy: jobCreatorId,
               job: enviado.job,
               contenido: text || '',
               direction: 'inbound',
@@ -271,7 +352,8 @@ class BaileysClient {
             logger.error(`[Baileys][${this.userId}] Error registrando mensaje inbound:`, e.message);
           }
 
-          const reglas = await Autoresponse.find({ createdBy: userObjectId, active: true });
+          // Buscar auto-respuestas del creador de la campaña
+          const reglas = await Autoresponse.find({ createdBy: jobCreatorObjectId, active: true });
 
           if (reglas.length > 0) {
             const normalize = (s) => (s || "").toLowerCase().trim();
@@ -281,19 +363,22 @@ class BaileysClient {
             const matched = reglas.find(r => {
               const kw = normalize(r.keyword);
               if (!kw) return false;
-              const mt = r.matchType || "exact"; // ✅ Default a exact (comparación exacta)
-              return mt === "exact" ? bodyNorm === kw : bodyNorm.includes(kw);
+              const mt = r.matchType || "exact";
+              if (mt === "exact") return bodyNorm === kw;
+              if (mt === "startsWith") return bodyNorm.startsWith(kw);
+              if (mt === "endsWith") return bodyNorm.endsWith(kw);
+              return bodyNorm.includes(kw);
             });
 
             const rule = matched || reglas.find(r => r.isFallback);
 
             if (rule) {
-              // Anti-spam: verificar ventana de tiempo
+              // Anti-spam: verificar por creador de la campaña
               const windowMinutes = Number(process.env.AUTORESPONSE_WINDOW_MINUTES || 30);
               const since = new Date(Date.now() - windowMinutes * 60 * 1000);
 
               const recent = await AutoResponseLog.findOne({
-                createdBy: userObjectId,
+                createdBy: jobCreatorObjectId,
                 chatId: searchJid,
                 respondedAt: { $gte: since },
               }).sort({ respondedAt: -1 }).lean();
@@ -302,10 +387,10 @@ class BaileysClient {
                 try {
                   // Enviar auto-respuesta
                   await this.sendMessage(from, rule.response);
-                  logger.info(`[Baileys][${this.userId}] 🤖 Auto-respuesta enviada (${rule.keyword || "fallback"})`);
+                  logger.info(`[Baileys][${this.userId}] 🤖 Auto-respuesta enviada (${rule.keyword || "fallback"}) para campaña de usuario ${jobCreatorId}`);
 
                   await AutoResponseLog.create({
-                    createdBy: userObjectId,
+                    createdBy: jobCreatorObjectId,
                     chatId: searchJid,
                     ruleId: rule._id,
                     respondedAt: new Date(),

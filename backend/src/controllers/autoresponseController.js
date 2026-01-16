@@ -44,6 +44,8 @@ exports.createAutoresponse = async (req, res) => {
         const autoresponse = new Autoresponse({
             keyword: keyword ? keyword.trim().toLowerCase() : null,
             response,
+            matchType: req.body.matchType || "contains",
+            active: req.body.active !== false,
             isFallback,
             createdBy
         });

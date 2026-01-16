@@ -68,7 +68,10 @@ const ARGENTINE_OBRAS_SOCIALES = [
   "OSG (109202)",
   "OSPERYH (106500)",
   "OSPCRA (104009)",
-  "OSPMA (700108)"
+  "OSPMA (700108)",
+  "HOMINIS (901501)",
+  "OSCTCP (121606)",
+  "OSMA (112509)"
 ]
 
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
@@ -83,6 +86,7 @@ const STATUS_OPTIONS = [
   "Falta clave (por ARCA)",
   "Reprogramada",
   "Reprogramada (falta confirmar hora)",
+  "Reprogramada (solo clave)",
   "Completa",
   "No atendió",
   "Tiene dudas",
@@ -219,21 +223,22 @@ const getStatusColor = (status: string, theme: string) => {
     "falta documentación": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
     "falta clave": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
     "falta clave (por arca)": { light: "bg-indigo-100 text-indigo-800", dark: "bg-indigo-500/20 text-indigo-400" },
-    reprogramada: { light: "bg-violet-100 text-violet-800", dark: "bg-violet-500/20 text-violet-400" },
+    "reprogramada": { light: "bg-violet-100 text-violet-800", dark: "bg-violet-500/20 text-violet-400" },
     "reprogramada (falta confirmar hora)": { light: "bg-violet-100 text-violet-800", dark: "bg-violet-500/20 text-violet-400" },
-    completa: { light: "bg-lime-600 text-white", dark: "bg-lime-500/30 text-lime-300" },
+    "reprogramada (solo clave)": { light: "bg-violet-100 text-violet-800", dark: "bg-violet-500/20 text-violet-400" },
+    "completa": { light: "bg-lime-600 text-white", dark: "bg-lime-500/30 text-lime-300" },
     "qr hecho": { light: "bg-green-600 text-white", dark: "bg-green-500/30 text-green-300" },
-    aprobada: { light: "bg-teal-600 text-white", dark: "bg-teal-500/30 text-teal-300" },
+    "aprobada": { light: "bg-teal-600 text-white", dark: "bg-teal-500/30 text-teal-300" },
     "no atendió": { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" },
     "tiene dudas": { light: "bg-pink-100 text-pink-800", dark: "bg-pink-500/20 text-pink-400" },
     "falta clave y documentación": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
     "no le llegan los mensajes": { light: "bg-purple-100 text-purple-800", dark: "bg-purple-500/20 text-purple-400" },
-    cortó: { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" },
-    autovinculación: { light: "bg-amber-700 text-white", dark: "bg-amber-500/30 text-amber-300" },
-    caída: { light: "bg-red-600 text-white", dark: "bg-red-500/30 text-red-300" },
-    pendiente: { light: "bg-gray-200 text-gray-700", dark: "bg-gray-500/20 text-gray-400" },
+    "cortó": { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" },
+    "autovinculación": { light: "bg-amber-700 text-white", dark: "bg-amber-500/30 text-amber-300" },
+    "caída": { light: "bg-red-600 text-white", dark: "bg-red-500/30 text-red-300" },
+    "pendiente": { light: "bg-gray-200 text-gray-700", dark: "bg-gray-500/20 text-gray-400" },
     "rehacer vídeo": { light: "bg-red-300 text-red-900", dark: "bg-red-500/20 text-red-400" },
-    rechazada: { light: "bg-red-100 text-red-700", dark: "bg-red-500/20 text-red-400" },
+    "rechazada": { light: "bg-red-100 text-red-700", dark: "bg-red-500/20 text-red-400" },
     "aprobada, pero no reconoce clave": { light: "bg-yellow-600 text-white", dark: "bg-yellow-500/30 text-yellow-300" },
   }
 
@@ -362,6 +367,7 @@ const getRowBackgroundByStatus = (status: string, theme: string) => {
     "falta clave (por arca)": { light: "bg-indigo-50 hover:bg-indigo-100", dark: "bg-indigo-900/20 hover:bg-indigo-900/30" },
     "reprogramada": { light: "bg-violet-50 hover:bg-violet-100", dark: "bg-violet-900/20 hover:bg-violet-900/30" },
     "reprogramada (falta confirmar hora)": { light: "bg-violet-50 hover:bg-violet-100", dark: "bg-violet-900/20 hover:bg-violet-900/30" },
+    "reprogramada (solo clave)": { light: "bg-violet-50 hover:bg-violet-100", dark: "bg-violet-900/20 hover:bg-violet-900/30" },
     "completa": { light: "bg-lime-100 hover:bg-lime-200", dark: "bg-lime-900/30 hover:bg-lime-900/40" },
     "qr hecho": { light: "bg-green-100 hover:bg-green-200", dark: "bg-green-900/30 hover:bg-green-900/40" },
     "aprobada": { light: "bg-teal-100 hover:bg-teal-200", dark: "bg-teal-900/30 hover:bg-teal-900/40" },
@@ -489,6 +495,7 @@ export function AuditoriasSeguimiento() {
   const isAuditor = currentRole === "auditor" || currentRole === "Auditor"
   const isAsesor = currentRole === "asesor" || currentRole === "Asesor"
   const isAdministrativo = currentRole === "administrativo" || currentRole === "Administrativo"
+  const isRecuperador = currentRole === "recuperador" || currentRole === "Recuperador"
 
   /* Funciones auxiliares de selección */
   const toggleSelection = (value: string, setFn: React.Dispatch<React.SetStateAction<string[]>>) => {
@@ -611,15 +618,31 @@ export function AuditoriasSeguimiento() {
       const asesoresRes = await api.users.list("includeAllAuditors=true")
       const asesoresData = Array.isArray(asesoresRes.data) ? asesoresRes.data : []
 
-      const asesoresFiltered = asesoresData
-        .filter((u: User) => {
-          const isActive = u?.active !== false
-          const isAsesor = u.role === "asesor" || u.role === "Asesor"
-          const isAuditorWithTeam = (u.role === "auditor" || u.role === "Auditor") && u.numeroEquipo
-          return isActive && (isAsesor || isAuditorWithTeam) && u.nombre
-        })
-        .sort((a: User, b: User) => a.nombre.localeCompare(b.nombre))
-      setAsesoresList(asesoresFiltered)
+      /* ✅ RESTRICCIÓN ASESOR: Solo puede ver su propio nombre en el filtro */
+      if (isAsesor && user?.nombre) {
+        // Para asesor: solo mostrar su propio nombre en la lista
+        const selfAsesor = asesoresData.find((u: User) => u._id === user._id)
+        if (selfAsesor) {
+          setAsesoresList([selfAsesor])
+          // Pre-seleccionar automáticamente al asesor autenticado
+          setSelectedAsesores([selfAsesor.nombre])
+        } else {
+          // Fallback: crear entrada con datos del usuario actual
+          setAsesoresList([{ _id: user._id, nombre: user.nombre, email: user.email || "", role: "asesor" } as User])
+          setSelectedAsesores([user.nombre])
+        }
+      } else {
+        // Para otros roles: comportamiento normal
+        const asesoresFiltered = asesoresData
+          .filter((u: User) => {
+            const isActive = u?.active !== false
+            const isAsesorRole = u.role === "asesor" || u.role === "Asesor"
+            const isAuditorWithTeam = (u.role === "auditor" || u.role === "Auditor") && u.numeroEquipo
+            return isActive && (isAsesorRole || isAuditorWithTeam) && u.nombre
+          })
+          .sort((a: User, b: User) => a.nombre.localeCompare(b.nombre))
+        setAsesoresList(asesoresFiltered)
+      }
 
       /* Obtener auditores */
       const auditoresData = asesoresData
@@ -646,11 +669,13 @@ export function AuditoriasSeguimiento() {
       /* Supervisores y Gerencia ven todos los grupos */
       setGruposList(gruposData.sort((a: Group, b: Group) => (a.nombre || "").localeCompare(b.nombre || "")))
 
-      /* Obtener supervisores */
+      /* Obtener supervisores (incluye Gerencia para consistencia con modal de edición) */
       const supervisoresData = asesoresData
         .filter((u: User) => {
           const isActive = u?.active !== false
-          return isActive && (u.role === "supervisor" || u.role === "Supervisor") && u.nombre
+          const role = u.role?.toLowerCase()
+          // ✅ Incluir supervisores Y gerencia
+          return isActive && (role === "supervisor" || role === "gerencia") && u.nombre
         })
         .sort((a: User, b: User) => a.nombre.localeCompare(b.nombre))
       setSupervisoresList(supervisoresData)
@@ -738,7 +763,10 @@ export function AuditoriasSeguimiento() {
     setDateTo("")
     setSelectedGroups([])
     setSelectedEstados([])
-    setSelectedAsesores([])
+    /* ✅ RESTRICCIÓN ASESOR: No limpiar el filtro de asesor para asesores */
+    if (!isAsesor) {
+      setSelectedAsesores([])
+    }
     setSelectedAuditores([])
     setSelectedSupervisores([])
     setSelectedAdministradores([])
@@ -833,6 +861,17 @@ export function AuditoriasSeguimiento() {
     /* Manejador para nuevas auditorías - agregar si es visible en la vista actual */
     const handleNewAudit = (newAudit: Audit) => {
       console.log("[Socket] New audit received:", newAudit._id)
+
+      /* ✅ RESTRICCIÓN ASESOR: Solo agregar si el asesor es el asignado o creador */
+      if (isAsesor && user?._id) {
+        const auditAsesorId = typeof newAudit.asesor === 'object' ? newAudit.asesor?._id : newAudit.asesor
+        const auditCreatedById = (newAudit as any).createdBy?._id || (newAudit as any).createdBy
+        
+        if (auditAsesorId !== user._id && auditCreatedById !== user._id) {
+          console.log("[Socket] Asesor filter: ignoring audit (not owned)", newAudit._id)
+          return
+        }
+      }
 
       /* Agregar a la lista - el filtrado se maneja por la lógica existente del cliente */
       setAudits(prev => {
@@ -1087,16 +1126,19 @@ export function AuditoriasSeguimiento() {
           {/* Filtro multi-selección de asesor */}
           <div className="relative" ref={asesorFilterRef}>
             <button
-              onClick={() => setIsAsesorDropdownOpen(!isAsesorDropdownOpen)}
+              onClick={() => !isAsesor && setIsAsesorDropdownOpen(!isAsesorDropdownOpen)}
+              disabled={isAsesor}
               className={cn(
                 "w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm",
                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800",
+                isAsesor && "opacity-70 cursor-not-allowed"
               )}
+              title={isAsesor ? "Solo puedes ver tus propias ventas" : undefined}
             >
               <span className="truncate">{formatMultiLabel(selectedAsesores, "Asesor", "asesores")}</span>
               <ChevronDown className="w-4 h-4" />
             </button>
-            {isAsesorDropdownOpen && (
+            {isAsesorDropdownOpen && !isAsesor && (
               <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
                 <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
                   <button
@@ -1548,7 +1590,8 @@ export function AuditoriasSeguimiento() {
                     </td>
                     <td className="px-2 py-1.5 text-center">
                       <div className="flex items-center justify-center gap-1 transition-opacity">
-                        {!isAsesor && (
+                        {/* Recuperador tiene acceso solo visual (sin edición) en Seguimiento */}
+                        {!isAsesor && !isRecuperador && (
                           <button
                             onClick={() => openEditModal(item)}
                             className="p-1 hover:bg-blue-100 text-blue-600 rounded dark:hover:bg-blue-900/30 dark:text-blue-400"
@@ -1557,7 +1600,8 @@ export function AuditoriasSeguimiento() {
                             <Pencil className="w-3 h-3" />
                           </button>
                         )}
-                        {(isAdmin || isGerencia) && (
+                        {/* Recuperador NO puede eliminar ventas */}
+                        {(isAdmin || isGerencia) && !isRecuperador && (
                           <button
                             onClick={() => handleDeleteAudit(item._id)}
                             className="p-1 hover:bg-red-100 text-red-600 rounded dark:hover:bg-red-900/30 dark:text-red-400"

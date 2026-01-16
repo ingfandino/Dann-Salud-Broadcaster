@@ -1,0 +1,17 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/dashboard/layout,_N_T_/dashboard/audits/layout,_N_T_/dashboard/audits/falta-clave/layout,_N_T_/dashboard/audits/falta-clave/page,_N_T_/dashboard/audits/falta-clave"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/dashboard/audits/falta-clave/__PAGE__",
+    "/dashboard/audits/falta-clave",
+    "/dashboard/audits",
+    "/dashboard",
+    "/_index",
+    "/_head"
+  ]
+}

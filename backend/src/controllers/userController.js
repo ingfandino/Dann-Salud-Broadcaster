@@ -72,9 +72,21 @@ async function getUsers(req, res) {
         let queryFilter = {};
         const { _id, role: rawRole } = req.user;
         const role = (rawRole || "").toLowerCase();
-        const { scope, includeAllAuditors } = req.query;
+        const { scope, includeAllAuditors, role: filterRole } = req.query;
 
-        logger.info(`getUsers requested by ${req.user.email} with role: ${role}`);
+        logger.info(`getUsers requested by ${req.user.email} with role: ${role}, filterRole: ${filterRole}`);
+
+        // ✅ FILTRO POR ROL: Si se especifica role=supervisor, filtrar SOLO supervisores
+        if (filterRole && (role === "administrativo" || role === "gerencia")) {
+            queryFilter = { 
+                role: { $regex: new RegExp(`^${filterRole}$`, 'i') }, 
+                active: true,
+                deletedAt: null 
+            };
+            logger.info(`🔍 Filtrando usuarios por rol: ${filterRole}`);
+            const users = await User.find(queryFilter).select("-password").sort({ nombre: 1 });
+            return res.json(users);
+        }
 
         if (role === "administrativo" || role === "gerencia") {
             queryFilter = { deletedAt: null };
@@ -162,6 +174,20 @@ async function updateUser(req, res) {
         const { id } = req.params;
         const updateData = { ...req.body };
 
+        // Validar email único si se está actualizando
+        if (updateData.email) {
+            const existingUser = await User.findOne({ email: updateData.email, _id: { $ne: id } });
+            if (existingUser) {
+                return res.status(400).json({ error: "El email ya está registrado por otro usuario" });
+            }
+        }
+
+        // ✅ Permitir limpiar numeroEquipo (campo opcional)
+        // Si viene vacío o null, lo establecemos explícitamente como null
+        if (updateData.numeroEquipo === "" || updateData.numeroEquipo === null || updateData.numeroEquipo === undefined) {
+            updateData.numeroEquipo = null;
+        }
+
         // Evitar borrar el password accidentalmente
         if (!updateData.password) {
             delete updateData.password;
@@ -193,6 +219,12 @@ async function updateUser(req, res) {
 
         res.json(updatedUser);
     } catch (err) {
+        // Manejar error de índice duplicado de MongoDB
+        if (err.code === 11000) {
+            const field = Object.keys(err.keyPattern || {})[0] || 'campo';
+            return res.status(400).json({ error: `El ${field} ya está registrado` });
+        }
+        logger.error("❌ Error actualizando usuario:", err);
         res.status(400).json({ error: err.message });
     }
 }
@@ -329,7 +361,7 @@ async function updateUserRole(req, res) {
             return res.status(403).json({ error: "Acceso denegado" });
         }
 
-        const validRoles = ["asesor", "supervisor", "auditor", "administrativo", "gerencia", "RR.HH"];
+        const validRoles = ["asesor", "supervisor", "auditor", "administrativo", "gerencia", "RR.HH", "recuperador"];
         if (!validRoles.includes(role)) {
             return res.status(400).json({ error: "Rol no válido" });
         }

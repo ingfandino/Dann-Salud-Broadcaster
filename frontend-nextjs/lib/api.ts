@@ -86,6 +86,7 @@ export const api = {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
         },
+        bulkImport: (data: { records: any[] }) => apiClient.post('/audits/bulk-import', data),
         getAvailableSlots: (date: string) => apiClient.get('/audits/available-slots', { params: { date } }),
         getSalesStats: (date: string) => apiClient.get('/audits/sales-stats', { params: { date } }),
         getSupervisorStats: () => apiClient.get('/audits/stats/supervisors'),
@@ -171,6 +172,7 @@ export const api = {
         saveExportConfig: (config: any) => apiClient.post('/affiliates/export-config', config),
         getExportConfig: () => apiClient.get('/affiliates/export-config'),
         getObrasSociales: () => apiClient.get('/affiliates/obras-sociales'),
+        getStockByObraSocial: (obraSocial: string) => apiClient.get(`/affiliates/stock-by-obra-social?obraSocial=${encodeURIComponent(obraSocial)}`),
         /* Gestión de Leads */
         getFreshData: (params?: any) => apiClient.get('/affiliates/fresh-data', { params }),
         getReusableData: (params?: any) => apiClient.get('/affiliates/reusable', { params }),
@@ -182,6 +184,7 @@ export const api = {
         updateStatus: (id: string, data: any) => apiClient.put(`/affiliates/${id}/status`, data),
         getFailed: (params?: any) => apiClient.get('/affiliates/failed', { params }),
         getSupervisorStats: () => apiClient.get('/affiliates/supervisor-stats'),
+        exportAll: () => apiClient.get('/affiliates/export-all', { responseType: 'blob' }),
     },
 
 
@@ -275,6 +278,19 @@ export const api = {
         reschedule: (id: string, data: { date: string, note?: string }) => apiClient.post(`/assignments/${id}/reschedule`, data),
         reassign: (id: string, data: { supervisorId: string, note?: string, scheduledHour?: string }) => apiClient.post(`/assignments/${id}/reassign`, data),
         exportMyLeads: () => apiClient.get('/assignments/my-leads/export', { responseType: 'blob' }),
+    },
+
+    /* Teléfonos Corporativos (RR.HH.) */
+    phones: {
+        list: () => apiClient.get('/phones'),
+        get: (id: string) => apiClient.get(`/phones/${id}`),
+        create: (data: any) => apiClient.post('/phones', data),
+        update: (id: string, data: any) => apiClient.put(`/phones/${id}`, data),
+        delete: (id: string) => apiClient.delete(`/phones/${id}`),
+        addRecharge: (id: string, data: any) => apiClient.post(`/phones/${id}/recharges`, data),
+        deleteRecharge: (id: string, rechargeId: string) => apiClient.delete(`/phones/${id}/recharges/${rechargeId}`),
+        getAsesoresByEquipo: (numeroEquipo: string) => apiClient.get(`/phones/asesores/${numeroEquipo}`),
+        getStats: () => apiClient.get('/phones/stats'),
     },
 
     /* Cliente raw para requests personalizados */

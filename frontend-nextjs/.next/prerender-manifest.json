@@ -52,6 +52,31 @@
         "x-next-revalidate-tag-token"
       ]
     },
+    "/dashboard/admin/sales-record": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/dashboard/admin/sales-record",
+      "dataRoute": "/dashboard/admin/sales-record.rsc",
+      "prefetchDataRoute": null,
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
     "/dashboard/affiliates/config": {
       "experimentalBypassFor": [
         {
@@ -302,6 +327,31 @@
         "x-next-revalidate-tag-token"
       ]
     },
+    "/dashboard/audits/afip-padron": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/dashboard/audits/afip-padron",
+      "dataRoute": "/dashboard/audits/afip-padron.rsc",
+      "prefetchDataRoute": null,
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
     "/dashboard/audits/create": {
       "experimentalBypassFor": [
         {
@@ -317,6 +367,31 @@
       "initialRevalidateSeconds": false,
       "srcRoute": "/dashboard/audits/create",
       "dataRoute": "/dashboard/audits/create.rsc",
+      "prefetchDataRoute": null,
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
+    "/dashboard/audits/falta-clave": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/dashboard/audits/falta-clave",
+      "dataRoute": "/dashboard/audits/falta-clave.rsc",
       "prefetchDataRoute": null,
       "allowHeader": [
         "host",
@@ -377,7 +452,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/dashboard/audits/recovery": {
+    "/dashboard/audits/pendiente": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -390,8 +465,33 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/dashboard/audits/recovery",
-      "dataRoute": "/dashboard/audits/recovery.rsc",
+      "srcRoute": "/dashboard/audits/pendiente",
+      "dataRoute": "/dashboard/audits/pendiente.rsc",
+      "prefetchDataRoute": null,
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
+    "/dashboard/audits/rechazada": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/dashboard/audits/rechazada",
+      "dataRoute": "/dashboard/audits/rechazada.rsc",
       "prefetchDataRoute": null,
       "allowHeader": [
         "host",
@@ -592,6 +692,31 @@
       "initialRevalidateSeconds": false,
       "srcRoute": "/dashboard/hr/inactive",
       "dataRoute": "/dashboard/hr/inactive.rsc",
+      "prefetchDataRoute": null,
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
+    "/dashboard/hr/phones": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/dashboard/hr/phones",
+      "dataRoute": "/dashboard/hr/phones.rsc",
       "prefetchDataRoute": null,
       "allowHeader": [
         "host",
@@ -881,8 +1006,8 @@
   "dynamicRoutes": {},
   "notFoundRoutes": [],
   "preview": {
-    "previewModeId": "6311436f50bc78d60944b98d64ac512a",
-    "previewModeSigningKey": "ff0324b3bef4420ba8a4c4ebe83aa779461ca908da8720d44dd3c7014ad69ab7",
-    "previewModeEncryptionKey": "e8d3119d28c89679c54e075f4832c87bf4e9cf4608c73c133a280381dbc5d16b"
+    "previewModeId": "0f89f6d16b893d602d2740743cd4dfd6",
+    "previewModeSigningKey": "ead11fd4e0d96069e750fa5139fd3a789ee344018c6f048f75467dd5f2c8f908",
+    "previewModeEncryptionKey": "f9fccfa16db8144b23346f54169feb8961008287f3f3772daf2a55a301206ff9"
   }
 }

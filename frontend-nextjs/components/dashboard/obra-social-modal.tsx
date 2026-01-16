@@ -4,14 +4,26 @@
  * ============================================================
  * Selector de obra social con cantidad a asignar.
  * Se usa en la configuración de exportación de afiliados.
+ * 
+ * ✅ MEJORAS ENVÍOS AVANZADOS:
+ * - Sin overlay oscuro (blackout eliminado)
+ * - Muestra disponibilidad en tiempo real al seleccionar OS
+ * - Stock de frescos y reutilizables visible
  */
 
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Plus, X } from "lucide-react"
+import { Plus, X, Database, RefreshCw, Loader2 } from "lucide-react"
 import { useTheme } from "./theme-provider"
 import { cn } from "@/lib/utils"
+import { api } from "@/lib/api"
+
+interface StockInfo {
+    freshCount: number
+    reusableCount: number
+    totalCount: number
+}
 
 interface ObraSocialModalProps {
     isOpen: boolean
@@ -33,6 +45,10 @@ export function ObraSocialModal({
     const [cantidad, setCantidad] = useState(0)
     const [position, setPosition] = useState({ top: 0, left: 0 })
     const modalRef = useRef<HTMLDivElement>(null)
+    
+    // ✅ NUEVO: Estado para stock en tiempo real
+    const [stockInfo, setStockInfo] = useState<StockInfo | null>(null)
+    const [loadingStock, setLoadingStock] = useState(false)
 
     useEffect(() => {
         if (isOpen && triggerElement) {
@@ -70,11 +86,38 @@ export function ObraSocialModal({
         }
     }
 
+    // ✅ NUEVO: Cargar stock cuando se selecciona una obra social
+    const loadStockForObraSocial = async (obraSocial: string) => {
+        if (!obraSocial) {
+            setStockInfo(null)
+            return
+        }
+        
+        try {
+            setLoadingStock(true)
+            const res = await api.affiliates.getStockByObraSocial(obraSocial)
+            setStockInfo(res.data)
+        } catch (error) {
+            console.error("Error cargando stock:", error)
+            setStockInfo(null)
+        } finally {
+            setLoadingStock(false)
+        }
+    }
+
+    // Manejar cambio de obra social
+    const handleObraSocialChange = (value: string) => {
+        setNombre(value)
+        setCantidad(0) // Reset cantidad al cambiar OS
+        loadStockForObraSocial(value)
+    }
+
     const handleAdd = () => {
         if (!nombre || cantidad <= 0) return
         onAdd(nombre, cantidad)
         setNombre("")
         setCantidad(0)
+        setStockInfo(null)
         onClose()
     }
 
@@ -82,7 +125,7 @@ export function ObraSocialModal({
 
     return (
         <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"
             onClick={handleBackdropClick}
         >
             <div
@@ -125,7 +168,7 @@ export function ObraSocialModal({
                         </label>
                         <select
                             value={nombre}
-                            onChange={(e) => setNombre(e.target.value)}
+                            onChange={(e) => handleObraSocialChange(e.target.value)}
                             className={cn(
                                 "w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-purple-500/50",
                                 theme === "dark"
@@ -141,6 +184,63 @@ export function ObraSocialModal({
                             ))}
                         </select>
                     </div>
+
+                    {/* ✅ NUEVO: Mostrar disponibilidad en tiempo real */}
+                    {nombre && (
+                        <div className={cn(
+                            "rounded-lg p-3 border",
+                            theme === "dark" 
+                                ? "bg-blue-500/10 border-blue-500/20" 
+                                : "bg-blue-50 border-blue-200"
+                        )}>
+                            <div className="flex items-center gap-2 mb-2">
+                                <Database className={cn("w-4 h-4", theme === "dark" ? "text-blue-400" : "text-blue-600")} />
+                                <span className={cn("text-sm font-medium", theme === "dark" ? "text-blue-300" : "text-blue-700")}>
+                                    Disponibilidad actual
+                                </span>
+                                {loadingStock && <Loader2 className="w-3 h-3 animate-spin text-blue-400" />}
+                            </div>
+                            {stockInfo ? (
+                                <div className="grid grid-cols-3 gap-2 text-center">
+                                    <div className={cn(
+                                        "rounded p-2",
+                                        theme === "dark" ? "bg-green-500/10" : "bg-green-50"
+                                    )}>
+                                        <div className={cn("text-lg font-bold", theme === "dark" ? "text-green-400" : "text-green-600")}>
+                                            {stockInfo.freshCount.toLocaleString()}
+                                        </div>
+                                        <div className={cn("text-xs", theme === "dark" ? "text-green-300" : "text-green-700")}>Frescos</div>
+                                    </div>
+                                    <div className={cn(
+                                        "rounded p-2",
+                                        theme === "dark" ? "bg-amber-500/10" : "bg-amber-50"
+                                    )}>
+                                        <div className={cn("text-lg font-bold", theme === "dark" ? "text-amber-400" : "text-amber-600")}>
+                                            {stockInfo.reusableCount.toLocaleString()}
+                                        </div>
+                                        <div className={cn("text-xs", theme === "dark" ? "text-amber-300" : "text-amber-700")}>Reutilizables</div>
+                                    </div>
+                                    <div className={cn(
+                                        "rounded p-2",
+                                        theme === "dark" ? "bg-purple-500/10" : "bg-purple-50"
+                                    )}>
+                                        <div className={cn("text-lg font-bold", theme === "dark" ? "text-purple-400" : "text-purple-600")}>
+                                            {stockInfo.totalCount.toLocaleString()}
+                                        </div>
+                                        <div className={cn("text-xs", theme === "dark" ? "text-purple-300" : "text-purple-700")}>Total</div>
+                                    </div>
+                                </div>
+                            ) : loadingStock ? (
+                                <div className={cn("text-sm text-center py-2", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
+                                    Cargando disponibilidad...
+                                </div>
+                            ) : (
+                                <div className={cn("text-sm text-center py-2", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
+                                    No se pudo cargar la disponibilidad
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     <div>
                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>

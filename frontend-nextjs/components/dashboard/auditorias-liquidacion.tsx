@@ -137,6 +137,7 @@ export function AuditoriasLiquidacion() {
   const { user } = useAuth()
   const isGerencia = user?.role?.toLowerCase() === 'gerencia'
   const isAsesor = user?.role?.toLowerCase() === 'asesor'
+  const isRecuperador = user?.role?.toLowerCase() === 'recuperador'
 
   // State
   const [items, setItems] = useState<any[]>([])
@@ -379,6 +380,14 @@ export function AuditoriasLiquidacion() {
 
     // Apply other filters
     let result = baseItems.filter(item => {
+      // ✅ Recuperador: Solo ve registros donde Supervisor = "Eliana Suarez"
+      if (isRecuperador) {
+        const supervisorName = getSupervisorName(item).toLowerCase()
+        if (!(supervisorName.includes('eliana') && supervisorName.includes('suarez'))) {
+          return false
+        }
+      }
+
       if (filters.afiliado && !item.nombre?.toLowerCase().includes(filters.afiliado.toLowerCase())) return false
       if (filters.cuil && !item.cuil?.includes(filters.cuil)) return false
       
@@ -417,7 +426,7 @@ export function AuditoriasLiquidacion() {
       // Default: fecha descendente
       return new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime()
     })
-  }, [items, itemsByWeek, currentWeek, filters, selectedSupervisores, selectedAsesores, sortBy])
+  }, [items, itemsByWeek, currentWeek, filters, selectedSupervisores, selectedAsesores, sortBy, isRecuperador])
 
   // Export
   const handleExport = async () => {

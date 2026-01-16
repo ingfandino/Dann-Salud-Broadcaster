@@ -96,6 +96,7 @@ const STATUS_OPTIONS = [
     "Falta clave (por ARCA)",
     "Reprogramada",
     "Reprogramada (falta confirmar hora)",
+    "Reprogramada (solo clave)",
     "Completa",
     "No atendió",
     "Tiene dudas",
@@ -168,7 +169,10 @@ const ARGENTINE_OBRAS_SOCIALES = [
     "OSG (109202)",
     "OSPERYH (106500)",
     "OSPCRA (104009)",
-    "OSPMA (700108)"
+    "OSPMA (700108)",
+    "HOMINIS (901501)",
+    "OSCTCP (121606)",
+    "OSMA (112509)"
 ]
 
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
@@ -205,6 +209,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
     const isGerencia = userRole === 'gerencia';
     const isAdmin = userRole === 'administrativo';
     const isAuditorOrSupervisor = ['auditor', 'supervisor'].includes(userRole || '');
+    const isRecuperador = userRole === 'recuperador';
     const isQRHecho = audit.status?.toLowerCase() === 'qr hecho';
     const isLockedByQR = isQRHecho && !isAdmin && !isGerencia;
 
@@ -224,7 +229,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
             return [
                 "Mensaje enviado", "En videollamada", "Rechazada",
                 "Falta documentación", "Falta clave", "Falta clave (por ARCA)", "Reprogramada",
-                "Reprogramada (falta confirmar hora)", "Completa",
+                "Reprogramada (falta confirmar hora)", "Reprogramada (solo clave)", "Completa",
                 "No atendió", "Tiene dudas", "Falta clave y documentación",
                 "No le llegan los mensajes", "Cortó", "Autovinculación",
                 "Caída", "Rehacer vídeo"
@@ -232,6 +237,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
         }
         if (isGerencia) {
             return STATUS_OPTIONS; // All options
+        }
+        // ✅ Recuperador: solo 3 estados permitidos
+        if (isRecuperador) {
+            return ["Completa", "Caída", "Reprogramada"];
         }
         return []; // Asesor sees nothing or read-only
     };
@@ -255,6 +264,8 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
         hora: localSchedule.hora,
         datosExtra: audit.datosExtra || "",
         isRecuperada: audit.isRecuperada || false,
+        isReferido: false, // ✅ NUEVO: Checkbox Referido
+        disponibleParaVenta: (audit as any).disponibleParaVenta || false, // ✅ NUEVO: Check para AFIP/Padrón
         fechaCreacionQR: audit.fechaCreacionQR ? audit.fechaCreacionQR.split('T')[0] : "",
         supervisor: audit.supervisorSnapshot?._id || ""
     })
@@ -291,6 +302,8 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                 hora: localSchedule.hora,
                 datosExtra: audit.datosExtra || "",
                 isRecuperada: audit.isRecuperada || false,
+                isReferido: false, // ✅ NUEVO: Reset checkbox Referido al abrir
+                disponibleParaVenta: (audit as any).disponibleParaVenta || false, // ✅ NUEVO: Check para AFIP/Padrón
                 fechaCreacionQR: audit.fechaCreacionQR ? audit.fechaCreacionQR.split('T')[0] : "",
                 supervisor: audit.supervisorSnapshot?._id || ""
             })
@@ -317,7 +330,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
             const filteredAuditores = users.filter((u: any) => ['auditor', 'supervisor', 'gerencia'].includes(u.role?.toLowerCase()) && u.active !== false)
             console.log("AuditEditModal: Filtered auditores:", filteredAuditores.length, filteredAuditores)
             setAuditores(filteredAuditores)
-            setSupervisores(users.filter((u: any) => u.role === 'supervisor' && u.active !== false))
+            // ✅ NOTA: supervisores se calcula dinámicamente en el useMemo según isReferido
+            setSupervisores(users.filter((u: any) => 
+                (u.role?.toLowerCase() === 'supervisor' || u.role?.toLowerCase() === 'gerencia') && u.active !== false
+            ))
             setAdministradores(users.filter((u: any) => u.role === 'administrativo' && u.active !== false))
 
             // Extract unique groups from users
@@ -338,15 +354,42 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
         }
     }
 
+    // ✅ NUEVO: Filtrar supervisores según isReferido
+    // Si isReferido = false → solo supervisores
+    // Si isReferido = true → supervisores + gerencia
+    const filteredSupervisores = useMemo(() => {
+        if (form.isReferido) {
+            // Incluir supervisores Y gerencia
+            return supervisores.filter((u: any) => 
+                ['supervisor', 'gerencia'].includes(u.role?.toLowerCase())
+            )
+        }
+        // Solo supervisores
+        return supervisores.filter((u: any) => u.role?.toLowerCase() === 'supervisor')
+    }, [supervisores, form.isReferido])
+
+    // ✅ NUEVO: Detectar si el supervisor seleccionado es Gerencia
+    const selectedSupervisorIsGerencia = useMemo(() => {
+        if (!form.supervisor) return false
+        const selected = supervisores.find((u: any) => u._id === form.supervisor)
+        return selected?.role?.toLowerCase() === 'gerencia'
+    }, [form.supervisor, supervisores])
+
     // Filter asesores based on selected grupo (shows ALL users from that numeroEquipo, regardless of role)
+    // ✅ MODIFICADO: Si supervisor es Gerencia, mostrar solo usuarios con rol Gerencia
     const filteredAsesores = useMemo(() => {
+        // Si el supervisor seleccionado es Gerencia, mostrar solo Gerencias
+        if (selectedSupervisorIsGerencia) {
+            return asesores.filter((u: any) => u.role?.toLowerCase() === 'gerencia')
+        }
+
         if (!form.numeroEquipo && !form.grupo) {
             return asesores
         }
 
         const selectedNumeroEquipo = form.numeroEquipo || form.grupo
         return asesores.filter((u: any) => u.numeroEquipo === selectedNumeroEquipo)
-    }, [asesores, form.numeroEquipo, form.grupo])
+    }, [asesores, form.numeroEquipo, form.grupo, selectedSupervisorIsGerencia])
 
     const fetchAvailableSlots = async (date: string) => {
         try {
@@ -405,7 +448,55 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                 numeroEquipo: value, // Update numeroEquipo to match grupo
                 asesor: supervisor?._id || '' // Auto-select supervisor or clear if not found
             }))
-        } else {
+        } 
+        // ✅ NUEVO: Special handling para cambio de supervisor
+        else if (name === 'supervisor') {
+            // Verificar si el nuevo supervisor es Gerencia
+            const selectedUser = supervisores.find((u: any) => u._id === value)
+            const isGerenciaSelected = selectedUser?.role?.toLowerCase() === 'gerencia'
+            
+            if (isGerenciaSelected) {
+                // Si se selecciona Gerencia: vaciar grupo y asesor
+                setForm(prev => ({
+                    ...prev,
+                    supervisor: value,
+                    grupo: '', // Vaciar grupo
+                    numeroEquipo: '', // Vaciar numeroEquipo
+                    asesor: '' // Vaciar asesor (se seleccionará de la lista de Gerencias)
+                }))
+            } else {
+                setForm(prev => ({
+                    ...prev,
+                    supervisor: value
+                }))
+            }
+        }
+        // ✅ NUEVO: Special handling para cambio de isReferido
+        else if (name === 'isReferido') {
+            // Al cambiar isReferido, resetear supervisor si ya no es válido
+            setForm(prev => {
+                const newIsReferido = checked
+                // Si se desmarca y el supervisor actual es Gerencia, limpiarlo
+                if (!newIsReferido) {
+                    const currentSupervisor = supervisores.find((u: any) => u._id === prev.supervisor)
+                    if (currentSupervisor?.role?.toLowerCase() === 'gerencia') {
+                        return {
+                            ...prev,
+                            isReferido: newIsReferido,
+                            supervisor: '', // Limpiar supervisor Gerencia
+                            grupo: '',
+                            numeroEquipo: '',
+                            asesor: ''
+                        }
+                    }
+                }
+                return {
+                    ...prev,
+                    isReferido: newIsReferido
+                }
+            })
+        }
+        else {
             setForm(prev => ({
                 ...prev,
                 [name]: type === 'checkbox' ? checked : value
@@ -426,6 +517,41 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
         try {
             setLoading(true)
 
+            // ✅ RECUPERADOR: Lógica especial al cambiar a "Completa"
+            // Cuando un Recuperador cambia una venta a estado "Completa":
+            // - Supervisor → Eliana Suárez (rol Gerencia)
+            // - Asesor → usuario Recuperador en sesión
+            // - Grupo → null
+            // - Flag ¿Recuperada? → true
+            if (isRecuperador && form.status === "Completa" && audit.status !== "Completa") {
+                // Buscar a Eliana Suárez en la lista de supervisores
+                const elianaSuarez = supervisores.find((s: any) => 
+                    s.nombre?.toLowerCase().includes('eliana') && 
+                    s.nombre?.toLowerCase().includes('suarez') ||
+                    s.nombre?.toLowerCase().includes('suárez')
+                )
+                
+                if (elianaSuarez) {
+                    form.supervisor = elianaSuarez._id
+                }
+                
+                // Asignar asesor al recuperador actual
+                form.asesor = user?._id || ''
+                
+                // Limpiar grupo
+                form.grupo = ''
+                form.numeroEquipo = ''
+                
+                // Marcar como recuperada
+                form.isRecuperada = true
+                
+                console.log("[AuditEditModal] Recuperador -> Completa: Aplicando lógica especial", {
+                    supervisor: elianaSuarez?.nombre || "No encontrada",
+                    asesor: user?.nombre,
+                    isRecuperada: true
+                })
+            }
+
             const payload: any = {
                 ...form,
                 scheduledAt: `${form.fecha}T${form.hora}:00`,
@@ -444,10 +570,11 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
             payload.administrador = form.administrador || null
 
             // Handle supervisor
-            if (!isGerencia) {
+            // ✅ Recuperador puede modificar supervisor al pasar a "Completa"
+            if (!isGerencia && !isRecuperador) {
                 delete payload.supervisor
             } else {
-                // If gerencia and supervisor is empty string, send null or remove it
+                // If gerencia/recuperador and supervisor is empty string, send null or remove it
                 if (!payload.supervisor) {
                     payload.supervisor = null
                 }
@@ -621,6 +748,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                             </p>
                         </div>
                     )}
+                    {/* Recuperador tiene restricciones especiales: solo puede editar Estado, Fecha/Hora (reprogramar), y Datos extra */}
                     <fieldset disabled={isAsesor || isLockedByQR} className="contents">
                         {activeTab === "details" ? (
                             <div className="space-y-4">
@@ -634,8 +762,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                             name="nombre"
                                             value={form.nombre}
                                             onChange={handleChange}
+                                            disabled={isRecuperador}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
+                                                isRecuperador && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         />
@@ -648,8 +778,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                             name="telefono"
                                             value={form.telefono}
                                             onChange={handleChange}
+                                            disabled={isRecuperador}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
+                                                isRecuperador && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         />
@@ -664,8 +796,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                         name="cuil"
                                         value={form.cuil}
                                         onChange={handleChange}
+                                        disabled={isRecuperador}
                                         className={cn(
                                             "w-full px-3 py-2 rounded-lg border text-sm",
+                                            isRecuperador && "opacity-60 cursor-not-allowed",
                                             theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                         )}
                                     />
@@ -681,8 +815,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                             name="obraSocialAnterior"
                                             value={form.obraSocialAnterior}
                                             onChange={handleChange}
+                                            disabled={isRecuperador}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
+                                                isRecuperador && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
@@ -700,8 +836,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                             name="obraSocialVendida"
                                             value={form.obraSocialVendida}
                                             onChange={handleChange}
+                                            disabled={isRecuperador}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
+                                                isRecuperador && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
@@ -738,6 +876,21 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                                 </option>
                                             ))}
                                         </select>
+                                        {/* ✅ Checkbox "Disponible para venta" - Solo visible para AFIP o Padrón */}
+                                        {(form.status?.toLowerCase() === 'afip' || form.status?.toLowerCase() === 'padrón') && (
+                                            <div className="flex items-center gap-2 mt-2">
+                                                <input
+                                                    type="checkbox"
+                                                    name="disponibleParaVenta"
+                                                    checked={form.disponibleParaVenta}
+                                                    onChange={handleChange}
+                                                    className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                                                />
+                                                <label className={cn("text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                                                    Disponible para venta
+                                                </label>
+                                            </div>
+                                        )}
                                     </div>
                                     <div>
                                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -747,8 +900,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                             name="tipoVenta"
                                             value={form.tipoVenta}
                                             onChange={handleChange}
+                                            disabled={isRecuperador}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
+                                                isRecuperador && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
@@ -769,10 +924,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                             name="asesor"
                                             value={form.asesor}
                                             onChange={handleChange}
-                                            disabled={!isGerencia} // Item 6: Lock Asesor for non-gerencia
+                                            disabled={!isGerencia || isRecuperador} // Recuperador no puede modificar
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                !isGerencia && "opacity-60 cursor-not-allowed",
+                                                (!isGerencia || isRecuperador) && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
@@ -790,10 +945,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                             name="grupo"
                                             value={form.grupo}
                                             onChange={handleChange}
-                                            disabled={!isGerencia} // Item 6: Lock Grupo for non-gerencia
+                                            disabled={!isGerencia || selectedSupervisorIsGerencia || isRecuperador} // Recuperador no puede modificar
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                !isGerencia && "opacity-60 cursor-not-allowed",
+                                                (!isGerencia || selectedSupervisorIsGerencia || isRecuperador) && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
@@ -802,6 +957,11 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                                 <option key={g._id} value={g.nombre || g.name}>{g.nombre || g.name}</option>
                                             ))}
                                         </select>
+                                        {selectedSupervisorIsGerencia && !isRecuperador && (
+                                            <p className={cn("text-xs mt-1", theme === "dark" ? "text-amber-400" : "text-amber-600")}>
+                                                Grupo deshabilitado (Supervisor es Gerencia)
+                                            </p>
+                                        )}
                                     </div>
                                     <div>
                                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -811,17 +971,17 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                             name="supervisor"
                                             value={form.supervisor}
                                             onChange={handleChange}
-                                            disabled={!isGerencia}
+                                            disabled={!isGerencia || isRecuperador} // Recuperador no puede modificar (se asigna auto al pasar a Completa)
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                !isGerencia && "opacity-60 cursor-not-allowed",
+                                                (!isGerencia || isRecuperador) && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
                                             <option value="">Seleccione</option>
-                                            {supervisores?.map(u => (
+                                            {filteredSupervisores?.map(u => (
                                                 <option key={u._id} value={u._id}>
-                                                    {u.nombre} {u.numeroEquipo ? `(${u.numeroEquipo})` : ''}
+                                                    {u.nombre} {u.role?.toLowerCase() === 'gerencia' ? '(Gerencia)' : u.numeroEquipo ? `(${u.numeroEquipo})` : ''}
                                                 </option>
                                             ))}
                                         </select>
@@ -834,8 +994,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                             name="auditor"
                                             value={form.auditor}
                                             onChange={handleChange}
+                                            disabled={isRecuperador} // Recuperador no puede modificar
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
+                                                isRecuperador && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
@@ -856,10 +1018,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                         name="administrador"
                                         value={form.administrador}
                                         onChange={handleChange}
-                                        disabled={!isGerencia && !isAdmin} // Item 7: Lock Admin for non-admin/gerencia
+                                        disabled={(!isGerencia && !isAdmin) || isRecuperador} // Recuperador no puede modificar
                                         className={cn(
                                             "w-full px-3 py-2 rounded-lg border text-sm",
-                                            (!isGerencia && !isAdmin) && "opacity-60 cursor-not-allowed",
+                                            ((!isGerencia && !isAdmin) || isRecuperador) && "opacity-60 cursor-not-allowed",
                                             theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                         )}
                                     >
@@ -971,12 +1133,40 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave }: AuditEditModa
                                         name="isRecuperada"
                                         checked={form.isRecuperada}
                                         onChange={handleChange}
-                                        className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                        disabled={isRecuperador} // Recuperador: se marca automáticamente al pasar a "Completa"
+                                        className={cn(
+                                            "w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500",
+                                            isRecuperador && "opacity-60 cursor-not-allowed"
+                                        )}
                                     />
                                     <label className={cn("text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
                                         ¿Recuperada?
                                     </label>
+                                    {isRecuperador && (
+                                        <span className={cn("text-xs ml-2", theme === "dark" ? "text-gray-500" : "text-gray-400")}>
+                                            (Se marca automáticamente al pasar a Completa)
+                                        </span>
+                                    )}
                                 </div>
+
+                                {/* ✅ NUEVO: Checkbox Referido - Solo visible para Gerencia */}
+                                {isGerencia && (
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            name="isReferido"
+                                            checked={form.isReferido}
+                                            onChange={handleChange}
+                                            className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <label className={cn("text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                                            Referido
+                                        </label>
+                                        <span className={cn("text-xs ml-2", theme === "dark" ? "text-gray-500" : "text-gray-400")}>
+                                            (Permite asignar Gerencia como Supervisor)
+                                        </span>
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             <div className="space-y-6">

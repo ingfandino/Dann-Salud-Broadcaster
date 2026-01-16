@@ -41,11 +41,11 @@ const autoresponseSchema = new mongoose.Schema(
             type: Boolean,
             default: true
         },
-        /** Tipo de coincidencia: exact (exacta) o contains (contiene) */
+        /** Tipo de coincidencia: exact, contains, startsWith, endsWith */
         matchType: {
             type: String,
-            enum: ["exact", "contains"],
-            default: "exact"
+            enum: ["exact", "contains", "startsWith", "endsWith"],
+            default: "contains"
         },
         /** Indica si es la respuesta por defecto cuando no hay coincidencias */
         isFallback: {

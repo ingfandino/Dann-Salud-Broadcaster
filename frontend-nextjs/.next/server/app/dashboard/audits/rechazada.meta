@@ -1,0 +1,17 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/dashboard/layout,_N_T_/dashboard/audits/layout,_N_T_/dashboard/audits/rechazada/layout,_N_T_/dashboard/audits/rechazada/page,_N_T_/dashboard/audits/rechazada"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/dashboard/audits/rechazada/__PAGE__",
+    "/dashboard/audits/rechazada",
+    "/dashboard/audits",
+    "/dashboard",
+    "/_index",
+    "/_head"
+  ]
+}

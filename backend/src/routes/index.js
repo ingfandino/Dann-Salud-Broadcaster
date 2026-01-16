@@ -35,6 +35,7 @@ const internalMessageRoutes = require("./internalMessageRoutes");
 const affiliateRoutes = require("./affiliates");
 const bannedWordRoutes = require("./bannedWords");
 const employeeRoutes = require("./employees");
+const phoneRoutes = require("./phones");
 
 // 📌 Rutas públicas
 router.use("/auth", authRoutes);
@@ -86,6 +87,7 @@ router.use("/internal-messages", internalMessageRoutes);
 router.use("/affiliates", affiliateRoutes);
 router.use("/banned-words", bannedWordRoutes);
 router.use("/employees", employeeRoutes);
+router.use("/phones", phoneRoutes);
 router.use("/assignments", require("./assignments"));
 
 module.exports = router;

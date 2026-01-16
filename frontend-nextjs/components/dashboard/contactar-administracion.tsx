@@ -150,6 +150,39 @@ export function ContactarAdministracion() {
             return
         }
 
+        // Validar que no exceda los datos disponibles (solo para supervisores)
+        if (user?.role === 'supervisor' && supervisorStats) {
+            const totalAvailable = supervisorStats.freshCount + supervisorStats.reusableCount
+            
+            // Calcular total solicitado y desglose por tipo
+            let totalFreshRequested = 0
+            let totalReusableRequested = 0
+            
+            for (const d of distribution) {
+                const freshPct = d.mix.freshPercentage / 100
+                const reusablePct = d.mix.reusablePercentage / 100
+                totalFreshRequested += Math.floor(d.quantity * freshPct)
+                totalReusableRequested += Math.ceil(d.quantity * reusablePct)
+            }
+            
+            const totalRequested = distribution.reduce((sum, d) => sum + d.quantity, 0)
+            
+            if (totalRequested > totalAvailable) {
+                toast.error(`No puedes enviar ${totalRequested} datos. Solo tienes ${totalAvailable} disponibles.`)
+                return
+            }
+            
+            if (totalFreshRequested > supervisorStats.freshCount) {
+                toast.error(`No hay suficientes datos frescos. Solicitados: ${totalFreshRequested}, Disponibles: ${supervisorStats.freshCount}`)
+                return
+            }
+            
+            if (totalReusableRequested > supervisorStats.reusableCount) {
+                toast.error(`No hay suficientes datos reutilizables. Solicitados: ${totalReusableRequested}, Disponibles: ${supervisorStats.reusableCount}`)
+                return
+            }
+        }
+
         setLoading(true)
         try {
             // Preparar payload limpio
