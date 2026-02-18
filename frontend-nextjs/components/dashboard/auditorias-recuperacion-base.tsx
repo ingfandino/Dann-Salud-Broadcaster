@@ -47,8 +47,8 @@ interface RecuperacionConfig {
 const INTERFACE_CONFIG: Record<RecuperacionType, RecuperacionConfig> = {
   "falta-clave": {
     title: "Falta Clave",
-    description: "Ventas con estado 'Falta clave'",
-    statusFilters: ["Falta clave"],
+    description: "Ventas con problemas de clave",
+    statusFilters: ["Falta clave", "Falta clave (por ARCA)", "Aprobada, pero no reconoce clave", "El afiliado cambió la clave"],
     defaultSort: "asc", // más antiguas primero
   },
   "rechazada": {
@@ -163,6 +163,7 @@ const getStatusColor = (status: string, theme: string) => {
   const statusLower = (status || "").toLowerCase()
   const colors: Record<string, { light: string; dark: string }> = {
     "falta clave": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
+    "falta clave (por arca)": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
     "rechazada": { light: "bg-red-100 text-red-700", dark: "bg-red-500/20 text-red-400" },
     "pendiente": { light: "bg-gray-200 text-gray-700", dark: "bg-gray-500/20 text-gray-400" },
     "falta documentación": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
@@ -239,6 +240,7 @@ const getRowBackgroundByStatus = (status: string, theme: string) => {
 
   const colorMap: Record<string, { light: string; dark: string }> = {
     "falta clave": { light: "bg-orange-50 hover:bg-orange-100", dark: "bg-orange-900/20 hover:bg-orange-900/30" },
+    "falta clave (por arca)": { light: "bg-orange-50 hover:bg-orange-100", dark: "bg-orange-900/20 hover:bg-orange-900/30" },
     "rechazada": { light: "bg-red-50 hover:bg-red-100", dark: "bg-red-900/20 hover:bg-red-900/30" },
     "pendiente": { light: "bg-gray-100 hover:bg-gray-200", dark: "bg-gray-700/30 hover:bg-gray-700/40" },
     "falta documentación": { light: "bg-orange-50 hover:bg-orange-100", dark: "bg-orange-900/20 hover:bg-orange-900/30" },
@@ -295,8 +297,9 @@ export function AuditoriasRecuperacionBase({ type }: AuditoriasRecuperacionBaseP
   const userRole = user?.role?.toLowerCase()
   const isGerencia = userRole === 'gerencia'
   const isRecuperador = userRole === 'recuperador'
-  const canEdit = isGerencia || isRecuperador
-  const canDelete = isGerencia
+  const isEncargado = userRole === 'encargado' // ✅ Rol Encargado
+  const canEdit = isGerencia || isRecuperador || isEncargado
+  const canDelete = isGerencia // Encargado no puede eliminar
 
   /* Filtrar asesores por supervisor seleccionado */
   const filteredAsesoresList = useMemo(() => {
@@ -422,7 +425,7 @@ export function AuditoriasRecuperacionBase({ type }: AuditoriasRecuperacionBaseP
         .filter((u: User) => {
           const isActive = u?.active !== false
           const role = u.role?.toLowerCase()
-          return isActive && (role === "supervisor" || role === "gerencia") && u.nombre
+          return isActive && (role === "supervisor" || role === "gerencia" || role === "encargado") && u.nombre
         })
         .sort((a: User, b: User) => a.nombre.localeCompare(b.nombre))
       setSupervisoresList(supervisoresData)

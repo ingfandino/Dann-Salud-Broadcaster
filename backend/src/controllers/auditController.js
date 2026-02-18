@@ -68,8 +68,8 @@ exports.createAudit = async (req, res) => {
         return res.status(400).json({ message: 'Fecha inválida' });
     }
 
-    // ✅ PRIVILEGIO ESPECIAL: Gerencia puede crear ventas de cualquier fecha
-    const isGerencia = req.user?.role?.toLowerCase() === 'gerencia';
+    // ✅ PRIVILEGIO ESPECIAL: Gerencia y Encargado pueden crear ventas de cualquier fecha
+    const isGerencia = req.user?.role?.toLowerCase() === 'gerencia' || req.user?.role?.toLowerCase() === 'encargado';
 
     if (!isGerencia) {
         // Solo validar fecha para roles que NO sean Gerencia
@@ -78,6 +78,47 @@ exports.createAudit = async (req, res) => {
         if (sched < today) {
             return res.status(400).json({ message: 'Fecha inválida' });
         }
+    }
+
+    // ✅ LÓGICA ESPECIAL PARA ROL INDEPENDIENTE
+    const userRole = req.user?.role?.toLowerCase();
+    const isIndependiente = userRole === 'independiente';
+    let finalAsesor = asesor;
+    let supervisorSnapshotForIndependiente = null;
+    let isReferidoFlag = req.body.isReferido || false;
+
+    if (isIndependiente) {
+        // Auto-asignar como asesor
+        finalAsesor = req.user._id;
+        
+        // Buscar Eliana Suarez como supervisor (búsqueda flexible con y sin acento)
+        const User = require('../models/User');
+        const elianaSuarez = await User.findOne({
+            $or: [
+                { nombre: { $regex: /eliana.*su[aá]rez/i } },
+                { email: { $regex: /eliana.*su[aá]rez/i } }
+            ],
+            role: 'gerencia',
+            active: true
+        }).select('_id nombre numeroEquipo');
+        
+        if (!elianaSuarez) {
+            return res.status(400).json({ 
+                message: 'No se pudo asignar supervisor automático. Eliana Suarez (Gerencia) no encontrada en el sistema.' 
+            });
+        }
+        
+        // Construir supervisorSnapshot para Independiente
+        supervisorSnapshotForIndependiente = {
+            _id: elianaSuarez._id,
+            nombre: elianaSuarez.nombre,
+            numeroEquipo: null // Independientes no tienen equipo
+        };
+        
+        // Marcar como referido para proteger el supervisorSnapshot
+        isReferidoFlag = true;
+        
+        logger.info(`[INDEPENDIENTE] Usuario ${req.user.nombre} creando venta. Asesor: auto-asignado, Supervisor: ${elianaSuarez.nombre}`);
     }
 
     // 👉 Validación de CUIL único (solo si se proporciona)
@@ -111,6 +152,24 @@ exports.createAudit = async (req, res) => {
         return res.status(400).json({ message: 'Turno completo (verificación final)' });
     }
 
+    // ✅ FIX: Si viene supervisor ID, buscar usuario y construir supervisorSnapshot
+    let supervisorSnapshotData = null;
+    
+    // Priorizar supervisorSnapshot de Independiente si existe
+    if (supervisorSnapshotForIndependiente) {
+        supervisorSnapshotData = supervisorSnapshotForIndependiente;
+    } else if (req.body.supervisor) {
+        const User = require('../models/User');
+        const supervisorUser = await User.findById(req.body.supervisor).select('_id nombre numeroEquipo');
+        if (supervisorUser) {
+            supervisorSnapshotData = {
+                _id: supervisorUser._id,
+                nombre: supervisorUser.nombre,
+                numeroEquipo: supervisorUser.numeroEquipo ? String(supervisorUser.numeroEquipo) : null
+            };
+        }
+    }
+
     const audit = new Audit({
         nombre,
         cuil,
@@ -119,12 +178,15 @@ exports.createAudit = async (req, res) => {
         obraSocialAnterior,
         obraSocialVendida,
         scheduledAt: sched,
-        asesor: asesor || req.user._id,
+        asesor: finalAsesor || req.user._id, // ✅ Usar finalAsesor (auto-asignado para Independiente)
         validador: validador || null, // ✅ Usuario que valida la venta
         createdBy: req.user._id,
         groupId: req.user.groupId,
         auditor: null,
-        datosExtra: req.body.datosExtra || ""
+        datosExtra: req.body.datosExtra || "",
+        // ✅ FIX: Incluir supervisorSnapshot si se proporcionó supervisor o es Independiente
+        supervisorSnapshot: supervisorSnapshotData,
+        isReferido: isReferidoFlag // ✅ Usar flag (true para Independiente)
     });
 
     if (typeof req.body.datosExtra === 'string' && req.body.datosExtra.trim().length) {
@@ -233,9 +295,13 @@ exports.getAuditsByDate = async (req, res) => {
 
                 /* La lógica es: SI fechaCreacionQR tiene valor -> usar ese, SINO -> usar scheduledAt */
                 if (!dateField) {
+                    // ✅ Ajustar rango para fechaCreacionQR: compensar desfase UTC (-3 horas Argentina)
+                    // fechaCreacionQR puede estar guardado en UTC medianoche, lo que causa desfase
+                    const fromAdjusted = new Date(from.getTime() - (3 * 60 * 60 * 1000));
+
                     filter.$or = [
-                        // Caso 1: fechaCreacionQR existe y tiene valor válido en el rango
-                        { fechaCreacionQR: { $ne: null, $gte: from, $lt: to } },
+                        // Caso 1: fechaCreacionQR existe y tiene valor válido en el rango (ajustado)
+                        { fechaCreacionQR: { $ne: null, $gte: fromAdjusted, $lt: to } },
                         // Caso 2: fechaCreacionQR NO existe o es null -> usar scheduledAt
                         {
                             $and: [
@@ -252,7 +318,23 @@ exports.getAuditsByDate = async (req, res) => {
                 const day = parseLocalDate(date || undefined);
                 const next = new Date(day);
                 next.setDate(next.getDate() + 1);
-                filter[fieldToFilter] = { $gte: day, $lt: next };
+
+                if (!dateField) {
+                    // ✅ Misma lógica dual: fechaCreacionQR (ajustado) o scheduledAt
+                    const dayAdjusted = new Date(day.getTime() - (3 * 60 * 60 * 1000));
+
+                    filter.$or = [
+                        { fechaCreacionQR: { $ne: null, $gte: dayAdjusted, $lt: next } },
+                        {
+                            $and: [
+                                { $or: [{ fechaCreacionQR: { $exists: false } }, { fechaCreacionQR: null }] },
+                                { scheduledAt: { $gte: day, $lt: next } }
+                            ]
+                        }
+                    ];
+                } else {
+                    filter[fieldToFilter] = { $gte: day, $lt: next };
+                }
             }
         }
 
@@ -287,7 +369,22 @@ exports.getAuditsByDate = async (req, res) => {
                 const uniqueStatuses = [...new Set(statusFilterValues)];
 
                 if (uniqueStatuses.length) {
-                    filter.status = { $in: uniqueStatuses };
+                    // ✅ Buscar en ambos campos: status y statusAdministrativo (EXACT MATCH con $in)
+                    const statusOrCondition = [
+                        { status: { $in: uniqueStatuses } },
+                        { statusAdministrativo: { $in: uniqueStatuses } }
+                    ];
+
+                    // ✅ Si ya existe un $or (ej. por userId), combinar con $and
+                    if (filter.$or) {
+                        const existingOr = filter.$or;
+                        delete filter.$or;
+                        filter.$and = filter.$and || [];
+                        filter.$and.push({ $or: existingOr });
+                        filter.$and.push({ $or: statusOrCondition });
+                    } else {
+                        filter.$or = statusOrCondition;
+                    }
                 }
             }
         }
@@ -295,10 +392,10 @@ exports.getAuditsByDate = async (req, res) => {
 
         /* Visibilidad por rol */
         const expRole = (req.user?.role || '').toLowerCase();
-        if (expRole === 'asesor') {
-            /* ✅ RESTRICCIÓN ASESOR: Solo ve ventas donde es el asesor asignado O fue el creador */
+        if (expRole === 'asesor' || expRole === 'independiente') {
+            /* ✅ RESTRICCIÓN ASESOR/INDEPENDIENTE: Solo ve ventas donde es el asesor asignado O fue el creador */
             const asesorId = req.user._id;
-            
+
             // Combinar el filtro existente con la restricción de asesor usando $and
             const asesorFilter = {
                 $or: [
@@ -306,7 +403,7 @@ exports.getAuditsByDate = async (req, res) => {
                     { createdBy: asesorId }
                 ]
             };
-            
+
             // Si ya hay un filtro $or existente (ej. por fecha), necesitamos usar $and
             if (filter.$or) {
                 const existingFilter = { ...filter };
@@ -320,8 +417,8 @@ exports.getAuditsByDate = async (req, res) => {
                 // Si no hay $or, simplemente agregamos el filtro de asesor
                 filter.$or = asesorFilter.$or;
             }
-        } else if (expRole === 'supervisor') {
-            /* Supervisores ven TODAS las auditorías
+        } else if (expRole === 'supervisor' || expRole === 'encargado') {
+            /* Supervisores/Encargados ven TODAS las auditorías
                El frontend ocultará teléfonos de otros grupos */
         }
 
@@ -419,7 +516,7 @@ exports.getAuditsByDate = async (req, res) => {
             /* Fallback de supervisor a partir de numeroEquipo */
             if (as && (!as.supervisor || !as.supervisor._id) && grupo) {
                 if (!supCache.has(String(grupo))) {
-                    const sup = await User.findOne({ role: 'supervisor', numeroEquipo: String(grupo) })
+                    const sup = await User.findOne({ role: { $in: ['supervisor', 'supervisor_reventa', 'encargado'] }, numeroEquipo: String(grupo) })
                         .select('nombre name email numeroEquipo')
                         .lean();
                     supCache.set(String(grupo), sup || null);
@@ -430,7 +527,8 @@ exports.getAuditsByDate = async (req, res) => {
                 }
             }
             /* Fallback de groupId a partir de numeroEquipo */
-            if (!a.groupId && grupo) {
+            // ✅ FIX: Solo aplicar fallback si NO hay supervisor asignado (para evitar reaparecer grupo cuando se asignó supervisor manual 'Eliana')
+            if (!a.groupId && grupo && (!a.supervisorSnapshot || !a.supervisorSnapshot.nombre)) {
                 a.groupId = { nombre: String(grupo) };
             }
         }));
@@ -474,7 +572,7 @@ exports.getAuditsByDate = async (req, res) => {
                             return true;
                         }
                     }
-                    
+
                     // ✅ FALLBACK: asesor.supervisor (supervisor del equipo)
                     const as = a.asesor;
                     if (as?.supervisor) {
@@ -486,7 +584,7 @@ exports.getAuditsByDate = async (req, res) => {
                             return true;
                         }
                     }
-                    
+
                     return false;
                 });
             }
@@ -680,9 +778,17 @@ exports.updateAudit = async (req, res) => {
         const updates = req.body;
 
         // Solo administrativo/auditor/supervisor/gerencia/RR.HH pueden editar
+        // ✅ RECUPERADOR: Acceso SOLO LECTURA - NO puede modificar auditorías
         const userRole = (req.user.role || '').toLowerCase();
         logger.info(`[updateAudit] Usuario: ${req.user.nombre}, Rol original: "${req.user.role}", Rol normalizado: "${userRole}"`);
-        if (!['administrativo', 'auditor', 'supervisor', 'gerencia', 'rr.hh'].includes(userRole)) {
+
+        // ✅ Bloquear actualizaciones de Recuperador (solo tiene acceso de lectura)
+        if (userRole === 'recuperador') {
+            logger.warn(`[updateAudit] Acceso denegado para Recuperador: "${req.user.nombre}" - Solo lectura`);
+            return res.status(403).json({ message: 'El rol Recuperador tiene acceso de solo lectura. No puede modificar auditorías.' });
+        }
+
+        if (!['administrativo', 'auditor', 'supervisor', 'gerencia', 'rr.hh', 'encargado', 'independiente'].includes(userRole)) {
             logger.warn(`[updateAudit] Acceso denegado para rol: "${userRole}"`);
             return res.status(403).json({ message: 'No autorizado' });
         }
@@ -707,6 +813,8 @@ exports.updateAudit = async (req, res) => {
                 // ✅ Solo asignar fechaCreacionQR automáticamente si NO viene del frontend
                 if (!updates.fechaCreacionQR) {
                     updates.fechaCreacionQR = new Date();
+                    // ✅ Marcar como asignación automática para el historial
+                    updates._fechaQRAutomatic = true;
                 }
                 logger.info(`Auditoría ${id} cambió a QR hecho. Fecha actualizada a: ${updates.scheduledAt}`);
             }
@@ -773,6 +881,16 @@ exports.updateAudit = async (req, res) => {
             };
         }
 
+        let adminHistoryEntry = null;
+        if ('administrador' in updates && updates.administrador !== oldAudit.administrador?.toString()) {
+            adminHistoryEntry = {
+                previousAdmin: oldAudit.administrador,
+                newAdmin: updates.administrador || null,
+                changedBy: req.user._id,
+                changedAt: new Date()
+            };
+        }
+
         // ✅ MANEJO DE SUPERVISOR (Manual vs Automático)
         // 1. Si viene 'supervisor' (ID manual), lo usamos para actualizar el snapshot
         if (updates.supervisor) {
@@ -789,37 +907,78 @@ exports.updateAudit = async (req, res) => {
             delete updates.supervisor;
         }
         // 2. Si NO viene supervisor manual, pero cambió el asesor o el grupo, recalculamos
-        else if (updates.asesor || updates.groupId || updates.numeroEquipo) {
-            // Necesitamos el asesor completo para el helper
-            const User = require('../models/User');
-            const { getSupervisorSnapshotForAudit } = require('../utils/supervisorHelper');
+        // ✅ FIX: Si el grupo se establece explícitamente a NULL (updates.numeroEquipo === null),
+        // significa que queremos "desvincular" del equipo y mantener el supervisor actual (manual).
+        // En ese caso, NO recalculamos el snapshot.
+        else if (updates.asesor || updates.groupId !== undefined || updates.numeroEquipo !== undefined) {
+            // Verificar si es referido (ya sea en updates o en oldAudit)
+            const isReferido = updates.isReferido !== undefined ? updates.isReferido : oldAudit.isReferido;
 
-            // Construir objeto temporal para el cálculo
-            const tempAudit = {
-                ...oldAudit.toObject(),
-                ...updates,
-                // Asegurar que groupId sea objeto o ID según lo que espera el helper
-                groupId: updates.groupId || oldAudit.groupId
-            };
+            // Si es referido, NO recalcular automáticamente por equipo (protege a Eliana Sanchez)
+            if (isReferido) {
+                const logger = require('../utils/logger');
+                logger.info(`[updateAudit] Audit ${id} es Referido. Omitiendo recálculo automático de supervisor por equipo.`);
+            }
+            // Si numeroEquipo viene como null explícito, NO recalcular snapshot
+            else if (updates.numeroEquipo === null || updates.groupId === null) {
+                const logger = require('../utils/logger');
+                logger.info(`[updateAudit] Grupo/Equipo establecido a NULL para audit ${id}. Manteniendo supervisor actual.`);
+            } else {
+                // Necesitamos el asesor completo para el helper
+                const User = require('../models/User');
+                const { getSupervisorSnapshotForAudit } = require('../utils/supervisorHelper');
 
-            let asesorObj = null;
-            if (updates.asesor) {
-                asesorObj = await User.findById(updates.asesor).lean();
-            } else if (oldAudit.asesor) {
-                asesorObj = await User.findById(oldAudit.asesor).lean();
+                // Construir objeto temporal para el cálculo
+                const tempAudit = {
+                    ...oldAudit.toObject(),
+                    ...updates,
+                    // Asegurar que groupId sea objeto o ID según lo que espera el helper
+                    groupId: updates.groupId || oldAudit.groupId
+                };
+
+                let asesorObj = null;
+                if (updates.asesor) {
+                    asesorObj = await User.findById(updates.asesor).lean();
+                } else if (oldAudit.asesor) {
+                    asesorObj = await User.findById(oldAudit.asesor).lean();
+                }
+
+                const snapshot = await getSupervisorSnapshotForAudit(tempAudit, asesorObj);
+                if (snapshot) {
+                    updates.supervisorSnapshot = snapshot;
+                }
+            }
+        }
+
+        // ✅ Registrar historial de fechaCreacionQR si cambió
+        let fechaQRHistoryEntry = null;
+        if ('fechaCreacionQR' in updates) {
+            const oldFechaQR = oldAudit.fechaCreacionQR ? new Date(oldAudit.fechaCreacionQR).toISOString() : null;
+            const newFechaQR = updates.fechaCreacionQR ? new Date(updates.fechaCreacionQR).toISOString() : null;
+
+            if (oldFechaQR !== newFechaQR) {
+                // Determinar si fue automático (por cambio a QR hecho) o manual
+                const isAutomatic = updates._fechaQRAutomatic === true;
+
+                fechaQRHistoryEntry = {
+                    value: updates.fechaCreacionQR ? new Date(updates.fechaCreacionQR) : null,
+                    updatedBy: req.user._id,
+                    updatedAt: new Date(),
+                    isAutomatic: isAutomatic
+                };
+
+                logger.info(`[updateAudit] Registrando historial de fechaCreacionQR para auditoría ${id}. Automático: ${isAutomatic}`);
             }
 
-            const snapshot = await getSupervisorSnapshotForAudit(tempAudit, asesorObj);
-            if (snapshot) {
-                updates.supervisorSnapshot = snapshot;
-            }
+            // Limpiar flag temporal
+            delete updates._fechaQRAutomatic;
         }
 
         const updateDoc = {};
         if (Object.keys(updates).length) {
             updateDoc.$set = updates;
         }
-        if (historyEntry || statusHistoryEntry || asesorHistoryEntry) {
+        if (historyEntry || statusHistoryEntry || asesorHistoryEntry || fechaQRHistoryEntry) {
             updateDoc.$push = {};
             if (historyEntry) {
                 updateDoc.$push.datosExtraHistory = historyEntry;
@@ -829,6 +988,12 @@ exports.updateAudit = async (req, res) => {
             }
             if (asesorHistoryEntry) {
                 updateDoc.$push.asesorHistory = asesorHistoryEntry;
+            }
+            if (fechaQRHistoryEntry) {
+                updateDoc.$push.fechaQRHistory = fechaQRHistoryEntry;
+            }
+            if (adminHistoryEntry) {
+                updateDoc.$push.administradorHistory = adminHistoryEntry;
             }
         }
 
@@ -848,11 +1013,20 @@ exports.updateAudit = async (req, res) => {
             await oldAudit.populate('groupId', 'nombre name');
             await oldAudit.populate('datosExtraHistory.updatedBy', 'nombre name username email role');
             await oldAudit.populate('statusHistory.updatedBy', 'nombre name username email role');
+            await oldAudit.populate('fechaQRHistory.updatedBy', 'nombre name username email role');
             await oldAudit.populate({
                 path: 'asesorHistory',
                 populate: [
                     { path: 'previousAsesor', select: 'nombre name' },
                     { path: 'newAsesor', select: 'nombre name' },
+                    { path: 'changedBy', select: 'nombre name' }
+                ]
+            });
+            await oldAudit.populate({
+                path: 'administradorHistory',
+                populate: [
+                    { path: 'previousAdmin', select: 'nombre name' },
+                    { path: 'newAdmin', select: 'nombre name' },
                     { path: 'changedBy', select: 'nombre name' }
                 ]
             });
@@ -881,11 +1055,20 @@ exports.updateAudit = async (req, res) => {
             .populate('groupId', 'nombre name')
             .populate('datosExtraHistory.updatedBy', 'nombre name username email role')
             .populate('statusHistory.updatedBy', 'nombre name username email role')
+            .populate('fechaQRHistory.updatedBy', 'nombre name username email role')
             .populate({
                 path: 'asesorHistory',
                 populate: [
                     { path: 'previousAsesor', select: 'nombre name' },
                     { path: 'newAsesor', select: 'nombre name' },
+                    { path: 'changedBy', select: 'nombre name' }
+                ]
+            })
+            .populate({
+                path: 'administradorHistory',
+                populate: [
+                    { path: 'previousAdmin', select: 'nombre name' },
+                    { path: 'newAdmin', select: 'nombre name' },
                     { path: 'changedBy', select: 'nombre name' }
                 ]
             });
@@ -1110,6 +1293,11 @@ exports.uploadMultimedia = async (req, res) => {
 exports.deleteAudit = async (req, res) => {
     const { id } = req.params;
 
+    // ⚠️ IMPORTANTE: rol "encargado" NUNCA puede borrar registros
+    if (req.user.role === 'encargado') {
+        return res.status(403).json({ message: 'No autorizado para eliminar auditorías' });
+    }
+
     const allowedRoles = ['admin', 'auditor', 'supervisor', 'gerencia', 'RR.HH', 'administrativo'];
     if (!allowedRoles.includes(req.user.role)) {
         return res.status(403).json({ message: 'No autorizado' });
@@ -1122,6 +1310,13 @@ exports.deleteAudit = async (req, res) => {
 
     if (!audit) {
         return res.status(404).json({ message: 'Auditoría no encontrada' });
+    }
+
+    // Verificar permisos: Solo Gerencia/Admin pueden eliminar
+    // Supervisores pueden eliminar de su equipo o creadas por ellos
+    // Encargado NO puede eliminar
+    if (req.user.role === 'encargado') {
+        return res.status(403).json({ message: 'Encargado no tiene permisos para eliminar auditorías' });
     }
 
     if (req.user.role === 'supervisor') {
@@ -1328,7 +1523,7 @@ exports.exportByDate = async (req, res) => {
             const grupo = as?.numeroEquipo;
             if ((!as?.supervisor?._id) && grupo) {
                 if (!supCache.has(String(grupo))) {
-                    const sup = await User.findOne({ role: 'supervisor', numeroEquipo: String(grupo) })
+                    const sup = await User.findOne({ role: { $in: ['supervisor', 'supervisor_reventa', 'encargado'] }, numeroEquipo: String(grupo) })
                         .select('nombre name email numeroEquipo')
                         .lean();
                     supCache.set(String(grupo), sup || null);
@@ -1406,7 +1601,7 @@ exports.getAuditsByDateRange = async (req, res) => {
 
         // ✅ Restricción por rol
         const rangeRole = (req.user?.role || '').toLowerCase();
-        if (rangeRole === 'supervisor') {
+        if (rangeRole === 'supervisor' || rangeRole === 'encargado') {
             // El frontend ocultará teléfonos de otros grupos
         } else if (rangeRole === 'asesor') {
             // Asesor: solo lo creado por él/ella
@@ -1599,7 +1794,7 @@ exports.bulkImportAudits = async (req, res) => {
         };
 
         const allUsers = await User.find({ active: { $ne: false } }).select('_id nombre email role numeroEquipo').lean();
-        
+
         const supervisorMap = new Map();
         const asesorMap = new Map();
         const adminMap = new Map();
@@ -1607,8 +1802,8 @@ exports.bulkImportAudits = async (req, res) => {
         allUsers.forEach(u => {
             const nombre = (u.nombre || '').toLowerCase().trim();
             const role = (u.role || '').toLowerCase();
-            
-            if (role === 'supervisor') {
+
+            if (role === 'supervisor' || role === 'supervisor_reventa' || role === 'encargado') {
                 supervisorMap.set(nombre, u);
             }
             if (role === 'asesor' || role === 'auditor') {
@@ -1620,7 +1815,7 @@ exports.bulkImportAudits = async (req, res) => {
         });
 
         const validStatuses = [
-            "QR hecho", "QR hecho (Temporal)", "QR hecho, pero pendiente de aprobación",
+            "QR hecho", "QR hecho (Temporal)", "QR hecho pero pendiente de aprobación",
             "Hacer QR", "Aprobada", "Pendiente", "Cargada", "Falta clave", "AFIP",
             "Rechazada", "Padrón", "Remuneración no válida", "Autovinculación",
             "En revisión", "Caída", "Completa"
@@ -1747,8 +1942,8 @@ exports.bulkImportAudits = async (req, res) => {
                     numeroEquipo: supervisorUser.numeroEquipo
                 };
             } else if (asesorUser && asesorUser.numeroEquipo) {
-                const sup = allUsers.find(u => 
-                    (u.role || '').toLowerCase() === 'supervisor' && 
+                const sup = allUsers.find(u =>
+                    ['supervisor', 'supervisor_reventa', 'encargado'].includes((u.role || '').toLowerCase()) &&
                     u.numeroEquipo === asesorUser.numeroEquipo
                 );
                 if (sup) {

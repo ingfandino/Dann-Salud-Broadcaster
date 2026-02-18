@@ -67,7 +67,7 @@ exports.list = async (req, res) => {
                 // Buscar el usuario con rol "supervisor" que tenga el mismo numeroEquipo
                 const supervisor = await User.findOne({
                     numeroEquipo: audit.asesor.numeroEquipo,
-                    role: 'supervisor',
+                    role: { $in: ['supervisor', 'supervisor_reventa', 'encargado'] },
                     active: true
                 }).select('nombre name email numeroEquipo').lean();
 

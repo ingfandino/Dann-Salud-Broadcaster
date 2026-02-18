@@ -33,10 +33,12 @@ import { AuditoriasRechazada } from "./auditorias-rechazada"
 import { AuditoriasPendiente } from "./auditorias-pendiente"
 import { AuditoriasAfipPadron } from "./auditorias-afip-padron"
 import { RRHHEstadisticas } from "./rrhh-estadisticas"
+import { RRHHBajoRendimiento } from "./rrhh-bajo-rendimiento"
 import { RRHHActivos } from "./rrhh-activos"
 import { RRHHInactivos } from "./rrhh-inactivos"
 import { RRHHAgregar } from "./rrhh-agregar"
 import { RRHHTelefonos } from "./rrhh-telefonos"
+import { RRHHBajasLiquidaciones } from "./rrhh-bajas-liquidaciones"
 import { GestionUsuarios } from "./gestion-usuarios"
 import { RegistroVentas } from "./registro-ventas"
 import { FreshData } from "./fresh-data"
@@ -46,6 +48,7 @@ import { FailedAffiliations } from "./failed-affiliations"
 import { ContactarAdministracion } from "./contactar-administracion"
 import { ContactarDatosDia } from "./contactar-datos-dia"
 import { useAuth } from "@/lib/auth"
+import { Evidencias } from "./evidencias"
 import { api } from "@/lib/api"
 import { useSocket } from "@/lib/socket"
 
@@ -85,12 +88,15 @@ const sectionTitles: Record<string, string> = {
   "auditorias-afip-padron": "AFIP y Padrón",
   "recursos-humanos": "Recursos Humanos",
   "rrhh-estadisticas": "Estadísticas de Empleados",
+  "rrhh-bajo-rendimiento": "Bajo Rendimiento",
   "rrhh-activos": "Personal Activo",
+  "rrhh-bajas-liquidaciones": "Bajas y Liquidaciones",
   "rrhh-inactivos": "Personal Inactivo",
   "rrhh-agregar": "Añadir Empleado",
   "rrhh-telefonos": "Teléfonos Corporativos",
   "administracion": "Administración",
   "administracion-registro-ventas": "Registro de Ventas",
+  "administracion-evidencias": "Evidencias",
   "gestion-usuarios": "Gestión de Usuarios",
 }
 
@@ -208,8 +214,8 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
       // Acceso: asesor, supervisor, gerencia, auditor con equipo
       const role = user?.role?.toLowerCase()
       const hasTeam = !!user?.numeroEquipo
-      const canAccess = role === 'asesor' || role === 'gerencia' || role === 'supervisor' || 
-                        (role === 'auditor' && hasTeam)
+      const canAccess = role === 'asesor' || role === 'gerencia' || role === 'supervisor' ||
+        (role === 'auditor' && hasTeam)
       if (!canAccess) {
         return (
           <div className="flex flex-col items-center justify-center h-64 text-center">
@@ -246,13 +252,13 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
     }
 
     if (activeSection === "auditorias-falta-clave") {
-      // Acceso: Gerencia y Recuperador
+      // Acceso: Gerencia, Recuperador y Encargado
       const role = user?.role?.toLowerCase()
-      if (role !== 'gerencia' && role !== 'recuperador') {
+      if (role !== 'gerencia' && role !== 'recuperador' && role !== 'encargado') {
         return (
           <div className="flex flex-col items-center justify-center h-64 text-center">
             <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
-            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia y Recuperadores.</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia, Recuperadores y Encargados.</p>
           </div>
         )
       }
@@ -260,13 +266,13 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
     }
 
     if (activeSection === "auditorias-rechazada") {
-      // Acceso: Gerencia y Recuperador
+      // Acceso: Gerencia, Recuperador y Encargado
       const role = user?.role?.toLowerCase()
-      if (role !== 'gerencia' && role !== 'recuperador') {
+      if (role !== 'gerencia' && role !== 'recuperador' && role !== 'encargado') {
         return (
           <div className="flex flex-col items-center justify-center h-64 text-center">
             <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
-            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia y Recuperadores.</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia, Recuperadores y Encargados.</p>
           </div>
         )
       }
@@ -274,13 +280,13 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
     }
 
     if (activeSection === "auditorias-pendiente") {
-      // Acceso: Gerencia y Recuperador
+      // Acceso: Gerencia, Recuperador y Encargado
       const role = user?.role?.toLowerCase()
-      if (role !== 'gerencia' && role !== 'recuperador') {
+      if (role !== 'gerencia' && role !== 'recuperador' && role !== 'encargado') {
         return (
           <div className="flex flex-col items-center justify-center h-64 text-center">
             <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
-            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia y Recuperadores.</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia, Recuperadores y Encargados.</p>
           </div>
         )
       }
@@ -288,13 +294,13 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
     }
 
     if (activeSection === "auditorias-afip-padron") {
-      // Acceso: Gerencia y Recuperador
+      // Acceso: Gerencia, Recuperador y Encargado
       const role = user?.role?.toLowerCase()
-      if (role !== 'gerencia' && role !== 'recuperador') {
+      if (role !== 'gerencia' && role !== 'recuperador' && role !== 'encargado') {
         return (
           <div className="flex flex-col items-center justify-center h-64 text-center">
             <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
-            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia y Recuperadores.</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia, Recuperadores y Encargados.</p>
           </div>
         )
       }
@@ -305,8 +311,36 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
       return <RRHHEstadisticas />
     }
 
+    if (activeSection === "rrhh-bajo-rendimiento") {
+      // Acceso: solo Gerencia
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia.</p>
+          </div>
+        )
+      }
+      return <RRHHBajoRendimiento />
+    }
+
     if (activeSection === "rrhh-activos") {
       return <RRHHActivos />
+    }
+
+    if (activeSection === "rrhh-bajas-liquidaciones") {
+      // Acceso: solo Gerencia
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia.</p>
+          </div>
+        )
+      }
+      return <RRHHBajasLiquidaciones />
     }
 
     if (activeSection === "rrhh-inactivos") {
@@ -318,13 +352,13 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
     }
 
     if (activeSection === "rrhh-telefonos") {
-      // Acceso: solo Supervisor y Gerencia
+      // Acceso: Supervisor, Gerencia y Encargado
       const role = user?.role?.toLowerCase()
-      if (role !== 'supervisor' && role !== 'gerencia') {
+      if (role !== 'supervisor' && role !== 'gerencia' && role !== 'encargado') {
         return (
           <div className="flex flex-col items-center justify-center h-64 text-center">
             <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
-            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Supervisores y Gerencia.</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Supervisores, Gerencia y Encargados.</p>
           </div>
         )
       }
@@ -346,6 +380,19 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
         )
       }
       return <RegistroVentas />
+    }
+
+    if (activeSection === "administracion-evidencias") {
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia' && role !== 'administrativo') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia y Administrativos.</p>
+          </div>
+        )
+      }
+      return <Evidencias />
     }
 
     if (safeActiveSection.startsWith("base-afiliados")) {

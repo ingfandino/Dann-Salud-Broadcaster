@@ -41,6 +41,7 @@ interface Employee {
   fechaIngreso: string
   fechaBaja?: string
   motivoBaja?: string
+  motivoBajaNormalizado?: string | null
   cargo: string
   numeroEquipo: string
   firmoContrato: boolean
@@ -61,10 +62,17 @@ const cargoColors: Record<string, string> = {
 export function RRHHInactivos() {
   const { theme } = useTheme()
   const { user } = useAuth()
-  const canEdit = ['rrhh', 'rr.hh', 'gerencia'].includes(user?.role?.toLowerCase() || '');
+  const userRole = user?.role?.toLowerCase() || '';
+  const isGerencia = userRole === 'gerencia';
+  const isRRHH = userRole === 'rr.hh' || userRole === 'rrhh';
+  const isSupervisorRole = userRole === 'supervisor';
+  // ✅ Supervisor puede editar (pero NO borrar)
+  const canEdit = isGerencia || isRRHH || isSupervisorRole;
+  // ✅ Solo Gerencia y RR.HH pueden borrar
+  const canDelete = isGerencia || isRRHH;
   
   // Detectar si es supervisor para filtrar por equipo
-  const isSupervisor = ['supervisor', 'supervisor_reventa'].includes(user?.role?.toLowerCase() || '');
+  const isSupervisor = ['supervisor', 'supervisor_reventa'].includes(userRole);
   const myNumeroEquipo = user?.numeroEquipo ? String(user.numeroEquipo) : null;
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
@@ -117,7 +125,8 @@ export function RRHHInactivos() {
       firmoContrato: empleado.firmoContrato,
       activo: empleado.activo,
       notas: empleado.notas,
-      motivoBaja: empleado.motivoBaja
+      motivoBaja: empleado.motivoBaja,
+      motivoBajaNormalizado: empleado.motivoBajaNormalizado || null
     })
     setEditModalOpen(true)
   }
@@ -444,15 +453,17 @@ export function RRHHInactivos() {
                               >
                                 <RefreshCw className="w-4 h-4" />
                               </button>
-
-                              <button
-                                onClick={() => handleDelete(emp._id)}
-                                className="p-1 rounded hover:bg-red-500/10 text-red-400 hover:text-red-500 transition-colors"
-                                title="Eliminar Definitivamente"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
                             </>
+                          )}
+                          {/* ✅ Solo Gerencia y RR.HH pueden borrar (Supervisor NO) */}
+                          {canDelete && (
+                            <button
+                              onClick={() => handleDelete(emp._id)}
+                              className="p-1 rounded hover:bg-red-500/10 text-red-400 hover:text-red-500 transition-colors"
+                              title="Eliminar Definitivamente"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           )}
                         </div>
                       </td>
@@ -628,18 +639,35 @@ export function RRHHInactivos() {
                   >
                     Motivo de Baja
                   </label>
-                  <textarea
-                    rows={2}
-                    value={editForm.motivoBaja || ""}
-                    onChange={(e) => setEditForm({ ...editForm, motivoBaja: e.target.value })}
-                    className={cn(
-                      "w-full px-3 py-2 rounded-lg border text-sm resize-none",
-                      theme === "dark"
-                        ? "bg-white/5 border-white/10 text-white placeholder-gray-500"
-                        : "bg-white border-gray-200 text-gray-800 placeholder-gray-400",
-                    )}
-                    placeholder="Razón de la baja..."
-                  />
+                  {isGerencia ? (
+                    <select
+                      value={editForm.motivoBajaNormalizado || ''}
+                      onChange={(e) => setEditForm({ ...editForm, motivoBajaNormalizado: e.target.value || null })}
+                      className={cn(
+                        "w-full px-3 py-2 rounded-lg border text-sm",
+                        theme === "dark"
+                          ? "bg-white/5 border-white/10 text-white"
+                          : "bg-white border-gray-200 text-gray-800",
+                      )}
+                    >
+                      <option value="">Sin asignar</option>
+                      <option value="Renuncia">Renuncia</option>
+                      <option value="Despido por bajo rendimiento">Despido por bajo rendimiento</option>
+                      <option value="Despido por inasistencias">Despido por inasistencias</option>
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={editForm.motivoBajaNormalizado || 'Pendiente de normalización'}
+                      disabled
+                      className={cn(
+                        "w-full px-3 py-2 rounded-lg border text-sm",
+                        theme === "dark"
+                          ? "bg-white/10 border-white/10 text-gray-400"
+                          : "bg-gray-100 border-gray-200 text-gray-500",
+                      )}
+                    />
+                  )}
                 </div>
 
                 {/* Foto de DNI */}

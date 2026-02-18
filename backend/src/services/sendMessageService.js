@@ -10,6 +10,8 @@ const SendConfig = require("../models/SendConfig");
 const Message = require("../models/Message");
 const SendJob = require("../models/SendJob");
 const Contact = require("../models/Contact");
+const Affiliate = require("../models/Affiliate");
+const LeadAssignment = require("../models/LeadAssignment");
 const { getOrInitClient, isReady, sendMessage, USE_MULTI, USE_BAILEYS } = require("./whatsappUnified");
 const { emitJobProgress } = require("../config/socket");
 const { addLog } = require("../services/logService");
@@ -107,6 +109,81 @@ async function getConfig() {
         await config.save();
     }
     return config;
+}
+
+/**
+ * Marca un teléfono como Spam en Affiliate y LeadAssignment.
+ * Se invoca cuando se detecta que un número no tiene WhatsApp.
+ * 
+ * @param {string} phone - Teléfono a marcar (formato original o normalizado)
+ * @param {string} reason - Razón del spam (ej: 'Sin WhatsApp')
+ */
+async function markPhoneAsSpam(phone, reason) {
+    try {
+        // Normalizar el teléfono para búsqueda
+        const normalizedPhone = String(phone).replace(/\D/g, "");
+        const phoneVariants = [
+            normalizedPhone,
+            normalizedPhone.replace(/^549/, ""), // Sin prefijo país
+            normalizedPhone.replace(/^54/, ""),  // Sin prefijo
+        ].filter(p => p.length >= 8); // Solo variantes válidas
+
+        // Buscar affiliates con este teléfono en cualquiera de los campos
+        const affiliates = await Affiliate.find({
+            $or: phoneVariants.flatMap(variant => [
+                { telefono1: { $regex: variant, $options: "i" } },
+                { telefono2: { $regex: variant, $options: "i" } },
+                { telefono3: { $regex: variant, $options: "i" } },
+                { telefono4: { $regex: variant, $options: "i" } },
+                { telefono5: { $regex: variant, $options: "i" } },
+            ])
+        });
+
+        if (affiliates.length === 0) {
+            logger.debug(`[markPhoneAsSpam] No se encontraron affiliates para teléfono ${phone}`);
+            return;
+        }
+
+        for (const affiliate of affiliates) {
+            // Marcar affiliate como fallido y sin WhatsApp
+            affiliate.leadStatus = 'Fallido';
+            affiliate.noWhatsApp = true;
+            await affiliate.save();
+
+            // Buscar y marcar LeadAssignment activos
+            const updatedAssignments = await LeadAssignment.updateMany(
+                { affiliate: affiliate._id, active: true, status: { $ne: 'Spam' } },
+                {
+                    $set: {
+                        status: 'Spam',
+                        subStatus: reason
+                    },
+                    $push: {
+                        interactions: {
+                            type: 'Cambio Estado',
+                            note: `Marcado automáticamente: ${reason}`,
+                            timestamp: new Date()
+                        }
+                    }
+                }
+            );
+
+            if (updatedAssignments.modifiedCount > 0) {
+                logger.info(`📛 Affiliate ${affiliate._id} y ${updatedAssignments.modifiedCount} asignación(es) marcados como Spam: ${reason}`);
+            } else {
+                logger.info(`📛 Affiliate ${affiliate._id} marcado como Fallido/noWhatsApp (sin asignaciones activas)`);
+            }
+        }
+
+        await addLog({
+            tipo: "info",
+            mensaje: `Teléfono ${phone} marcado como Spam en ${affiliates.length} affiliate(s)`,
+            metadata: { phone, reason, affiliateCount: affiliates.length }
+        });
+
+    } catch (error) {
+        logger.error(`[markPhoneAsSpam] Error marcando teléfono ${phone}:`, error.message);
+    }
 }
 
 async function processJob(jobId) {
@@ -387,10 +464,13 @@ async function processJob(jobId) {
                     // 🚨 FAIL FAST: Si el número no existe o no tiene WhatsApp, NO reintentar
                     if (errMsg.includes("not-authorized") || errMsg.includes("no exists") || errMsg.includes("invalid jid")) {
                         logger.warn(`🛑 FAIL FAST: Número inválido detectado (${contact.telefono}). Abortando reintentos.`);
-                        
+
                         await Contact.findByIdAndUpdate(contact._id, { noWhatsApp: true });
                         logger.info(`📛 Contacto ${contact.telefono} marcado como noWhatsApp=true`);
-                        
+
+                        // Propagar estado Spam a Affiliate y LeadAssignment
+                        await markPhoneAsSpam(contact.telefono, 'Sin WhatsApp');
+
                         await addLog({
                             tipo: "warning",
                             mensaje: `Envío abortado: Número inválido o sin WhatsApp (${contact.telefono})`,
@@ -442,7 +522,7 @@ async function processJob(jobId) {
                     timestamp: new Date(),
                 });
                 await newMsg.save();
-                
+
                 await Contact.findByIdAndUpdate(contact._id, { massMessagedAt: new Date() });
                 logger.info(`✅ Enviado a ${contact.telefono} (marcado massMessagedAt)`);
                 wasSent = true;

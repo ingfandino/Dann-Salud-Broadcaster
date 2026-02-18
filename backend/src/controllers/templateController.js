@@ -45,7 +45,7 @@ exports.getTemplates = async (req, res) => {
         let filter = {};
         if (["admin","gerencia"].includes(role)) {
             filter = {};
-        } else if (role === "supervisor") {
+        } else if (role === "supervisor" || role === "encargado") {
             // ver plantillas de todos los usuarios de su equipo (mismo numeroEquipo)
             const teamUsers = await User.find({ numeroEquipo: equipo }).select("_id");
             const gerencias = await User.find({ role: "gerencia" }).select("_id");
@@ -58,7 +58,7 @@ exports.getTemplates = async (req, res) => {
             filter = { createdBy: { $in: allowed } };
         } else if (role === "asesor" || role === "auditor") {
             // ✅ ver propias + de supervisores del mismo equipo + gerencia + admin
-            const supervisors = await User.find({ role: "supervisor", numeroEquipo: equipo }).select("_id");
+            const supervisors = await User.find({ role: { $in: ["supervisor", "supervisor_reventa", "encargado"] }, numeroEquipo: equipo }).select("_id");
             const gerencias = await User.find({ role: "gerencia" }).select("_id");
             const admins = await User.find({ role: "administrativo" }).select("_id");
             const allowed = [
@@ -107,8 +107,8 @@ exports.updateTemplate = async (req, res) => {
         // Verificar si puede editar según la misma lógica de visibilidad
         let canEdit = isOwner || isPrivileged;
         
-        if (!canEdit && (role === "supervisor" || role === "supervisor_reventa")) {
-            // Supervisores pueden editar plantillas de su equipo + gerencia + admin
+        if (!canEdit && (role === "supervisor" || role === "supervisor_reventa" || role === "encargado")) {
+            // Supervisores/Encargados pueden editar plantillas de su equipo + gerencia + admin
             const creatorRole = String(tpl.createdBy?.role || '').toLowerCase();
             const creatorEquipo = tpl.createdBy?.numeroEquipo;
             canEdit = creatorEquipo === equipo || ["gerencia", "admin", "administrativo"].includes(creatorRole);
@@ -118,7 +118,7 @@ exports.updateTemplate = async (req, res) => {
             // Asesores pueden editar plantillas propias + de supervisores de su equipo + gerencia + admin
             const creatorRole = String(tpl.createdBy?.role || '').toLowerCase();
             const creatorEquipo = tpl.createdBy?.numeroEquipo;
-            const isSupervisorDelEquipo = (creatorRole === "supervisor" || creatorRole === "supervisor_reventa") && creatorEquipo === equipo;
+            const isSupervisorDelEquipo = ["supervisor", "supervisor_reventa", "encargado"].includes(creatorRole) && creatorEquipo === equipo;
             const isGerenciaOrAdmin = ["gerencia", "admin", "administrativo"].includes(creatorRole);
             canEdit = isSupervisorDelEquipo || isGerenciaOrAdmin;
         }
@@ -148,8 +148,8 @@ exports.deleteTemplate = async (req, res) => {
         // Verificar si puede eliminar según la misma lógica de visibilidad
         let canDelete = isOwner || isPrivileged;
         
-        if (!canDelete && (role === "supervisor" || role === "supervisor_reventa")) {
-            // Supervisores pueden eliminar plantillas de su equipo + gerencia + admin
+        if (!canDelete && (role === "supervisor" || role === "supervisor_reventa" || role === "encargado")) {
+            // Supervisores/Encargados pueden eliminar plantillas de su equipo + gerencia + admin
             const creatorRole = String(tpl.createdBy?.role || '').toLowerCase();
             const creatorEquipo = tpl.createdBy?.numeroEquipo;
             canDelete = creatorEquipo === equipo || ["gerencia", "admin", "administrativo"].includes(creatorRole);
@@ -159,7 +159,7 @@ exports.deleteTemplate = async (req, res) => {
             // Asesores pueden eliminar plantillas propias + de supervisores de su equipo + gerencia + admin
             const creatorRole = String(tpl.createdBy?.role || '').toLowerCase();
             const creatorEquipo = tpl.createdBy?.numeroEquipo;
-            const isSupervisorDelEquipo = (creatorRole === "supervisor" || creatorRole === "supervisor_reventa") && creatorEquipo === equipo;
+            const isSupervisorDelEquipo = ["supervisor", "supervisor_reventa", "encargado"].includes(creatorRole) && creatorEquipo === equipo;
             const isGerenciaOrAdmin = ["gerencia", "admin", "administrativo"].includes(creatorRole);
             canDelete = isSupervisorDelEquipo || isGerenciaOrAdmin;
         }

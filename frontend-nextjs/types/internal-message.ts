@@ -16,6 +16,7 @@ export interface InternalMessage {
     };
     subject: string;
     content: string;
+    isHtml?: boolean;
     attachments: {
         _id: string;
         filename: string;

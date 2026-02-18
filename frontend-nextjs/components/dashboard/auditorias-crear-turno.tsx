@@ -76,12 +76,19 @@ export function AuditoriasCrearTurno() {
 
   const userRole = user?.role?.toLowerCase() || ""
   const isSupervisor = userRole === "supervisor"
-  
+  const isRecuperador = userRole === "recuperador"
+  const isEncargado = userRole === "encargado" // ✅ NUEVO: Rol Encargado
+  const isIndependiente = userRole === "independiente" // ✅ NUEVO: Rol Independiente
+
   // Un auditor CON numeroEquipo es realmente un asesor que también hace auditorías
   // Un auditor SIN numeroEquipo actúa como gerencia (puede ver todos los equipos)
   const isAuditorConEquipo = userRole === "auditor" && !!user?.numeroEquipo
-  const isAsesor = userRole === "asesor" || isAuditorConEquipo
+  const isAsesor = userRole === "asesor" || isAuditorConEquipo || isRecuperador || isIndependiente // Independiente se comporta como asesor (autoasigna)
   const isGerenciaOrAuditorSinEquipo = userRole === "gerencia" || (userRole === "auditor" && !user?.numeroEquipo)
+  
+  // ✅ Encargado con numeroEquipo se comporta como supervisor de su equipo
+  const isEncargadoConEquipo = isEncargado && !!user?.numeroEquipo
+  const isSupervisorLevel = isSupervisor || isEncargadoConEquipo
 
   // Form State
   const [form, setForm] = useState({
@@ -108,6 +115,9 @@ export function AuditoriasCrearTurno() {
   const [perteneceOtroSupervisor, setPerteneceOtroSupervisor] = useState(false)
   const [supervisorSeleccionado, setSupervisorSeleccionado] = useState("")
 
+  // Estado para "Venta propia" de Supervisores
+  const [ventaPropia, setVentaPropia] = useState(false)
+
   // Loading states
   const [loading, setLoading] = useState(false)
   const [loadingSlots, setLoadingSlots] = useState(false)
@@ -117,12 +127,69 @@ export function AuditoriasCrearTurno() {
   const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 })
   const [rejectedRows, setRejectedRows] = useState<any[]>([])
 
-  // Load supervisors (para Gerencia, Auditor sin equipo, o Supervisor con checkbox activo)
+  // Estado para Eliana Suarez (usada por Recuperador y Supervisor con venta propia)
+  const [elianaSuarez, setElianaSuarez] = useState<any>(null)
+
+  // Load supervisors (para Gerencia, Auditor sin equipo, Supervisor, Recuperador o Encargado)
   useEffect(() => {
-    if (isGerenciaOrAuditorSinEquipo || isSupervisor) {
+    if (isGerenciaOrAuditorSinEquipo || isSupervisor || isRecuperador || isEncargado) {
       loadSupervisores()
     }
-  }, [isGerenciaOrAuditorSinEquipo, isSupervisor])
+  }, [isGerenciaOrAuditorSinEquipo, isSupervisor, isRecuperador, isEncargado])
+
+  // Efecto para manejar "Venta propia" de Supervisores y Encargados
+  useEffect(() => {
+    if ((isSupervisor || isEncargado) && ventaPropia) {
+      // Autoseleccionar al supervisor como asesor
+      if (user?._id) {
+        setForm(prev => ({ ...prev, asesor: user._id }))
+        console.log('Supervisor Venta Propia: Asesor autoasignado:', user.nombre)
+      }
+      // Asignar Eliana Suarez como supervisor si ya está cargada
+      if (elianaSuarez) {
+        setForm(prev => ({ ...prev, supervisor: elianaSuarez._id }))
+        console.log('Supervisor Venta Propia: Supervisor asignado - Eliana Suarez')
+      }
+    } else if ((isSupervisor || isEncargado) && !ventaPropia) {
+      // Limpiar asesor y supervisor cuando se desactiva
+      setForm(prev => ({ ...prev, asesor: '', supervisor: '' }))
+    }
+  }, [ventaPropia, isSupervisor, isEncargado, user, elianaSuarez])
+
+  // ✅ Efecto para Independiente: auto-asignar asesor y cargar Eliana Suarez como supervisor
+  useEffect(() => {
+    if (isIndependiente) {
+      // Auto-asignar como asesor
+      if (user?._id) {
+        setForm(prev => ({ ...prev, asesor: user._id }))
+        console.log('Independiente: Asesor autoasignado:', user.nombre)
+      }
+      // Cargar Eliana Suarez como supervisor
+      loadElianaSuarezForIndependiente()
+    }
+  }, [isIndependiente, user])
+
+  // Función para cargar Eliana Suarez para Independiente
+  const loadElianaSuarezForIndependiente = async () => {
+    try {
+      const res = await api.users.list()
+      const eliana = res.data.find((u: any) => 
+        u.role?.toLowerCase() === 'gerencia' && 
+        u.nombre?.toLowerCase().includes('eliana') &&
+        (u.nombre?.toLowerCase().includes('suarez') || u.nombre?.toLowerCase().includes('suárez'))
+      )
+      if (eliana) {
+        setElianaSuarez(eliana)
+        setForm(prev => ({ ...prev, supervisor: eliana._id }))
+        console.log('Independiente: Supervisor asignado - Eliana Suarez')
+      } else {
+        toast.error('No se pudo encontrar a Eliana Suarez (Gerencia) en el sistema')
+      }
+    } catch (error) {
+      console.error('Error cargando Eliana Suarez para Independiente:', error)
+      toast.error('Error al cargar supervisor automático')
+    }
+  }
 
   // Load asesores when supervisor changes (para Gerencia/Auditor sin equipo)
   // Para supervisores, cargar asesores de su equipo o del supervisor seleccionado
@@ -141,13 +208,14 @@ export function AuditoriasCrearTurno() {
 
   // Load validadores
   useEffect(() => {
-    console.log('Validadores useEffect triggered:', { 
-      otroEquipo, 
-      asesor: form.asesor, 
-      user: user?.nombre, 
-      numeroEquipo: user?.numeroEquipo, 
+    console.log('Validadores useEffect triggered:', {
+      otroEquipo,
+      asesor: form.asesor,
+      user: user?.nombre,
+      numeroEquipo: user?.numeroEquipo,
       isSupervisor,
       isAsesor,
+      isRecuperador,
       isGerenciaOrAuditorSinEquipo,
       perteneceOtroSupervisor,
       supervisorSeleccionado
@@ -156,10 +224,35 @@ export function AuditoriasCrearTurno() {
       loadTodosLosValidadores()
     } else if (isSupervisor && perteneceOtroSupervisor && supervisorSeleccionado) {
       loadValidadoresPorSupervisor(supervisorSeleccionado)
+    } else if (isRecuperador && elianaSuarez) {
+      // Recuperador: cargar validadores del equipo de Eliana Suarez
+      loadValidadoresPorSupervisor(elianaSuarez._id)
     } else {
       loadValidadores()
     }
-  }, [otroEquipo, form.asesor, form.supervisor, user, isSupervisor, isAsesor, isGerenciaOrAuditorSinEquipo, perteneceOtroSupervisor, supervisorSeleccionado, supervisores])
+  }, [otroEquipo, form.asesor, form.supervisor, user, isSupervisor, isAsesor, isRecuperador, isGerenciaOrAuditorSinEquipo, perteneceOtroSupervisor, supervisorSeleccionado, supervisores, elianaSuarez])
+
+  // Para Recuperador: preseleccionar validador por defecto (Eliana Suarez o usuario de sesión)
+  useEffect(() => {
+    if (isRecuperador && validadores.length > 0 && !form.validador) {
+      // Intentar preseleccionar a Eliana Suarez como validador
+      const elianaValidador = validadores.find((v: any) =>
+        v.nombre?.toLowerCase().includes('eliana') &&
+        v.nombre?.toLowerCase().includes('suarez')
+      )
+      if (elianaValidador) {
+        setForm(prev => ({ ...prev, validador: elianaValidador._id }))
+        console.log('Recuperador: Validador preseleccionado - Eliana Suarez')
+      } else if (user?._id) {
+        // Si no está Eliana, preseleccionar al usuario de sesión si está en la lista
+        const usuarioEnLista = validadores.find((v: any) => v._id === user._id)
+        if (usuarioEnLista) {
+          setForm(prev => ({ ...prev, validador: user._id }))
+          console.log('Recuperador: Validador preseleccionado - Usuario de sesión')
+        }
+      }
+    }
+  }, [isRecuperador, validadores, user])
 
   // Load available slots when date changes
   useEffect(() => {
@@ -195,9 +288,30 @@ export function AuditoriasCrearTurno() {
       // Usar includeAllAuditors=true para obtener todos los usuarios sin filtro por equipo
       const { data } = await api.users.list("includeAllAuditors=true")
       const users = Array.isArray(data) ? data : []
-      const sups = users.filter((u: any) => u.role?.toLowerCase() === "supervisor" && u.active !== false)
+      const sups = users.filter((u: any) => (u.role?.toLowerCase() === "supervisor" || u.role?.toLowerCase() === "encargado") && u.active !== false)
       console.log('loadSupervisores:', sups.length, 'supervisores encontrados')
       setSupervisores(sups)
+
+      // Buscar a Eliana Suarez (usada por Recuperador y Supervisor con venta propia)
+      // ✅ FIX: Buscar en supervisores O gerencia (Eliana tiene rol gerencia)
+      const eliana = users.find((s: any) =>
+        (s.role?.toLowerCase() === 'supervisor' || s.role?.toLowerCase() === 'gerencia') &&
+        s.active !== false &&
+        s.nombre?.toLowerCase().includes('eliana') &&
+        s.nombre?.toLowerCase().includes('suarez')
+      )
+      if (eliana) {
+        setElianaSuarez(eliana)
+        console.log('Eliana Suarez encontrada:', eliana.nombre)
+
+        // Para Recuperador: preseleccionar automáticamente
+        if (isRecuperador) {
+          setForm(prev => ({ ...prev, supervisor: eliana._id }))
+          console.log('Recuperador: Supervisor preseleccionado - Eliana Suarez')
+        }
+      } else {
+        console.warn('No se encontró a Eliana Suarez en la lista de supervisores')
+      }
     } catch (err) {
       console.error(err)
     }
@@ -214,12 +328,26 @@ export function AuditoriasCrearTurno() {
       const filtered = users.filter((u: any) => {
         const isActive = u.active !== false
         const hasName = u.nombre && u.nombre.trim().length > 0
-        const isCorrectRole = ["asesor", "auditor", "supervisor"].includes(u.role?.toLowerCase())
-        // If supervisor, filter by own team. If not supervisor, backend 'scope=group' might have already filtered, 
+        const isCorrectRole = ["asesor", "auditor", "supervisor", "encargado"].includes(u.role?.toLowerCase())
+        // If supervisor or encargado, filter by own team. If not supervisor, backend 'scope=group' might have already filtered, 
         // but we double check if we have the info.
-        const sameTeam = !isSupervisor || !myNumeroEquipo || String(u.numeroEquipo) === String(myNumeroEquipo)
+        const sameTeam = !isSupervisorLevel || !myNumeroEquipo || String(u.numeroEquipo) === String(myNumeroEquipo)
         return isActive && hasName && isCorrectRole && sameTeam
       }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
+
+      // Si es supervisor o encargado, asegurarse de que esté incluido en la lista
+      if (isSupervisorLevel && user) {
+        const supervisorYaIncluido = filtered.some((u: any) => u._id === user._id)
+        if (!supervisorYaIncluido) {
+          // Agregar al supervisor/encargado actual al inicio de la lista
+          filtered.unshift({
+            _id: user._id,
+            nombre: user.nombre || user.email,
+            role: user.role,
+            numeroEquipo: user.numeroEquipo
+          })
+        }
+      }
 
       setAsesores(filtered)
     } catch (err) {
@@ -287,6 +415,18 @@ export function AuditoriasCrearTurno() {
         const notAsesor = !form.asesor || u._id !== form.asesor
         return isActive && hasName && sameTeam && notAsesor
       }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
+
+      // ✅ CRÍTICO: Para Recuperador, incluir al usuario de sesión en la lista de validadores
+      if (isRecuperador && user && !filtered.some((v: any) => v._id === user._id)) {
+        filtered.push({
+          _id: user._id,
+          nombre: user.nombre || user.email,
+          role: user.role,
+          numeroEquipo: user.numeroEquipo
+        })
+        console.log('Recuperador: Usuario de sesión agregado a validadores:', user.nombre)
+      }
+
       setValidadores(filtered)
     } catch (err) {
       console.error(err)
@@ -339,17 +479,17 @@ export function AuditoriasCrearTurno() {
       const filtered = users.filter((u: any) => {
         const isActive = u.active !== false
         const hasName = u.nombre && u.nombre.trim().length > 0
-        
+
         // Comparar numeroEquipo con conversión a String para evitar problemas de tipo
         const userEquipo = u.numeroEquipo ? String(u.numeroEquipo) : null
         const targetEquipo = targetNumeroEquipo ? String(targetNumeroEquipo) : null
         const sameTeam = userEquipo === targetEquipo
-        
+
         // Para asesores (isAsesor), excluir a sí mismos (son el asesor implícito de la venta)
         // Para otros roles, excluir al asesor seleccionado en el form
         const asesorIdToExclude = isAsesor ? user?._id : form.asesor
         const notAsesor = !asesorIdToExclude || u._id !== asesorIdToExclude
-        
+
         return isActive && hasName && sameTeam && notAsesor
       }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
 
@@ -366,7 +506,7 @@ export function AuditoriasCrearTurno() {
       // Usar includeAllAuditors=true para que el backend devuelva todos los usuarios
       const { data } = await api.users.list("includeAllAuditors=true")
       const users = Array.isArray(data) ? data : []
-      
+
       console.log('loadTodosLosValidadores: API devuelve', users.length, 'usuarios')
 
       const filtered = users.filter((u: any) => {
@@ -374,12 +514,12 @@ export function AuditoriasCrearTurno() {
         const hasName = u.nombre && u.nombre.trim().length > 0
         // Solo roles que pueden validar: Supervisor, Asesor, Auditor o Gerencia
         const isCorrectRole = ["asesor", "supervisor", "auditor", "gerencia"].includes(u.role?.toLowerCase())
-        
+
         // Para asesores (isAsesor), excluir a sí mismos (son el asesor implícito)
         // Para otros roles, excluir al asesor seleccionado en el form
         const asesorIdToExclude = isAsesor ? user?._id : form.asesor
         const notAsesor = !asesorIdToExclude || u._id !== asesorIdToExclude
-        
+
         return isActive && hasName && isCorrectRole && notAsesor
       }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
 
@@ -446,10 +586,13 @@ export function AuditoriasCrearTurno() {
       return "Teléfono debe tener 10 dígitos"
     if (!form.fecha) return "Fecha es requerida"
     if (!form.hora) return "Hora es requerida"
-    // Para asesores, no se requiere seleccionar asesor (se auto-asigna)
-    if (!isAsesor && !form.asesor) return "Asesor es requerido"
+    // Para asesores, supervisores con venta propia o encargados con venta propia, no se requiere seleccionar asesor (se auto-asigna)
+    const autoAsignaAsesor = isAsesor || ((isSupervisor || isEncargado) && ventaPropia)
+    if (!autoAsignaAsesor && !form.asesor) return "Asesor es requerido"
     if (!form.validador) return "Validador es requerido"
     if (isGerenciaOrAuditorSinEquipo && !form.supervisor) return "Supervisor es requerido"
+    // Para supervisor/encargado con venta propia, validar que Eliana Suarez esté disponible
+    if ((isSupervisor || isEncargado) && ventaPropia && !elianaSuarez) return "No se encontró a Eliana Suarez para asignar como supervisor"
     return null
   }
 
@@ -467,10 +610,11 @@ export function AuditoriasCrearTurno() {
 
       // Use browser's local timezone
       const scheduledAt = new Date(`${form.fecha}T${form.hora}:00`)
-      
-      // Para asesores, el asesor es el propio usuario. Para otros roles, usar el seleccionado.
-      const asesorId = isAsesor ? user?._id : form.asesor
-      
+
+      // Para asesores, supervisores con venta propia o encargados con venta propia, el asesor es el propio usuario
+      const autoAsignaAsesor = isAsesor || ((isSupervisor || isEncargado) && ventaPropia)
+      const asesorId = autoAsignaAsesor ? user?._id : form.asesor
+
       const payload: any = {
         nombre: form.nombre,
         cuil: form.cuil,
@@ -485,14 +629,20 @@ export function AuditoriasCrearTurno() {
         status: "Pendiente"
       }
 
-      if (form.supervisor) {
+      // ✅ CRÍTICO: Para Recuperador, Supervisor con Venta Propia o Encargado con Venta Propia, asignar Eliana Suarez
+      // También activar isReferido para que el sistema permita supervisor con rol Gerencia
+      if ((isRecuperador || ((isSupervisor || isEncargado) && ventaPropia)) && elianaSuarez) {
+        payload.supervisor = elianaSuarez._id
+        payload.isReferido = true  // ✅ Permite supervisor con rol Gerencia
+        console.log('Supervisor asignado (Eliana Suarez):', elianaSuarez.nombre, elianaSuarez._id, 'isReferido: true')
+      } else if (form.supervisor) {
         payload.supervisor = form.supervisor
       }
 
       await api.audits.create(payload)
       toast.success("Auditoría creada exitosamente")
 
-      // Reset form
+      // Reset form y estados relacionados
       setForm({
         nombre: "",
         cuil: "",
@@ -507,6 +657,10 @@ export function AuditoriasCrearTurno() {
         validador: "",
         datosExtra: ""
       })
+      // Resetear checkbox de venta propia
+      if (isSupervisor || isEncargado) {
+        setVentaPropia(false)
+      }
     } catch (err: any) {
       console.error('Full error:', err)
       console.error('Error response:', err.response)
@@ -869,6 +1023,21 @@ export function AuditoriasCrearTurno() {
             </div>
           )}
 
+          {/* Supervisor fijo para Recuperador (solo Eliana Suarez) */}
+          {isRecuperador && (
+            <div className={cn(
+              "p-3 rounded-lg border",
+              theme === "dark" ? "bg-purple-500/10 border-purple-500/30" : "bg-purple-50 border-purple-200"
+            )}>
+              <p className={cn("text-sm", theme === "dark" ? "text-purple-400" : "text-purple-700")}>
+                👑 <strong>Supervisor:</strong> {elianaSuarez?.nombre || "Eliana Suarez (cargando...)"}
+              </p>
+              <p className={cn("text-xs mt-1", theme === "dark" ? "text-purple-400/70" : "text-purple-600")}>
+                La venta se asignará automáticamente al equipo de Eliana Suarez
+              </p>
+            </div>
+          )}
+
           {/* Campo: Asesor asignado (solo para Supervisor y Gerencia/Auditor sin equipo) */}
           {/* Para asesores (y auditores con equipo), la venta se asigna automáticamente a ellos */}
           {!isAsesor && (
@@ -879,9 +1048,11 @@ export function AuditoriasCrearTurno() {
               <select
                 value={form.asesor}
                 onChange={(e) => handleChange("asesor", e.target.value)}
+                disabled={(isSupervisor || isEncargado) && ventaPropia}
                 className={cn(
                   "w-full px-3 py-2 rounded-lg border text-sm",
-                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800",
+                  (isSupervisor || isEncargado) && ventaPropia && "opacity-60 cursor-not-allowed"
                 )}
                 required
               >
@@ -892,6 +1063,50 @@ export function AuditoriasCrearTurno() {
                 <p className={cn("text-xs mt-1", theme === "dark" ? "text-cyan-400" : "text-cyan-600")}>
                   Primero selecciona un supervisor
                 </p>
+              )}
+            </div>
+          )}
+
+          {/* Checkbox "Venta propia" - para Supervisores y Encargados */}
+          {(isSupervisor || isEncargado) && !perteneceOtroSupervisor && (
+            <div className={cn(
+              "p-3 rounded-lg border",
+              ventaPropia
+                ? (theme === "dark" ? "bg-green-500/10 border-green-500/30" : "bg-green-50 border-green-200")
+                : (theme === "dark" ? "bg-gray-500/10 border-gray-500/30" : "bg-gray-50 border-gray-200")
+            )}>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="ventaPropia"
+                  checked={ventaPropia}
+                  onChange={(e) => {
+                    setVentaPropia(e.target.checked)
+                    if (!e.target.checked) {
+                      // Al desactivar, limpiar asignaciones
+                      setForm(prev => ({ ...prev, asesor: '', supervisor: '' }))
+                    }
+                  }}
+                  className="w-4 h-4 rounded"
+                />
+                <label htmlFor="ventaPropia" className={cn(
+                  "text-sm font-medium",
+                  ventaPropia
+                    ? (theme === "dark" ? "text-green-400" : "text-green-700")
+                    : (theme === "dark" ? "text-gray-400" : "text-gray-700")
+                )}>
+                  Venta propia
+                </label>
+              </div>
+              {ventaPropia && (
+                <div className="mt-2 space-y-1">
+                  <p className={cn("text-xs", theme === "dark" ? "text-green-400/80" : "text-green-600")}>
+                    👤 <strong>Asesor:</strong> {user?.nombre || "Tu usuario"}
+                  </p>
+                  <p className={cn("text-xs", theme === "dark" ? "text-green-400/80" : "text-green-600")}>
+                    👑 <strong>Supervisor:</strong> {elianaSuarez?.nombre || "Eliana Suarez (cargando...)"}
+                  </p>
+                </div>
               )}
             </div>
           )}

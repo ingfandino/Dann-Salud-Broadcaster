@@ -30,7 +30,7 @@ exports.getAllPhones = async (req, res) => {
             }
             query.numeroEquipo = numeroEquipo;
         }
-        // Gerencia ve todos
+        // Gerencia y Encargado ven todos
 
         const phones = await Phone.find(query)
             .populate('supervisor', 'nombre email numeroEquipo')
@@ -100,6 +100,7 @@ exports.createPhone = async (req, res) => {
         }
 
         // Para supervisores, solo pueden crear teléfonos de su propio equipo
+        // Encargado puede crear para cualquier equipo
         if (role === 'supervisor') {
             if (supervisorUser.numeroEquipo !== req.user.numeroEquipo) {
                 return res.status(403).json({ message: 'Solo puedes crear teléfonos para tu propio equipo' });
@@ -174,6 +175,17 @@ exports.updatePhone = async (req, res) => {
         // Agregar quién modificó
         updates.updatedBy = req.user._id;
 
+        // Si se está cambiando el número de teléfono, verificar que no exista en otro registro
+        if (updates.numeroTelefono && updates.numeroTelefono !== phone.numeroTelefono) {
+            const existingPhone = await Phone.findOne({ 
+                numeroTelefono: updates.numeroTelefono,
+                _id: { $ne: id } // Excluir el registro actual
+            });
+            if (existingPhone) {
+                return res.status(400).json({ message: 'Ya existe otro teléfono con este número' });
+            }
+        }
+
         const updatedPhone = await Phone.findByIdAndUpdate(
             id,
             updates,
@@ -188,6 +200,10 @@ exports.updatePhone = async (req, res) => {
         res.json(updatedPhone);
     } catch (error) {
         console.error('Error al actualizar teléfono:', error);
+        // Manejar error de duplicado de MongoDB
+        if (error.code === 11000) {
+            return res.status(400).json({ message: 'Ya existe otro teléfono con este número' });
+        }
         res.status(500).json({ message: 'Error al actualizar teléfono' });
     }
 };
@@ -260,11 +276,14 @@ exports.addRecharge = async (req, res) => {
         }
 
         // Crear nueva recarga
+        // NOTA: Parseamos la fecha con hora mediodía para evitar desfase por timezone
+        // Si enviamos "2026-01-20" sin hora, JavaScript lo interpreta como UTC midnight,
+        // lo cual en Argentina (UTC-3) se convierte al día anterior.
         const nuevaRecarga = {
             motivo,
             descripcion: descripcionFormateada,
             monto,
-            fecha: fecha ? new Date(fecha) : new Date(),
+            fecha: fecha ? new Date(fecha + "T12:00:00") : new Date(),
             registradoPor: req.user._id
         };
 

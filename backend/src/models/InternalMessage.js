@@ -18,6 +18,8 @@ const internalMessageSchema = new mongoose.Schema(
         subject: { type: String, default: "(Sin asunto)" },
         /** Contenido del mensaje */
         content: { type: String, required: true },
+        /** Indica si el contenido es HTML (para notificaciones del sistema) */
+        isHtml: { type: Boolean, default: false },
         /** Archivos adjuntos */
         attachments: [{
             filename: String,

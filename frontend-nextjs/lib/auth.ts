@@ -136,3 +136,23 @@ export const useAuth = create<AuthState>()(
         }
     )
 );
+
+// ✅ Helper para verificar si el usuario tiene nivel de supervisor (incluye encargado)
+export const isSupervisorLevel = (role?: string): boolean => {
+    if (!role) return false;
+    const normalizedRole = role.toLowerCase();
+    return normalizedRole === 'supervisor' || normalizedRole === 'encargado';
+};
+
+// ✅ Helper para verificar si el usuario puede editar auditorías (gerencia, auditor, supervisor, encargado)
+export const canEditAudits = (role?: string): boolean => {
+    if (!role) return false;
+    const normalizedRole = role.toLowerCase();
+    return ['gerencia', 'auditor', 'supervisor', 'encargado'].includes(normalizedRole);
+};
+
+// ✅ Helper para verificar si el usuario puede eliminar (solo gerencia)
+export const canDelete = (role?: string): boolean => {
+    if (!role) return false;
+    return role.toLowerCase() === 'gerencia';
+};

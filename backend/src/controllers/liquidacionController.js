@@ -77,10 +77,14 @@ exports.list = async (req, res) => {
             const field = dateField || 'fechaCreacionQR'; // Default a fechaCreacionQR si no se especifica
 
             if (field === 'fechaCreacionQR') {
+                // ✅ Ajustar rango para fechaCreacionQR: compensar desfase UTC (-3 horas Argentina)
+                // fechaCreacionQR puede estar guardado en UTC medianoche, lo que causa desfase
+                const fromAdjusted = new Date(from.getTime() - (3 * 60 * 60 * 1000));
+                
                 // La lógica es: SI fechaCreacionQR tiene valor -> usar ese, SINO -> usar scheduledAt
                 filter.$or = [
-                    // Caso 1: fechaCreacionQR existe y tiene valor válido en el rango
-                    { fechaCreacionQR: { $ne: null, $gte: from, $lte: to } },
+                    // Caso 1: fechaCreacionQR existe y tiene valor válido en el rango (ajustado)
+                    { fechaCreacionQR: { $ne: null, $gte: fromAdjusted, $lte: to } },
                     // Caso 2: fechaCreacionQR NO existe o es null -> usar scheduledAt
                     {
                         $and: [
@@ -126,10 +130,13 @@ exports.list = async (req, res) => {
             monthEnd.setUTCDate(monthEnd.getUTCDate() + 7); // Siguiente viernes
             monthEnd.setUTCHours(2, 59, 59, 999); // 23:59:59 Argentina del jueves
 
+            // ✅ Ajustar rango para fechaCreacionQR: compensar desfase UTC (-3 horas Argentina)
+            const monthStartAdjusted = new Date(monthStart.getTime() - (3 * 60 * 60 * 1000));
+
             filter.$and = [
                 {
                     $or: [
-                        { fechaCreacionQR: { $gte: monthStart, $lte: monthEnd } },
+                        { fechaCreacionQR: { $gte: monthStartAdjusted, $lte: monthEnd } },
                         {
                             $and: [
                                 { $or: [{ fechaCreacionQR: { $exists: false } }, { fechaCreacionQR: null }] },
@@ -165,18 +172,20 @@ exports.list = async (req, res) => {
         const currentUser = req.user;
         const userRole = currentUser?.role?.toLowerCase();
         const isSupervisor = userRole === 'supervisor';
+        const isEncargado = userRole === 'encargado';
         const isAsesor = userRole === 'asesor';
         const isAuditor = userRole === 'auditor';
+        const isIndependiente = userRole === 'independiente';
 
-        // ✅ Filtro para ASESORES: Solo ver sus propias auditorías
-        if (isAsesor) {
+        // ✅ Filtro para ASESORES e INDEPENDIENTES: Solo ver sus propias auditorías
+        if (isAsesor || isIndependiente) {
             audits = audits.filter((audit) => {
                 // El asesor de la auditoría debe ser el usuario actual
                 return audit.asesor?._id?.toString() === currentUser._id?.toString();
             });
 
             logger.info(
-                `👤 Asesor ${currentUser.email} viendo ${audits.length} auditorías propias en Liquidación`
+                `👤 ${isIndependiente ? 'Independiente' : 'Asesor'} ${currentUser.email} viendo ${audits.length} auditorías propias en Liquidación`
             );
         }
         // ✅ Filtro para AUDITORES con equipo: Solo ver donde aparecen como asesor
@@ -209,7 +218,7 @@ exports.list = async (req, res) => {
                 );
             }
         }
-        // ✅ Gerencia/Auditor/Administrativo ven todo (sin filtro adicional)
+        // ✅ Gerencia/Auditor/Administrativo/Encargado ven todo (sin filtro adicional)
 
         // Buscar supervisores dinámicamente por numeroEquipo
         const equipos = [...new Set(
@@ -221,7 +230,7 @@ exports.list = async (req, res) => {
         if (equipos.length > 0) {
             const supervisores = await User.find({
                 numeroEquipo: { $in: equipos },
-                role: { $in: ['supervisor', 'Supervisor'] },
+                role: { $in: ['supervisor', 'Supervisor', 'encargado'] },
                 active: true
             })
                 .select('nombre name email numeroEquipo')
@@ -317,7 +326,7 @@ exports.exportLiquidation = (req, res) => {
             const currentUser = req.user;
             const isSupervisor = currentUser?.role === 'supervisor' || currentUser?.role === 'Supervisor';
 
-            // Filtrar por equipo si es supervisor
+            // Filtrar por equipo si es supervisor (Encargado ve todo)
             if (isSupervisor && currentUser?.numeroEquipo) {
                 const targetNumeroEquipo = String(currentUser.numeroEquipo || '').trim().toLowerCase();
                 audits = audits.filter((audit) => {
@@ -334,7 +343,7 @@ exports.exportLiquidation = (req, res) => {
                 const User = require('../models/User');
                 const supervisores = await User.find({
                     numeroEquipo: { $in: equipos },
-                    role: { $in: ['supervisor', 'Supervisor'] },
+                    role: { $in: ['supervisor', 'Supervisor', 'encargado'] },
                     active: true
                 }).select('nombre name email numeroEquipo').lean();
 

@@ -35,10 +35,10 @@ apiClient.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-/* Interceptor de response - maneja errores 401 */
+/* Interceptor de response - maneja errores 401 y 403 (suspensión) */
 apiClient.interceptors.response.use(
     (response) => response,
-    (error: AxiosError) => {
+    (error: AxiosError<{ code?: string; message?: string; suspensionEnd?: string }>) => {
         if (error.response?.status === 401) {
             if (typeof window !== 'undefined') {
                 localStorage.removeItem('token');
@@ -48,6 +48,25 @@ apiClient.interceptors.response.use(
                 }
             }
         }
+
+        // ✅ Manejo de suspensión de cuenta
+        if (error.response?.status === 403 && error.response?.data?.code === 'ACCOUNT_SUSPENDED') {
+            if (typeof window !== 'undefined') {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                localStorage.removeItem('auth-storage');
+                document.cookie = 'token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+
+                const message = error.response.data.message || 'Tu cuenta se encuentra suspendida temporalmente.';
+                // Guardar mensaje para mostrar en login
+                sessionStorage.setItem('suspensionMessage', message);
+
+                if (!window.location.pathname.includes('/login')) {
+                    window.location.href = '/login?suspended=true';
+                }
+            }
+        }
+
         return Promise.reject(error);
     }
 );
@@ -141,6 +160,11 @@ export const api = {
             apiClient.put(`/users/${id}/team-history/${periodId}`, data),
         deleteTeamPeriod: (id: string, periodId: string) =>
             apiClient.delete(`/users/${id}/team-history/${periodId}`),
+        /* Suspensión temporal de cuentas */
+        suspend: (id: string, data: { suspensionStart: string; suspensionEnd: string }) =>
+            apiClient.post(`/users/${id}/suspend`, data),
+        cancelSuspension: (id: string) =>
+            apiClient.delete(`/users/${id}/suspend`),
     },
 
     /* Grupos */
@@ -291,6 +315,28 @@ export const api = {
         deleteRecharge: (id: string, rechargeId: string) => apiClient.delete(`/phones/${id}/recharges/${rechargeId}`),
         getAsesoresByEquipo: (numeroEquipo: string) => apiClient.get(`/phones/asesores/${numeroEquipo}`),
         getStats: () => apiClient.get('/phones/stats'),
+    },
+
+    /* Bajo Rendimiento (RR.HH.) */
+    lowPerformance: {
+        getAll: () => apiClient.get('/low-performance'),
+        getStats: () => apiClient.get('/low-performance/stats'),
+        getCurrentPeriod: () => apiClient.get('/low-performance/current-period'),
+        getSupervisorHistory: (supervisorId: string) => apiClient.get(`/low-performance/history/${supervisorId}`),
+        evaluate: (data: { periodStart?: string; periodEnd?: string; threshold?: number }) =>
+            apiClient.post('/low-performance/evaluate', data),
+        evaluateHistorical: (data: { startFrom: string; threshold?: number }) =>
+            apiClient.post('/low-performance/evaluate-historical', data),
+        delete: (id: string) => apiClient.delete(`/low-performance/${id}`),
+    },
+
+    /* Bajas y Liquidaciones (RR.HH.) */
+    separations: {
+        list: (params?: any) => apiClient.get('/separations', { params }),
+        get: (id: string) => apiClient.get(`/separations/${id}`),
+        markPaid: (id: string) => apiClient.patch(`/separations/${id}/mark-paid`),
+        updateMotivoBaja: (id: string, motivoBajaNormalizado: string | null) =>
+            apiClient.patch(`/separations/${id}/motivo-baja`, { motivoBajaNormalizado }),
     },
 
     /* Cliente raw para requests personalizados */

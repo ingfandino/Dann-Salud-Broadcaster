@@ -34,6 +34,23 @@ exports.requireAuth = async (req, res, next) => {
       return res.status(401).json({ error: "Usuario no encontrado" });
     }
 
+    // ✅ Verificar suspensión temporal
+    if (user.suspensionStart && user.suspensionEnd) {
+      const now = new Date();
+      const suspStart = new Date(user.suspensionStart);
+      const suspEnd = new Date(user.suspensionEnd);
+      
+      if (now >= suspStart && now <= suspEnd) {
+        logger.warn(`⛔ Acceso denegado: Usuario ${user.email} suspendido hasta ${suspEnd.toLocaleDateString()}`);
+        return res.status(403).json({ 
+          error: "Cuenta suspendida", 
+          code: "ACCOUNT_SUSPENDED",
+          message: `Tu cuenta se encuentra suspendida temporalmente hasta el ${suspEnd.toLocaleDateString('es-AR')}.`,
+          suspensionEnd: suspEnd
+        });
+      }
+    }
+
     req.user = user;
     next();
   } catch (err) {

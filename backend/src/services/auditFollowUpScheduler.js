@@ -179,7 +179,7 @@ async function checkAuditsForFollowUp() {
                 
                 if (numeroEquipo) {
                     supervisor = await User.findOne({
-                        role: 'supervisor',
+                        role: { $in: ['supervisor', 'supervisor_reventa', 'encargado'] },
                         numeroEquipo: numeroEquipo,
                         active: true
                     }).lean();
@@ -189,7 +189,7 @@ async function checkAuditsForFollowUp() {
                 if (!supervisor && asesor.groupId) {
                     const groupId = typeof asesor.groupId === 'object' ? asesor.groupId._id : asesor.groupId;
                     supervisor = await User.findOne({
-                        role: 'supervisor',
+                        role: { $in: ['supervisor', 'supervisor_reventa', 'encargado'] },
                         groupId: groupId,
                         active: true
                     }).lean();

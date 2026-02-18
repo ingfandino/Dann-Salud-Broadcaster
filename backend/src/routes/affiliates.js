@@ -69,8 +69,8 @@ router.get("/export-config", affiliateController.requireSupervisorOrGerencia, af
 // 📊 Obtener estadísticas de supervisor
 router.get("/supervisor-stats", affiliateController.requireSupervisorOrGerencia, affiliateController.getSupervisorStats);
 
-// 📋 Obtener obras sociales disponibles (solo Gerencia)
-router.get("/obras-sociales", affiliateController.requireGerencia, affiliateController.getAvailableObrasSociales);
+// 📋 Obtener obras sociales disponibles (Gerencia, Supervisor y Encargado)
+router.get("/obras-sociales", affiliateController.requireSupervisorOrGerencia, affiliateController.getAvailableObrasSociales);
 
 // 📊 Obtener stock por obra social (Gerencia) - Para Envíos Avanzados
 router.get("/stock-by-obra-social", affiliateController.requireGerencia, affiliateController.getStockByObraSocial);
@@ -91,8 +91,8 @@ router.get("/download-export/:filename", async (req, res) => {
         const { filename } = req.params;
         const userRole = req.user?.role?.toLowerCase();
 
-        // Solo gerencia y supervisores pueden descargar
-        if (!["gerencia", "supervisor", "administrativo"].includes(userRole)) {
+        // Solo gerencia, supervisores y encargado pueden descargar
+        if (!["gerencia", "supervisor", "administrativo", "encargado"].includes(userRole)) {
             return res.status(403).json({ error: "No autorizado para descargar archivos" });
         }
 
@@ -105,10 +105,10 @@ router.get("/download-export/:filename", async (req, res) => {
             return res.status(404).json({ error: "Archivo no encontrado" });
         }
 
-        // Si es supervisor, verificar que el archivo le pertenece
-        if (userRole === "supervisor") {
+        // Si es supervisor o encargado, verificar que el archivo le pertenece
+        if (userRole === "supervisor" || userRole === "encargado") {
             const userId = req.user._id.toString();
-            // El filename debe incluir el userId del supervisor
+            // El filename debe incluir el userId del supervisor/encargado
             if (!filename.includes(userId)) {
                 return res.status(403).json({ error: "No autorizado para descargar este archivo" });
             }

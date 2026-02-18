@@ -138,6 +138,7 @@ export function AuditoriasLiquidacion() {
   const isGerencia = user?.role?.toLowerCase() === 'gerencia'
   const isAsesor = user?.role?.toLowerCase() === 'asesor'
   const isRecuperador = user?.role?.toLowerCase() === 'recuperador'
+  const isEncargado = user?.role?.toLowerCase() === 'encargado' // ✅ Rol Encargado: solo lectura
 
   // State
   const [items, setItems] = useState<any[]>([])
@@ -220,7 +221,7 @@ export function AuditoriasLiquidacion() {
       const users = Array.isArray(data) ? data : []
 
       setAsesores(users.filter((u: any) => u.role?.toLowerCase() === "asesor" && u.active !== false))
-      setSupervisores(users.filter((u: any) => u.role?.toLowerCase() === "supervisor" && u.active !== false))
+      setSupervisores(users.filter((u: any) => (u.role?.toLowerCase() === "supervisor" || u.role?.toLowerCase() === "encargado") && u.active !== false))
       setAuditores(users.filter((u: any) => u.role?.toLowerCase() === "auditor" && u.active !== false))
       setAdministradores(users.filter((u: any) => u.role?.toLowerCase() === "administrativo" && u.active !== false))
     } catch (err) {
@@ -334,6 +335,17 @@ export function AuditoriasLiquidacion() {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
   }
 
+  // ✅ Helper para parsear fecha UTC sin conversión a hora local
+  // fechaCreacionQR viene como "2026-01-16T00:00:00.000Z" y debe interpretarse como 16/01, no 15/01
+  const parseUTCDate = (isoString: string): Date => {
+    if (!isoString) return new Date()
+    // Extraer componentes de la fecha ISO para evitar conversión timezone
+    const dateStr = isoString.split('T')[0]
+    const [year, month, day] = dateStr.split('-').map(Number)
+    // Crear fecha usando componentes locales (sin conversión UTC)
+    return new Date(year, month - 1, day, 12, 0, 0) // Mediodía para evitar problemas de borde
+  }
+
   const itemsByWeek = useMemo(() => {
     const weeks: Record<string, any[]> = {}
     items.forEach(item => {
@@ -342,8 +354,8 @@ export function AuditoriasLiquidacion() {
 
       // ✅ Use fechaCreacionQR for QR-based records, fallback to scheduledAt
       const dateField = item.status === 'QR hecho' ? (item.fechaCreacionQR || item.scheduledAt) : item.scheduledAt;
-      const date = new Date(dateField || item.createdAt)
-      // ✅ CORREGIDO: Usar hora local en lugar de UTC para agrupar semanas
+      // ✅ CORREGIDO: Parsear fecha UTC sin conversión a hora local para evitar desfase de día
+      const date = parseUTCDate(dateField || item.createdAt)
       const weekStart = toLocalDateString(getWeekStart(date))
       if (!weeks[weekStart]) weeks[weekStart] = []
       weeks[weekStart].push(item)
@@ -364,9 +376,9 @@ export function AuditoriasLiquidacion() {
       baseItems = baseItems.filter(item => {
         // ✅ Use fechaCreacionQR for QR records, fallback to scheduledAt
         const dateField = item.status === 'QR hecho' ? (item.fechaCreacionQR || item.scheduledAt) : item.scheduledAt;
-        // ✅ CORREGIDO: Usar fecha LOCAL (Argentina) en lugar de UTC para comparación
-        const d = new Date(dateField);
-        const itemDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        // ✅ CORREGIDO: Parsear fecha UTC sin conversión timezone para comparación correcta
+        const d = parseUTCDate(dateField);
+        const itemDate = toLocalDateString(d);
 
         if (filters.dateFrom && itemDate < filters.dateFrom) return false;
         if (filters.dateTo && itemDate > filters.dateTo) return false;
@@ -380,10 +392,9 @@ export function AuditoriasLiquidacion() {
 
     // Apply other filters
     let result = baseItems.filter(item => {
-      // ✅ Recuperador: Solo ve registros donde Supervisor = "Eliana Suarez"
+      // ✅ Recuperador: Solo ve registros donde isRecuperada = true
       if (isRecuperador) {
-        const supervisorName = getSupervisorName(item).toLowerCase()
-        if (!(supervisorName.includes('eliana') && supervisorName.includes('suarez'))) {
+        if (!item.isRecuperada) {
           return false
         }
       }

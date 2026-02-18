@@ -20,7 +20,7 @@ const employeeSchema = new mongoose.Schema({
     },
 
     /* ========== DATOS PERSONALES ========== */
-    
+
     /** Nombre completo del empleado */
     nombreCompleto: {
         type: String,
@@ -34,7 +34,7 @@ const employeeSchema = new mongoose.Schema({
     },
 
     /* ========== FECHAS LABORALES ========== */
-    
+
     /** Fecha de la entrevista inicial */
     fechaEntrevista: {
         type: Date,
@@ -47,7 +47,7 @@ const employeeSchema = new mongoose.Schema({
     },
 
     /* ========== INFORMACIÓN LABORAL ========== */
-    
+
     /** Cargo o puesto del empleado */
     cargo: {
         type: String,
@@ -60,7 +60,7 @@ const employeeSchema = new mongoose.Schema({
     },
 
     /* ========== DOCUMENTACIÓN ========== */
-    
+
     /** Indica si firmó el contrato */
     firmoContrato: {
         type: Boolean,
@@ -73,7 +73,7 @@ const employeeSchema = new mongoose.Schema({
     },
 
     /* ========== ESTADO LABORAL ========== */
-    
+
     /** Estado activo/inactivo del empleado */
     activo: {
         type: Boolean,
@@ -84,19 +84,35 @@ const employeeSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    /** Fecha de reingreso (para empleados que vuelven a la empresa) */
+    fechaReingreso: {
+        type: Date,
+        default: null
+    },
     /** Fecha de egreso definitivo */
     fechaEgreso: {
         type: Date,
         default: null
     },
-    /** Motivo de la baja */
+    /** Motivo de la baja (texto libre histórico, NO usar para lógica de negocio) */
     motivoBaja: {
         type: String,
         default: ''
     },
+    /** Motivo de baja normalizado (único campo para lógica de negocio) */
+    motivoBajaNormalizado: {
+        type: String,
+        enum: [
+            null,
+            'Renuncia',
+            'Despido por bajo rendimiento',
+            'Despido por inasistencias'
+        ],
+        default: null
+    },
 
     /* ========== NOTAS Y METADATA ========== */
-    
+
     /** Notas adicionales sobre el empleado */
     notas: {
         type: String,

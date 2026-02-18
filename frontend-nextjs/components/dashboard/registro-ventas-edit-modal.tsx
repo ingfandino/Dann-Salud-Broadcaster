@@ -9,20 +9,27 @@ import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
 
 const STATUS_OPTIONS = [
+  "Pendiente",
   "QR hecho",
   "QR hecho (Temporal)",
-  "QR hecho, pero pendiente de aprobación",
+  "QR hecho pero pendiente de aprobación",
   "Hacer QR",
-  "Aprobada",
-  "Pendiente",
-  "Cargada",
-  "Falta clave",
   "AFIP",
-  "Rechazada",
+  "Baja laboral con nueva alta",
+  "Baja laboral sin nueva alta",
   "Padrón",
-  "Remuneración no válida",
-  "Autovinculación",
   "En revisión",
+  "Remuneración no válida",
+  "Cargada",
+  "Aprobada",
+  "Aprobada, pero no reconoce clave",
+  "Rehacer vídeo",
+  "Rechazada",
+  "Falta documentación",
+  "Falta clave",
+  "Falta clave y documentación",
+  "El afiliado cambió la clave",
+  "Autovinculación",
   "Caída",
   "Completa",
 ]
@@ -30,7 +37,6 @@ const STATUS_OPTIONS = [
 const STATUS_MAP_TO_SEGUIMIENTO: Record<string, string> = {
   "Hacer QR": "Pendiente",
   "QR hecho (Temporal)": "Baja laboral sin nueva alta",
-  "QR hecho, pero pendiente de aprobación": "Cargada",
 }
 
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "RAS", "TURF", "Medicenter"]
@@ -83,6 +89,18 @@ interface Audit {
     changedBy: { nombre: string; name?: string }
     changedAt: string
   }[]
+  administradorHistory?: {
+    previousAdmin: { nombre: string; name?: string }
+    newAdmin: { nombre: string; name?: string }
+    changedBy: { nombre: string; name?: string }
+    changedAt: string
+  }[]
+  fechaQRHistory?: Array<{
+    value: string
+    updatedBy?: { nombre?: string }
+    updatedAt?: string
+    isAutomatic?: boolean
+  }>
   fechaCreacionQR?: string
   createdAt: string
   supervisorSnapshot?: {
@@ -110,13 +128,34 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
   const { theme } = useTheme()
   const { user } = useAuth()
 
+  // ✅ Extrae YYYY-MM-DD directamente del ISO string sin conversión de zona horaria
+  // Esto evita el bug donde fechas guardadas como 2026-01-16T00:00:00Z se mostraban como 15/01
   const getLocalDate = (utcDateString: string) => {
     if (!utcDateString) return ""
+    // Extraer directamente del ISO string para fechas puras (sin hora relevante)
+    const isoMatch = utcDateString.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (isoMatch) {
+      return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
+    }
+    // Fallback para formatos no-ISO
     const date = new Date(utcDateString)
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
+    const year = date.getUTCFullYear()
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+    const day = String(date.getUTCDate()).padStart(2, '0')
     return `${year}-${month}-${day}`
+  }
+
+  // ✅ Formatea fecha para visualización en formato DD/M/YYYY sin conversión de zona horaria
+  const formatDateDisplay = (utcDateString: string) => {
+    if (!utcDateString) return "-"
+    const isoMatch = utcDateString.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (isoMatch) {
+      const [, year, month, day] = isoMatch
+      return `${parseInt(day)}/${parseInt(month)}/${year}`
+    }
+    // Fallback: usar UTC para evitar desfase
+    const date = new Date(utcDateString)
+    return `${date.getUTCDate()}/${date.getUTCMonth() + 1}/${date.getUTCFullYear()}`
   }
 
   const userRole = user?.role?.toLowerCase()
@@ -127,6 +166,7 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
     cuil: audit.cuil || "",
     cuit: audit.cuit || "",
     fecha: getLocalDate(audit.fechaCreacionQR || audit.scheduledAt),
+    fechaQR: audit.fechaCreacionQR ? getLocalDate(audit.fechaCreacionQR) : "",
     aporte: audit.aporte?.toString() || "",
     observacionPrivada: audit.observacionPrivada || "",
     clave: audit.clave || "",
@@ -137,6 +177,7 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
     asesor: audit.asesor?._id || "",
     datosExtra: audit.datosExtra || "",
     mesPadron: audit.mesPadron || "",
+    disponibleParaVenta: (audit as any).disponibleParaVenta || false,
   })
 
   const [loading, setLoading] = useState(false)
@@ -152,6 +193,7 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
         cuil: audit.cuil || "",
         cuit: audit.cuit || "",
         fecha: getLocalDate(audit.fechaCreacionQR || audit.scheduledAt),
+        fechaQR: audit.fechaCreacionQR ? getLocalDate(audit.fechaCreacionQR) : "",
         aporte: audit.aporte?.toString() || "",
         observacionPrivada: audit.observacionPrivada || "",
         clave: audit.clave || "",
@@ -162,6 +204,7 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
         asesor: audit.asesor?._id || "",
         datosExtra: audit.datosExtra || "",
         mesPadron: audit.mesPadron || "",
+        disponibleParaVenta: (audit as any).disponibleParaVenta || false,
       })
       fetchFilterOptions()
     }
@@ -185,24 +228,25 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
 
   const filteredAsesores = useMemo(() => {
     if (!form.supervisor) {
-      return asesores.filter((u: any) => 
-        (u.role === 'asesor' || u.role === 'Asesor' || 
-         ((u.role === 'auditor' || u.role === 'Auditor') && u.numeroEquipo))
+      return asesores.filter((u: any) =>
+      (u.role === 'asesor' || u.role === 'Asesor' ||
+        ((u.role === 'auditor' || u.role === 'Auditor') && u.numeroEquipo))
       )
     }
     const selectedSupervisor = supervisores.find((s: any) => s._id === form.supervisor)
     if (!selectedSupervisor?.numeroEquipo) return asesores
-    return asesores.filter((u: any) => 
+    return asesores.filter((u: any) =>
       u.numeroEquipo === selectedSupervisor.numeroEquipo &&
-      (u.role === 'asesor' || u.role === 'Asesor' || 
-       ((u.role === 'auditor' || u.role === 'Auditor') && u.numeroEquipo))
+      (u.role === 'asesor' || u.role === 'Asesor' ||
+        ((u.role === 'auditor' || u.role === 'Auditor') && u.numeroEquipo))
     )
   }, [asesores, form.supervisor, supervisores])
 
   if (!isOpen) return null
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target
+    const { name, value, type } = e.target
+    const checked = (e.target as HTMLInputElement).checked
 
     if (name === 'supervisor') {
       setForm(prev => ({
@@ -213,7 +257,7 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
     } else {
       setForm(prev => ({
         ...prev,
-        [name]: value
+        [name]: type === 'checkbox' ? checked : value
       }))
     }
   }
@@ -240,12 +284,26 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
         statusAdministrativo: form.status,
         datosExtra: form.datosExtra,
         mesPadron: form.status === "Padrón" ? form.mesPadron : null,
+        disponibleParaVenta: (form.status?.toLowerCase() === 'afip' || form.status?.toLowerCase() === 'padrón')
+          ? form.disponibleParaVenta
+          : false,
       }
 
-      if (form.fecha) {
-        payload.fechaCreacionQR = new Date(form.fecha).toISOString()
+      // Lógica de fechaCreacionQR:
+      // 1. Si el usuario asignó una fecha manualmente (fechaQR), usarla
+      // 2. Si cambia a "QR hecho" y no tiene fecha manual, asignar fecha actual
+      // 3. Si tiene fecha del campo "fecha" original, mantenerla como fallback
+      if (form.fechaQR) {
+        payload.fechaCreacionQR = new Date(form.fechaQR).toISOString()
+      } else if (form.status === "QR hecho" && audit.status !== "QR hecho") {
+        // Auto-asignar fecha actual al cambiar a QR hecho si no hay fecha manual
+        payload.fechaCreacionQR = new Date().toISOString()
+      } else {
+        // ✅ Si está vacío y no es un cambio a 'QR hecho', enviamos NULL explícitamente para borrar
+        payload.fechaCreacionQR = null
       }
 
+      // Lógica de permisos para campo Administrador
       const administradorAsignado = audit.administrador?._id || audit.administrador
       const esElMismoAdministrador = administradorAsignado && administradorAsignado === user?._id
       const puedeModificarAdmin = !administradorAsignado || isGerencia || esElMismoAdministrador
@@ -254,6 +312,7 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
         payload.administrador = form.administrador || null
       }
 
+      // Solo Gerencia puede modificar supervisor y asesor
       if (isGerencia) {
         if (form.supervisor) {
           payload.supervisor = form.supervisor
@@ -261,10 +320,6 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
         if (form.asesor) {
           payload.asesor = form.asesor
         }
-      }
-
-      if (form.status === "QR hecho" && audit.status !== "QR hecho") {
-        payload.fechaCreacionQR = new Date().toISOString()
       }
 
       const response = await api.audits.update(audit._id, payload)
@@ -405,6 +460,28 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
                     )}
                   />
                 </div>
+                <div>
+                  <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                    Fecha de QR
+                  </label>
+                  <input
+                    type="date"
+                    name="fechaQR"
+                    value={form.fechaQR}
+                    onChange={handleChange}
+                    disabled={form.status !== 'QR hecho' && !isGerencia}
+                    className={cn(
+                      "w-full px-3 py-2 rounded-lg border text-sm",
+                      (form.status !== 'QR hecho' && !isGerencia) && "opacity-50 cursor-not-allowed",
+                      theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                    )}
+                  />
+                  <p className={cn("text-xs mt-1", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
+                    {(form.status !== 'QR hecho' && !isGerencia)
+                      ? "Se habilita solo en estado 'QR hecho' (o Gerencia)"
+                      : "Se asigna automáticamente al pasar a 'QR hecho' si está vacío"}
+                  </p>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -476,22 +553,32 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
                       <option key={opt} value={opt}>{opt}</option>
                     ))}
                   </select>
+                  {/* Checkbox "Disponible para venta" - Solo visible para AFIP o Padrón */}
+                  {(form.status?.toLowerCase() === 'afip' || form.status?.toLowerCase() === 'padrón') && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        type="checkbox"
+                        name="disponibleParaVenta"
+                        checked={form.disponibleParaVenta}
+                        onChange={handleChange}
+                        className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                      />
+                      <label className={cn("text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                        Disponible para venta
+                      </label>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
                     Administrativo
-                    {!puedeModificarAdmin && (
-                      <span className="ml-2 text-xs text-yellow-500">🔒 Bloqueado</span>
-                    )}
                   </label>
                   <select
                     name="administrador"
                     value={form.administrador}
                     onChange={handleChange}
-                    disabled={!puedeModificarAdmin}
                     className={cn(
                       "w-full px-3 py-2 rounded-lg border text-sm",
-                      !puedeModificarAdmin && "opacity-60 cursor-not-allowed",
                       theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                     )}
                   >
@@ -500,11 +587,6 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
                       <option key={u._id} value={u._id}>{u.nombre}</option>
                     ))}
                   </select>
-                  {!puedeModificarAdmin && (
-                    <p className="text-xs text-yellow-500 mt-1">
-                      Solo el administrador asignado o Gerencia pueden modificar este campo
-                    </p>
-                  )}
                 </div>
               </div>
 
@@ -712,6 +794,37 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
                 </div>
               )}
 
+              {audit.administradorHistory && audit.administradorHistory.length > 0 && (
+                <div>
+                  <h3 className={cn("text-sm font-semibold mb-3", theme === "dark" ? "text-white" : "text-gray-800")}>
+                    Historial de Administrativo
+                  </h3>
+                  <div className="space-y-2 mb-6">
+                    {audit.administradorHistory?.slice().reverse().map((entry, idx) => (
+                      <div
+                        key={idx}
+                        className={cn(
+                          "p-3 rounded-lg",
+                          theme === "dark" ? "bg-white/5" : "bg-gray-50"
+                        )}
+                      >
+                        <p className={cn("text-sm font-medium", theme === "dark" ? "text-gray-200" : "text-gray-800")}>
+                          {entry.previousAdmin?.nombre || entry.previousAdmin?.name || "Sin Admin"} → {entry.newAdmin?.nombre || entry.newAdmin?.name || "Sin Admin"}
+                        </p>
+                        <div className="flex items-center justify-between mt-2">
+                          <span className={cn("text-xs", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
+                            por {entry.changedBy?.nombre || "Sistema"}
+                          </span>
+                          <span className={cn("text-xs", theme === "dark" ? "text-gray-500" : "text-gray-400")}>
+                            {entry.changedAt ? new Date(entry.changedAt).toLocaleString("es-AR") : "-"}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {audit.asesorHistory && audit.asesorHistory.length > 0 && (
                 <div>
                   <h3 className={cn("text-sm font-semibold mb-3", theme === "dark" ? "text-white" : "text-gray-800")}>
@@ -749,9 +862,52 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
                 </div>
               )}
 
+              {audit.fechaQRHistory && audit.fechaQRHistory.length > 0 && (
+                <div>
+                  <h3 className={cn("text-sm font-semibold mb-3", theme === "dark" ? "text-white" : "text-gray-800")}>
+                    Historial de Fecha de QR
+                  </h3>
+                  <div className="space-y-2">
+                    {audit.fechaQRHistory.map((entry, idx) => (
+                      <div
+                        key={idx}
+                        className={cn(
+                          "flex items-center justify-between p-3 rounded-lg",
+                          theme === "dark" ? "bg-white/5" : "bg-gray-50"
+                        )}
+                      >
+                        <div>
+                          <span className={cn(
+                            "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium",
+                            theme === "dark" ? "bg-purple-500/20 text-purple-400" : "bg-purple-100 text-purple-800"
+                          )}>
+                            {entry.value ? formatDateDisplay(entry.value) : "-"}
+                          </span>
+                          <span className={cn(
+                            "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ml-2",
+                            entry.isAutomatic
+                              ? (theme === "dark" ? "bg-blue-500/20 text-blue-400" : "bg-blue-100 text-blue-800")
+                              : (theme === "dark" ? "bg-green-500/20 text-green-400" : "bg-green-100 text-green-800")
+                          )}>
+                            {entry.isAutomatic ? "Automático" : "Manual"}
+                          </span>
+                          <p className={cn("text-xs mt-1", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
+                            por {entry.updatedBy?.nombre || "Sistema"}
+                          </p>
+                        </div>
+                        <span className={cn("text-xs", theme === "dark" ? "text-gray-500" : "text-gray-400")}>
+                          {entry.updatedAt ? new Date(entry.updatedAt).toLocaleString("es-AR") : "-"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {(!audit.statusHistory || audit.statusHistory.length === 0) &&
                 (!audit.datosExtraHistory || audit.datosExtraHistory.length === 0) &&
-                (!audit.asesorHistory || audit.asesorHistory.length === 0) && (
+                (!audit.asesorHistory || audit.asesorHistory.length === 0) &&
+                (!audit.fechaQRHistory || audit.fechaQRHistory.length === 0) && (
                   <div className="text-center py-8">
                     <p className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
                       No hay historial disponible

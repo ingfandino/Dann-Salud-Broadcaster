@@ -36,6 +36,9 @@ require("./cron/leadAssignmentRecycleJob");
 
 // ✅ Cron job para notificación de vencimiento de recargas de teléfonos (cada hora)
 require("./cron/phoneRechargeNotificationJob");
+
+// ✅ Cron job para Liberación de Padrón (primer día de cada mes a las 00:01)
+require("./cron/padronReleaseJob");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const errorHandler = require("./middlewares/errorHandler");
@@ -46,6 +49,7 @@ const Message = require("./models/Message");
 const SendJob = require("./models/SendJob");
 const Affiliate = require("./models/Affiliate");
 const AffiliateExportConfig = require("./models/AffiliateExportConfig");
+const Evidencia = require("./models/Evidencia");
 const routes = require("./routes");
 const { requireAuth } = require("./middlewares/authMiddleware");
 const { validateEnv, ENV } = require("./config");
@@ -102,6 +106,13 @@ if (process.env.NODE_ENV !== "test") {
             logger.info("✅ Índices de AffiliateExportConfig sincronizados");
           } catch (e) {
             logger.warn("⚠️  No se pudieron sincronizar índices de AffiliateExportConfig", { error: e?.message });
+          }
+
+          try {
+            await Evidencia.syncIndexes();
+            logger.info("✅ Índices de Evidencia sincronizados");
+          } catch (e) {
+            logger.warn("⚠️  No se pudieron sincronizar índices de Evidencia", { error: e?.message });
           }
 
           // 🌱 Semilla opcional para crear auditor

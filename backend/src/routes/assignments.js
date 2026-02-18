@@ -16,7 +16,7 @@ const { permit } = require("../middlewares/roleMiddleware");
 router.post(
     "/distribute",
     requireAuth,
-    permit("supervisor", "gerencia"),
+    permit("supervisor", "gerencia", "encargado"),
     assignmentController.distribute
 );
 
@@ -24,42 +24,42 @@ router.post(
 router.get(
     "/my-leads",
     requireAuth,
-    permit("asesor", "supervisor", "gerencia", "auditor"),
+    permit("asesor", "supervisor", "gerencia", "auditor", "encargado", "independiente"),
     assignmentController.getMyLeads
 );
 
 router.get(
     "/my-leads/export",
     requireAuth,
-    permit("asesor", "supervisor", "gerencia", "auditor"),
+    permit("asesor", "supervisor", "gerencia", "auditor", "encargado", "independiente"),
     assignmentController.exportMyLeads
 );
 
 router.patch(
     "/:id/status",
     requireAuth,
-    permit("asesor", "supervisor", "gerencia", "auditor"),
+    permit("asesor", "supervisor", "gerencia", "auditor", "encargado", "independiente"),
     assignmentController.updateStatus
 );
 
 router.post(
     "/:id/interaction",
     requireAuth,
-    permit("asesor", "supervisor", "gerencia", "auditor"),
+    permit("asesor", "supervisor", "gerencia", "auditor", "encargado", "independiente"),
     assignmentController.logInteraction
 );
 
 router.post(
     "/:id/whatsapp",
     requireAuth,
-    permit("asesor", "supervisor", "gerencia", "auditor"),
+    permit("asesor", "supervisor", "gerencia", "auditor", "encargado", "independiente"),
     assignmentController.sendWhatsApp
 );
 
 router.post(
     "/:id/reschedule",
     requireAuth,
-    permit("asesor", "supervisor", "gerencia", "auditor"),
+    permit("asesor", "supervisor", "gerencia", "auditor", "encargado", "independiente"),
     assignmentController.reschedule
 );
 
@@ -67,7 +67,7 @@ router.post(
 router.post(
     "/:id/reassign",
     requireAuth,
-    permit("asesor", "supervisor", "gerencia", "auditor"),
+    permit("asesor", "supervisor", "gerencia", "auditor", "encargado", "independiente"),
     assignmentController.reassign
 );
 

@@ -227,11 +227,11 @@ class BaileysClient {
         try {
           // Obtener número de teléfono real (manejar @lid)
           let phoneNumber = null;
-          
+
           if (isLid) {
             const lid = from.split('@')[0];
             logger.info(`[Baileys][${this.userId}] 🔍 Mensaje LID detectado: ${lid}. Campos: remoteJidAlt=${msg.key.remoteJidAlt || 'N/A'}, participantAlt=${msg.key.participantAlt || 'N/A'}`);
-            
+
             // 1. Intentar obtener el PN desde remoteJidAlt o participantAlt
             const altJid = msg.key.remoteJidAlt || msg.key.participantAlt;
             if (altJid && (altJid.includes('@s.whatsapp.net') || altJid.includes('@c.us'))) {
@@ -240,13 +240,13 @@ class BaileysClient {
               // Guardar en mapeo global
               lidPnMapping.set(lid, phoneNumber);
             }
-            
+
             // 2. Intentar obtener del mapeo global
             if (!phoneNumber && lidPnMapping.has(lid)) {
               phoneNumber = lidPnMapping.get(lid);
               logger.info(`[Baileys][${this.userId}] LID ${lid} -> PN ${phoneNumber} (via cache global)`);
             }
-            
+
             // 3. Intentar obtener de lidMapping del socket
             if (!phoneNumber) {
               try {
@@ -262,7 +262,7 @@ class BaileysClient {
                 logger.debug(`[Baileys][${this.userId}] No se pudo resolver LID via signalRepository: ${lidErr.message}`);
               }
             }
-            
+
             // Si no se pudo resolver, emitir al frontend y continuar
             if (!phoneNumber) {
               logger.warn(`[Baileys][${this.userId}] ⚠️ No se pudo resolver LID ${lid} a número de teléfono`);
@@ -280,11 +280,11 @@ class BaileysClient {
           } else {
             phoneNumber = from.split('@')[0];
           }
-          
+
           const searchJid = `${phoneNumber}@c.us`; // Formato de BD
 
           const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-          
+
           // Buscar mensaje outbound SIN filtrar por createdBy (para encontrar campañas de cualquier usuario)
           const enviado = await Message.findOne({
             to: searchJid,
@@ -356,14 +356,14 @@ class BaileysClient {
           const reglas = await Autoresponse.find({ createdBy: jobCreatorObjectId, active: true });
 
           if (reglas.length > 0) {
-            const normalize = (s) => (s || "").toLowerCase().trim();
+            const normalize = (s) => (s || "").toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
             const bodyNorm = normalize(text);
 
             // Buscar regla que coincida
             const matched = reglas.find(r => {
               const kw = normalize(r.keyword);
               if (!kw) return false;
-              const mt = r.matchType || "exact";
+              const mt = r.matchType || "contains";
               if (mt === "exact") return bodyNorm === kw;
               if (mt === "startsWith") return bodyNorm.startsWith(kw);
               if (mt === "endsWith") return bodyNorm.endsWith(kw);
@@ -401,6 +401,17 @@ class BaileysClient {
                     isFallback: rule.isFallback || false,
                     userMessage: text || ''
                   });
+
+                  try {
+                    getIO().to(`user_${this.userId}`).emit('auto_response:sent', {
+                      contact: enviado.contact,
+                      keyword: rule.keyword || "Fallback",
+                      response: rule.response,
+                      timestamp: new Date()
+                    });
+                  } catch (socketErr) {
+                    logger.warn(`[Baileys][${this.userId}] Error emitiendo evento auto_response:sent:`, socketErr.message);
+                  }
                 } catch (e) {
                   logger.warn(`[Baileys][${this.userId}] Error enviando auto-respuesta:`, e.message);
                 }

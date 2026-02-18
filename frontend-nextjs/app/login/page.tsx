@@ -10,10 +10,10 @@
 
 import type React from "react"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
-import { Eye, EyeOff, MessageCircle, Moon, Sun, Sparkles, Zap, Shield } from "lucide-react"
+import { Eye, EyeOff, MessageCircle, Moon, Sun, Sparkles, Zap, Shield, Ban } from "lucide-react"
 import { AnimatedBackground } from "@/components/auth/animated-background"
 import { FloatingShapes } from "@/components/auth/floating-shapes"
 import { useAuth } from "@/lib/auth"
@@ -22,6 +22,7 @@ import { toast } from "sonner"
 /** Página de inicio de sesión */
 export default function LoginPage() {
     const router = useRouter()
+    const searchParams = useSearchParams()
     const { login } = useAuth()
 
     const [email, setEmail] = useState("")
@@ -30,6 +31,21 @@ export default function LoginPage() {
     const [rememberMe, setRememberMe] = useState(false)
     const [isLoading, setIsLoading] = useState(false)
     const [theme, setTheme] = useState<"light" | "dark">("light")
+    const [suspensionMessage, setSuspensionMessage] = useState<string | null>(null)
+
+    // Mostrar mensaje de suspensión si viene redirigido
+    useEffect(() => {
+        const isSuspended = searchParams.get('suspended')
+        if (isSuspended === 'true') {
+            const message = sessionStorage.getItem('suspensionMessage')
+            if (message) {
+                setSuspensionMessage(message)
+                sessionStorage.removeItem('suspensionMessage')
+            } else {
+                setSuspensionMessage('Tu cuenta se encuentra suspendida temporalmente.')
+            }
+        }
+    }, [searchParams])
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -48,7 +64,7 @@ export default function LoginPage() {
             /* Redirigir según rol */
             const role = response?.user?.role?.toLowerCase() || ''
 
-            if (role === 'asesor') {
+            if (role === 'asesor' || role === 'independiente') {
                 router.push('/dashboard/contact/today')
             } else if (role === 'supervisor') {
                 router.push('/dashboard/contact/admin')
@@ -187,6 +203,31 @@ export default function LoginPage() {
                                 Iniciar Sesión
                             </h2>
                         </div>
+
+                        {/* Mensaje de suspensión */}
+                        {suspensionMessage && (
+                            <div className={`p-4 rounded-xl mb-4 flex items-start gap-3 ${
+                                theme === "dark" 
+                                    ? "bg-orange-500/10 border border-orange-500/20" 
+                                    : "bg-orange-50 border border-orange-200"
+                            }`}>
+                                <Ban className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                                    theme === "dark" ? "text-orange-400" : "text-orange-500"
+                                }`} />
+                                <div>
+                                    <p className={`font-medium text-sm ${
+                                        theme === "dark" ? "text-orange-300" : "text-orange-700"
+                                    }`}>
+                                        Cuenta suspendida
+                                    </p>
+                                    <p className={`text-sm mt-1 ${
+                                        theme === "dark" ? "text-orange-400/80" : "text-orange-600"
+                                    }`}>
+                                        {suspensionMessage}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
                         <form onSubmit={handleSubmit} className="space-y-5">
                             <div>

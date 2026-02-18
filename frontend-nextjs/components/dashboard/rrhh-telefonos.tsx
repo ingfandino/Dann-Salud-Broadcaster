@@ -100,6 +100,7 @@ export function RRHHTelefonos() {
     const role = user?.role?.toLowerCase()
     const isGerencia = role === "gerencia"
     const isSupervisor = role === "supervisor"
+    const isEncargado = role === "encargado" // Encargado se comporta como Gerencia en teléfonos
 
     // Estados
     const [phones, setPhones] = useState<PhoneData[]>([])
@@ -113,7 +114,7 @@ export function RRHHTelefonos() {
     const [showEditModal, setShowEditModal] = useState(false)
     const [showRechargeModal, setShowRechargeModal] = useState(false)
     const [selectedPhone, setSelectedPhone] = useState<PhoneData | null>(null)
-
+    
     // Opciones para dropdowns
     const [supervisors, setSupervisors] = useState<UserOption[]>([])
     const [asesores, setAsesores] = useState<UserOption[]>([])
@@ -155,10 +156,10 @@ export function RRHHTelefonos() {
 
     useEffect(() => {
         loadPhones()
-        if (isGerencia) {
+        if (isGerencia || isEncargado) {
             loadSupervisors()
         }
-    }, [loadPhones, loadSupervisors, isGerencia])
+    }, [loadPhones, loadSupervisors, isGerencia, isEncargado])
 
     /* ========== FILTRADO ========== */
     const filteredPhones = phones.filter(phone => {
@@ -424,6 +425,7 @@ export function RRHHTelefonos() {
                 <PhoneModal
                     theme={theme}
                     isGerencia={isGerencia}
+                    isEncargado={isEncargado} // ✅ NUEVO: Rol Encargado
                     supervisors={supervisors}
                     asesores={asesores}
                     user={user}
@@ -447,6 +449,7 @@ export function RRHHTelefonos() {
                 <PhoneModal
                     theme={theme}
                     isGerencia={isGerencia}
+                    isEncargado={isEncargado} // ✅ NUEVO: Rol Encargado
                     supervisors={supervisors}
                     asesores={asesores}
                     user={user}
@@ -744,9 +747,10 @@ function PhoneCard({ phone, theme, isGerencia, isExpanded, onToggleExpand, onEdi
 }
 
 /* ========== MODAL CREAR/EDITAR TELÉFONO ========== */
-function PhoneModal({ theme, isGerencia, supervisors, asesores, user, phone, onClose, onSave, loadAsesores }: {
+function PhoneModal({ theme, isGerencia, isEncargado, supervisors, asesores, user, phone, onClose, onSave, loadAsesores }: {
     theme: string
     isGerencia: boolean
+    isEncargado: boolean // ✅ NUEVO: Rol Encargado
     supervisors: UserOption[]
     asesores: UserOption[]
     user: any
@@ -756,23 +760,29 @@ function PhoneModal({ theme, isGerencia, supervisors, asesores, user, phone, onC
     loadAsesores: (numeroEquipo: string) => void
 }) {
     const [form, setForm] = useState({
-        supervisor: phone?.supervisor?._id || (isGerencia ? "" : user?._id) || "",
+        supervisor: phone?.supervisor?._id || (isGerencia || isEncargado ? "" : user?._id) || "",
         modelo: phone?.modelo || "",
         numeroTelefono: phone?.numeroTelefono || "",
         asesorAsignado: phone?.asesorAsignado?._id || "",
         notas: phone?.notas || ""
     })
     const [saving, setSaving] = useState(false)
+    const [mounted, setMounted] = useState(false)
+
+    useEffect(() => {
+        setMounted(true)
+        return () => setMounted(false)
+    }, [])
 
     // Cargar asesores cuando cambia el supervisor (solo para Gerencia)
     useEffect(() => {
-        if (isGerencia && form.supervisor) {
+        if ((isGerencia || isEncargado) && form.supervisor) {
             const sup = supervisors.find(s => s._id === form.supervisor)
             if (sup?.numeroEquipo) {
                 loadAsesores(sup.numeroEquipo)
             }
         }
-    }, [form.supervisor, isGerencia, supervisors, loadAsesores])
+    }, [form.supervisor, isGerencia, isEncargado, supervisors, loadAsesores])
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -796,30 +806,39 @@ function PhoneModal({ theme, isGerencia, supervisors, asesores, user, phone, onC
         }
     }
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="fixed inset-0" onClick={onClose} />
-            <div className={cn(
-                "relative w-full max-w-md rounded-xl p-6 shadow-xl animate-scale-in",
-                theme === "dark" ? "bg-gray-900" : "bg-white"
-            )}>
+    if (!mounted) return null
+
+    const { createPortal } = require('react-dom')
+
+    return createPortal(
+        <div 
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200"
+            onClick={(e) => e.target === e.currentTarget && onClose()}
+        >
+            <div 
+                className={cn(
+                    "w-full max-w-md max-h-[90vh] overflow-y-auto rounded-xl p-6 shadow-xl border",
+                    theme === "dark" ? "bg-gray-900 border-gray-700" : "bg-white border-gray-200"
+                )}
+                onClick={(e) => e.stopPropagation()}
+            >
                 <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 z-10"
                 >
                     <X className="w-5 h-5" />
                 </button>
 
                 <h3 className={cn(
-                    "text-lg font-bold mb-4",
+                    "text-lg font-bold mb-4 pr-8",
                     theme === "dark" ? "text-white" : "text-gray-800"
                 )}>
                     {phone ? "Editar Teléfono" : "Nuevo Teléfono"}
                 </h3>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Supervisor (solo editable por Gerencia) */}
-                    {isGerencia ? (
+                    {/* Supervisor (solo editable por Gerencia/Encargado) */}
+                    {(isGerencia || isEncargado) ? (
                         <div>
                             <label className={cn(
                                 "block text-sm font-medium mb-1",
@@ -979,7 +998,8 @@ function PhoneModal({ theme, isGerencia, supervisors, asesores, user, phone, onC
                     </div>
                 </form>
             </div>
-        </div>
+        </div>,
+        document.body
     )
 }
 
@@ -997,6 +1017,12 @@ function RechargeModal({ theme, phone, onClose, onSave }: {
         fecha: new Date().toISOString().split("T")[0]
     })
     const [saving, setSaving] = useState(false)
+    const [mounted, setMounted] = useState(false)
+
+    useEffect(() => {
+        setMounted(true)
+        return () => setMounted(false)
+    }, [])
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -1024,22 +1050,31 @@ function RechargeModal({ theme, phone, onClose, onSave }: {
         }
     }
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="fixed inset-0" onClick={onClose} />
-            <div className={cn(
-                "relative w-full max-w-md rounded-xl p-6 shadow-xl animate-scale-in",
-                theme === "dark" ? "bg-gray-900" : "bg-white"
-            )}>
+    if (!mounted) return null
+
+    const { createPortal } = require('react-dom')
+
+    return createPortal(
+        <div 
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200"
+            onClick={(e) => e.target === e.currentTarget && onClose()}
+        >
+            <div 
+                className={cn(
+                    "w-full max-w-md max-h-[90vh] overflow-y-auto rounded-xl p-6 shadow-xl border",
+                    theme === "dark" ? "bg-gray-900 border-gray-700" : "bg-white border-gray-200"
+                )}
+                onClick={(e) => e.stopPropagation()}
+            >
                 <button
                     onClick={onClose}
-                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 z-10"
                 >
                     <X className="w-5 h-5" />
                 </button>
 
                 <h3 className={cn(
-                    "text-lg font-bold mb-2",
+                    "text-lg font-bold mb-2 pr-8",
                     theme === "dark" ? "text-white" : "text-gray-800"
                 )}>
                     Nueva Recarga / Gasto
@@ -1185,6 +1220,7 @@ function RechargeModal({ theme, phone, onClose, onSave }: {
                     </div>
                 </form>
             </div>
-        </div>
+        </div>,
+        document.body
     )
 }

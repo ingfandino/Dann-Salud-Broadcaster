@@ -88,7 +88,7 @@ async function getUsers(req, res) {
             return res.json(users);
         }
 
-        if (role === "administrativo" || role === "gerencia") {
+        if (role === "administrativo" || role === "gerencia" || role === "encargado") {
             queryFilter = { deletedAt: null };
         } else if (role === "supervisor" && includeAllAuditors === "true") {
             // Devolver todos los usuarios sin restricción de equipo
@@ -121,7 +121,7 @@ async function getUsers(req, res) {
         } else if (role === "asesor" || role === "auditor") {
             // ✅ Si pide supervisores para reasignación, devolver todos los supervisores
             if (scope === "supervisors") {
-                queryFilter = { role: "supervisor", active: true, deletedAt: null };
+                queryFilter = { role: { $in: ['supervisor', 'supervisor_reventa', 'encargado'] }, active: true, deletedAt: null };
             } else if (includeAllAuditors === "true") {
                 // ✅ Para checkbox "Pertenece a otro equipo": devolver todos los usuarios
                 // El frontend filtrará por roles específicos
@@ -361,7 +361,7 @@ async function updateUserRole(req, res) {
             return res.status(403).json({ error: "Acceso denegado" });
         }
 
-        const validRoles = ["asesor", "supervisor", "auditor", "administrativo", "gerencia", "RR.HH", "recuperador"];
+        const validRoles = ["asesor", "supervisor", "auditor", "administrativo", "gerencia", "RR.HH", "recuperador", "encargado", "independiente"];
         if (!validRoles.includes(role)) {
             return res.status(400).json({ error: "Rol no válido" });
         }
@@ -609,6 +609,96 @@ async function editTeamPeriod(req, res) {
     }
 }
 
+/** 
+ * Suspende temporalmente una cuenta de usuario.
+ * Solo Gerencia puede suspender usuarios.
+ */
+async function suspendUser(req, res) {
+    try {
+        const { id } = req.params;
+        const { suspensionStart, suspensionEnd } = req.body;
+
+        // Validar que se proporcionaron las fechas
+        if (!suspensionStart || !suspensionEnd) {
+            return res.status(400).json({ error: 'Se requieren fecha de inicio y fin de suspensión' });
+        }
+
+        const startDate = new Date(suspensionStart);
+        const endDate = new Date(suspensionEnd);
+
+        // Validar que la fecha de fin sea posterior a la de inicio
+        if (endDate <= startDate) {
+            return res.status(400).json({ error: 'La fecha de fin debe ser posterior a la fecha de inicio' });
+        }
+
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        // Actualizar campos de suspensión
+        user.suspensionStart = startDate;
+        user.suspensionEnd = endDate;
+        user.suspendedBy = req.user._id;
+
+        await user.save();
+
+        logger.info(`[SUSPENSION] Usuario ${user.email} suspendido del ${startDate.toLocaleDateString()} al ${endDate.toLocaleDateString()} por ${req.user.email}`);
+
+        res.json({
+            message: 'Usuario suspendido exitosamente',
+            user: {
+                _id: user._id,
+                nombre: user.nombre,
+                email: user.email,
+                suspensionStart: user.suspensionStart,
+                suspensionEnd: user.suspensionEnd
+            }
+        });
+
+    } catch (err) {
+        logger.error('❌ Error en suspendUser:', err);
+        res.status(500).json({ error: err.message });
+    }
+}
+
+/** 
+ * Cancela la suspensión de una cuenta de usuario.
+ * Solo Gerencia puede cancelar suspensiones.
+ */
+async function cancelSuspension(req, res) {
+    try {
+        const { id } = req.params;
+
+        const user = await User.findById(id);
+        if (!user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        // Limpiar campos de suspensión
+        user.suspensionStart = null;
+        user.suspensionEnd = null;
+        user.suspendedBy = null;
+
+        await user.save();
+
+        logger.info(`[SUSPENSION] Suspensión cancelada para ${user.email} por ${req.user.email}`);
+
+        res.json({
+            message: 'Suspensión cancelada exitosamente',
+            user: {
+                _id: user._id,
+                nombre: user.nombre,
+                email: user.email
+            }
+        });
+
+    } catch (err) {
+        logger.error('❌ Error en cancelSuspension:', err);
+        res.status(500).json({ error: err.message });
+    }
+}
+
 /** Elimina un periodo del historial (no el actual/abierto) */
 async function deleteTeamPeriod(req, res) {
     try {
@@ -659,5 +749,7 @@ module.exports = {
     getAvailableGroups,
     addTeamChange,
     editTeamPeriod,
-    deleteTeamPeriod
+    deleteTeamPeriod,
+    suspendUser,
+    cancelSuspension
 };

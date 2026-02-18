@@ -109,12 +109,22 @@ export function MessageDetail({ message, onBack, onReply, onForward, onDelete, o
                 <hr className={cn(theme === "dark" ? "border-white/10" : "border-gray-200")} />
 
                 {/* Cuerpo del mensaje */}
-                <div className={cn(
-                    "whitespace-pre-wrap leading-relaxed",
-                    theme === "dark" ? "text-gray-200" : "text-gray-800"
-                )}>
-                    {message.content}
-                </div>
+                {message.isHtml ? (
+                    <div
+                        className={cn(
+                            "prose prose-sm max-w-none leading-relaxed",
+                            theme === "dark" ? "prose-invert text-gray-200" : "text-gray-800"
+                        )}
+                        dangerouslySetInnerHTML={{ __html: message.content }}
+                    />
+                ) : (
+                    <div className={cn(
+                        "whitespace-pre-wrap leading-relaxed",
+                        theme === "dark" ? "text-gray-200" : "text-gray-800"
+                    )}>
+                        {message.content}
+                    </div>
+                )}
 
                 {/* Archivos adjuntos */}
                 {message.attachments.length > 0 && (

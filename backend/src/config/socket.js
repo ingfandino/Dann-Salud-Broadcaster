@@ -150,7 +150,7 @@ function initSocket(server, app = null, allowedOrigins = []) {
         /** === SUSCRIPCIONES A AUDITORÍAS POR ROL === */
         socket.on("audits:subscribe", (_role) => {
             if (!hasUser()) return ackErr("audits");
-            const mapping = { admin: "administrators", gerencia: "administrators", supervisor: "supervisors", auditor: "auditors" };
+            const mapping = { admin: "administrators", gerencia: "administrators", supervisor: "supervisors", encargado: "supervisors", auditor: "auditors" };
             const room = mapping[userRole()];
             if (!room) return ackErr("audits", "FORBIDDEN");
             socket.join(room);

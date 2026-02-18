@@ -76,6 +76,7 @@ export function BaseAfiliadosConfiguracion() {
   const [supervisorStats, setSupervisorStats] = useState<SupervisorStats | null>(null)
 
   const isSupervisor = user?.role?.toLowerCase() === 'supervisor'
+  const isEncargado = user?.role?.toLowerCase() === 'encargado'
 
   useEffect(() => {
     loadData()
@@ -90,7 +91,7 @@ export function BaseAfiliadosConfiguracion() {
         const statsRes = await api.affiliates.getSupervisorStats()
         setSupervisorStats(statsRes.data)
       } else {
-        // Load Gerencia Config
+        // Load Gerencia/Encargado Config
         const [supervisorsRes, configRes, obrasSocialesRes] = await Promise.all([
           api.users.getSupervisors(),
           api.affiliates.getExportConfig(),

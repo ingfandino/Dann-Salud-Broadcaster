@@ -52,7 +52,7 @@ const userSchema = new mongoose.Schema(
         /** Rol del usuario que determina sus permisos en el sistema */
         role: {
             type: String,
-            enum: ["administrativo", "supervisor", "asesor", "auditor", "gerencia", "RR.HH", "recuperador"],
+            enum: ["administrativo", "supervisor", "asesor", "auditor", "gerencia", "RR.HH", "recuperador", "encargado", "independiente"],
             default: "asesor",
         },
         /** Referencia al supervisor asignado (para asesores) */
@@ -91,6 +91,22 @@ const userSchema = new mongoose.Schema(
             type: Date,
             default: null,
             select: false,
+        },
+        /** Fecha de inicio de suspensión temporal */
+        suspensionStart: {
+            type: Date,
+            default: null,
+        },
+        /** Fecha de fin de suspensión temporal */
+        suspensionEnd: {
+            type: Date,
+            default: null,
+        },
+        /** Usuario que aplicó la suspensión */
+        suspendedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+            default: null,
         },
     },
     { timestamps: true }

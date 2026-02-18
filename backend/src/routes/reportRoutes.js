@@ -23,6 +23,6 @@ router.post("/", requireAuth, permit("gerencia"), createReport);
 
 // ✅ CORRECCIÓN: Nuevas rutas para integración con mensajería masiva
 router.get("/summary", requireAuth, permit("gerencia", "supervisor"), getReportsSummary);
-router.post("/generate/:jobId", requireAuth, permit("gerencia", "supervisor", "administrativo", "asesor"), generateReportsFromJob);
+router.post("/generate/:jobId", requireAuth, permit("gerencia", "supervisor", "administrativo", "asesor", "independiente"), generateReportsFromJob);
 
 module.exports = router;

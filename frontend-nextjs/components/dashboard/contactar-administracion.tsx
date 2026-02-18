@@ -51,11 +51,12 @@ export function ContactarAdministracion() {
                 // Filtrar según rol
                 let filteredUsers: User[] = []
 
-                if (user?.role === 'gerencia' || user?.role === 'admin') {
-                    // Gerencia: ve todos los asesores y auditores activos (con numeroEquipo)
+                if (user?.role === 'gerencia' || user?.role === 'admin' || user?.role === 'encargado') {
+                    // Gerencia/Encargado: ve todos los asesores, auditores y supervisores activos
                     filteredUsers = allUsers.filter(u =>
                         u.active === true && (
                             u.role === 'asesor' ||
+                            u.role === 'supervisor' ||
                             (u.role === 'auditor' && u.numeroEquipo)
                         )
                     )

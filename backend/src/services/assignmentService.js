@@ -25,20 +25,30 @@ function shuffleArray(array) {
 
 /**
  * Obtener afiliados mezclados (Frescos + Reutilizables) del pool del supervisor
+ * Respeta estrictamente los porcentajes solicitados por el usuario.
+ * Fallback solo se activa cuando no hay suficientes datos del tipo solicitado.
+ * 
  * @param {Object} mixConfig - Configuración de mezcla (freshPercentage, reusablePercentage)
  * @param {Number} totalCount - Cantidad total de leads a obtener
  * @param {String} supervisorId - ID del supervisor que ejecuta la distribución
  * @param {Set} usedIds - IDs ya utilizados en esta ejecución
+ * @returns {Object} { leads, metadata } - Leads mezclados y metadata de distribución
  */
 async function getMixedLeads(mixConfig, totalCount, supervisorId, usedIds = new Set()) {
     try {
         const freshPercentage = mixConfig.freshPercentage || 50;
         const reusablePercentage = mixConfig.reusablePercentage || 50;
 
+        // Detectar porcentajes extremos (100% de un solo tipo)
+        const is100Fresh = freshPercentage === 100;
+        const is100Reusable = reusablePercentage === 100;
+
         const targetFresh = Math.floor(totalCount * (freshPercentage / 100));
         const targetReusable = totalCount - targetFresh;
 
         logger.info(`📊 Objetivo: ${targetFresh} frescos + ${targetReusable} reutilizables (total: ${totalCount}, supervisor: ${supervisorId})`);
+        if (is100Fresh) logger.info(`📊 Modo: 100% FRESCOS solicitados`);
+        if (is100Reusable) logger.info(`📊 Modo: 100% REUTILIZABLES solicitados`);
 
         // ========== DATOS FRESCOS ==========
         let freshAffiliates = [];
@@ -81,61 +91,131 @@ async function getMixedLeads(mixConfig, totalCount, supervisorId, usedIds = new 
 
         logger.info(`📊 Obtenidos: ${freshObtained}/${targetFresh} frescos, ${reusableObtained}/${targetReusable} reutilizables`);
 
-        // ========== FALLBACK: Compensar solo si faltan datos ==========
+        // ========== FALLBACK CONTROLADO ==========
+        // REGLA: Solo compensar con el tipo opuesto si:
+        // 1. El usuario NO pidió 100% de un solo tipo (mezcla), O
+        // 2. El usuario pidió 100% pero NO hay suficientes del tipo solicitado
         let extraFresh = [];
         let extraReusable = [];
+        let fallbackUsed = false;
+        let fallbackReason = null;
 
         const currentTotal = freshObtained + reusableObtained;
+
         if (currentTotal < totalCount) {
             const deficit = totalCount - currentTotal;
-            logger.warn(`⚠️ Déficit de ${deficit} datos. Intentando compensar...`);
 
-            if (freshObtained < targetFresh) {
-                const freshDeficit = targetFresh - freshObtained;
-                extraReusable = await Affiliate.find({
-                    active: true,
-                    exportedTo: supervisorId,
-                    isUsed: { $ne: true },
-                    _id: { $nin: Array.from(usedIds) },
-                    dataSource: 'reusable'
-                })
-                    .limit(freshDeficit)
-                    .sort({ uploadDate: -1 })
-                    .lean();
-                
-                extraReusable.forEach(a => usedIds.add(a._id.toString()));
-                logger.info(`♻️ Compensación: ${extraReusable.length} reutilizables extra (por falta de frescos)`);
-            }
+            if (is100Fresh) {
+                // Usuario pidió 100% frescos - solo usar fallback si no hay suficientes frescos
+                if (freshObtained < totalCount) {
+                    fallbackUsed = true;
+                    fallbackReason = `No hay suficientes datos frescos (${freshObtained}/${totalCount})`;
+                    const freshDeficit = totalCount - freshObtained;
 
-            if (reusableObtained < targetReusable) {
-                const reusableDeficit = targetReusable - reusableObtained;
-                extraFresh = await Affiliate.find({
-                    active: true,
-                    exportedTo: supervisorId,
-                    isUsed: { $ne: true },
-                    _id: { $nin: Array.from(usedIds) },
-                    $or: [
-                        { dataSource: 'fresh' },
-                        { dataSource: { $exists: false } }
-                    ]
-                })
-                    .limit(reusableDeficit)
-                    .sort({ uploadDate: -1 })
-                    .lean();
-                
-                extraFresh.forEach(a => usedIds.add(a._id.toString()));
-                logger.info(`✨ Compensación: ${extraFresh.length} frescos extra (por falta de reutilizables)`);
+                    extraReusable = await Affiliate.find({
+                        active: true,
+                        exportedTo: supervisorId,
+                        isUsed: { $ne: true },
+                        _id: { $nin: Array.from(usedIds) },
+                        dataSource: 'reusable'
+                    })
+                        .limit(freshDeficit)
+                        .sort({ uploadDate: -1 })
+                        .lean();
+
+                    extraReusable.forEach(a => usedIds.add(a._id.toString()));
+                    logger.warn(`⚠️ FALLBACK ACTIVADO: ${fallbackReason}. Completando con ${extraReusable.length} reutilizables.`);
+                }
+            } else if (is100Reusable) {
+                // Usuario pidió 100% reutilizables - solo usar fallback si no hay suficientes
+                if (reusableObtained < totalCount) {
+                    fallbackUsed = true;
+                    fallbackReason = `No hay suficientes datos reutilizables (${reusableObtained}/${totalCount})`;
+                    const reusableDeficit = totalCount - reusableObtained;
+
+                    extraFresh = await Affiliate.find({
+                        active: true,
+                        exportedTo: supervisorId,
+                        isUsed: { $ne: true },
+                        _id: { $nin: Array.from(usedIds) },
+                        $or: [
+                            { dataSource: 'fresh' },
+                            { dataSource: { $exists: false } }
+                        ]
+                    })
+                        .limit(reusableDeficit)
+                        .sort({ uploadDate: -1 })
+                        .lean();
+
+                    extraFresh.forEach(a => usedIds.add(a._id.toString()));
+                    logger.warn(`⚠️ FALLBACK ACTIVADO: ${fallbackReason}. Completando con ${extraFresh.length} frescos.`);
+                }
+            } else {
+                // Usuario pidió mezcla (ej: 70/30) - compensar proporcionalmente
+                logger.warn(`⚠️ Déficit de ${deficit} datos en modo mezcla. Compensando...`);
+
+                if (freshObtained < targetFresh) {
+                    const freshDeficit = targetFresh - freshObtained;
+                    extraReusable = await Affiliate.find({
+                        active: true,
+                        exportedTo: supervisorId,
+                        isUsed: { $ne: true },
+                        _id: { $nin: Array.from(usedIds) },
+                        dataSource: 'reusable'
+                    })
+                        .limit(freshDeficit)
+                        .sort({ uploadDate: -1 })
+                        .lean();
+
+                    extraReusable.forEach(a => usedIds.add(a._id.toString()));
+                    if (extraReusable.length > 0) {
+                        logger.info(`♻️ Compensación: ${extraReusable.length} reutilizables extra (por falta de frescos)`);
+                    }
+                }
+
+                if (reusableObtained < targetReusable) {
+                    const reusableDeficit = targetReusable - reusableObtained;
+                    extraFresh = await Affiliate.find({
+                        active: true,
+                        exportedTo: supervisorId,
+                        isUsed: { $ne: true },
+                        _id: { $nin: Array.from(usedIds) },
+                        $or: [
+                            { dataSource: 'fresh' },
+                            { dataSource: { $exists: false } }
+                        ]
+                    })
+                        .limit(reusableDeficit)
+                        .sort({ uploadDate: -1 })
+                        .lean();
+
+                    extraFresh.forEach(a => usedIds.add(a._id.toString()));
+                    if (extraFresh.length > 0) {
+                        logger.info(`✨ Compensación: ${extraFresh.length} frescos extra (por falta de reutilizables)`);
+                    }
+                }
             }
         }
 
-        // Marcar origen
+        // Marcar origen correctamente
         const freshWithSource = [...freshAffiliates, ...extraFresh].map(a => ({ ...a, _source: 'fresh' }));
         const reusableWithSource = [...reusableAffiliates, ...extraReusable].map(a => ({ ...a, _source: 'reusable' }));
 
         const combined = [...freshWithSource, ...reusableWithSource];
-        
+
+        const finalFreshCount = freshWithSource.length;
+        const finalReusableCount = reusableWithSource.length;
         const finalTotal = combined.length;
-        logger.info(`📊 Resultado final: ${finalTotal}/${totalCount} (${freshWithSource.length} frescos, ${reusableWithSource.length} reutilizables)`);
+
+        logger.info(`📊 Resultado final: ${finalTotal}/${totalCount} (${finalFreshCount} frescos, ${finalReusableCount} reutilizables)`);
+
+        if (fallbackUsed) {
+            logger.warn(`⚠️ Se activó fallback: ${fallbackReason}`);
+        } else if (is100Fresh && finalReusableCount === 0) {
+            logger.info(`✅ 100% frescos respetado correctamente`);
+        } else if (is100Reusable && finalFreshCount === 0) {
+            logger.info(`✅ 100% reutilizables respetado correctamente`);
+        }
 
         return shuffleArray(combined);
 
@@ -213,11 +293,11 @@ async function distributeLeads(config, supervisorId) {
             const leads = await getMixedLeads(mix, quantity, supervisorId, usedIds);
 
             if (leads.length === 0) {
-                results.details.push({ 
-                    asesorId, 
-                    assigned: 0, 
+                results.details.push({
+                    asesorId,
+                    assigned: 0,
                     recycled: recycleResult.recycled,
-                    message: "No hay leads disponibles en el pool del supervisor" 
+                    message: "No hay leads disponibles en el pool del supervisor"
                 });
                 continue;
             }
@@ -243,8 +323,8 @@ async function distributeLeads(config, supervisorId) {
             const affiliateIds = leads.map(l => l._id);
             await Affiliate.updateMany(
                 { _id: { $in: affiliateIds } },
-                { 
-                    isUsed: true, 
+                {
+                    isUsed: true,
                     assignedTo: asesorId,
                     assignedAt: new Date(),
                     leadStatus: 'Asignado'
@@ -255,8 +335,8 @@ async function distributeLeads(config, supervisorId) {
             leads.forEach(l => usedIds.add(l._id.toString()));
 
             results.totalAssigned += assignments.length;
-            results.details.push({ 
-                asesorId, 
+            results.details.push({
+                asesorId,
                 assigned: assignments.length,
                 recycled: recycleResult.recycled
             });
@@ -309,10 +389,10 @@ async function getDailyAssignments(userId) {
         const contactedSet = new Set(contactedPhones.map(c => String(c.telefono)));
 
         for (const assignment of assignments) {
-            const phone = assignment.affiliate?.telefono1 
-                ? String(assignment.affiliate.telefono1).replace(/\D/g, "") 
+            const phone = assignment.affiliate?.telefono1
+                ? String(assignment.affiliate.telefono1).replace(/\D/g, "")
                 : null;
-            
+
             if (phone && contactedSet.has(phone) && assignment.status !== 'Spam') {
                 assignment.status = 'Spam';
                 assignment.subStatus = 'Ya contactado por campaña masiva';

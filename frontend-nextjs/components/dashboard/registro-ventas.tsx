@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import {
   Filter, Download, Calendar, Pencil, Trash2,
   X, ChevronDown, ChevronUp, RefreshCw,
-  Upload, FileSpreadsheet, AlertCircle, CheckCircle2, FileWarning, Info
+  Upload, FileSpreadsheet, AlertCircle, CheckCircle2, FileWarning, Info, Copy
 } from "lucide-react"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
@@ -19,20 +19,27 @@ import { connectSocket } from "@/lib/socket"
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "RAS", "TURF", "Medicenter"]
 
 const STATUS_OPTIONS = [
+  "Pendiente",
   "QR hecho",
   "QR hecho (Temporal)",
-  "QR hecho, pero pendiente de aprobación",
+  "QR hecho pero pendiente de aprobación",
   "Hacer QR",
-  "Aprobada",
-  "Pendiente",
-  "Cargada",
-  "Falta clave",
   "AFIP",
-  "Rechazada",
+  "Baja laboral con nueva alta",
+  "Baja laboral sin nueva alta",
   "Padrón",
-  "Remuneración no válida",
-  "Autovinculación",
   "En revisión",
+  "Remuneración no válida",
+  "Cargada",
+  "Aprobada",
+  "Aprobada, pero no reconoce clave",
+  "Rehacer vídeo",
+  "Rechazada",
+  "Falta documentación",
+  "Falta clave",
+  "Falta clave y documentación",
+  "El afiliado cambió la clave",
+  "Autovinculación",
   "Caída",
   "Completa",
 ]
@@ -160,10 +167,10 @@ const getWeeklyWorkPeriod = () => {
   const dayOfWeek = argentinaTime.getDay()
   const hours = argentinaTime.getHours()
   const minutes = argentinaTime.getMinutes()
-  
+
   let fridayStart = new Date(argentinaTime)
   let thursdayEnd = new Date(argentinaTime)
-  
+
   if (dayOfWeek === 4 && (hours > 23 || (hours === 23 && minutes >= 1))) {
     fridayStart.setDate(argentinaTime.getDate() + 1)
   } else if (dayOfWeek === 5) {
@@ -175,20 +182,20 @@ const getWeeklyWorkPeriod = () => {
   } else {
     fridayStart.setDate(argentinaTime.getDate() - dayOfWeek - 2)
   }
-  
+
   fridayStart.setHours(0, 0, 0, 0)
-  
+
   thursdayEnd = new Date(fridayStart)
   thursdayEnd.setDate(fridayStart.getDate() + 6)
   thursdayEnd.setHours(23, 1, 0, 0)
-  
+
   const formatDate = (d: Date) => {
     const year = d.getFullYear()
     const month = String(d.getMonth() + 1).padStart(2, "0")
     const day = String(d.getDate()).padStart(2, "0")
     return `${year}-${month}-${day}`
   }
-  
+
   return {
     dateFrom: formatDate(fridayStart),
     dateTo: formatDate(thursdayEnd)
@@ -251,9 +258,49 @@ const STATUS_COLORS: Record<string, {
     badge: { light: "bg-lime-100 text-lime-700", dark: "bg-lime-500/30 text-lime-300" },
     row: { light: "bg-lime-50 hover:bg-lime-100", dark: "bg-lime-900/20 hover:bg-lime-900/30" },
   },
-  "qr hecho, pero pendiente de aprobación": {
-    badge: { light: "bg-yellow-200 text-yellow-800", dark: "bg-yellow-700/30 text-yellow-400" },
-    row: { light: "bg-yellow-100 hover:bg-yellow-200", dark: "bg-yellow-900/30 hover:bg-yellow-900/40" },
+  "qr hecho pero pendiente de aprobación": {
+    badge: { light: "bg-emerald-100 text-emerald-800", dark: "bg-emerald-500/20 text-emerald-400" },
+    row: { light: "bg-emerald-50 hover:bg-emerald-100", dark: "bg-emerald-900/20 hover:bg-emerald-900/30" },
+  },
+  "baja laboral con nueva alta": {
+    badge: { light: "bg-blue-100 text-blue-800", dark: "bg-blue-500/20 text-blue-400" },
+    row: { light: "bg-blue-50 hover:bg-blue-100", dark: "bg-blue-900/20 hover:bg-blue-900/30" },
+  },
+  "baja laboral sin nueva alta": {
+    badge: { light: "bg-slate-100 text-slate-800", dark: "bg-slate-500/20 text-slate-400" },
+    row: { light: "bg-slate-50 hover:bg-slate-100", dark: "bg-slate-900/20 hover:bg-slate-900/30" },
+  },
+  "aprobada, pero no reconoce clave": {
+    badge: { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" },
+    row: { light: "bg-yellow-50 hover:bg-yellow-100", dark: "bg-yellow-900/20 hover:bg-yellow-900/30" },
+  },
+  "rehacer vídeo": {
+    badge: { light: "bg-red-300 text-red-900", dark: "bg-red-500/20 text-red-400" },
+    row: { light: "bg-red-50 hover:bg-red-100", dark: "bg-red-900/20 hover:bg-red-900/30" },
+  },
+  "falta documentación": {
+    badge: { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
+    row: { light: "bg-orange-50 hover:bg-orange-100", dark: "bg-orange-900/20 hover:bg-orange-900/30" },
+  },
+  "falta clave": {
+    badge: { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
+    row: { light: "bg-orange-50 hover:bg-orange-100", dark: "bg-orange-900/20 hover:bg-orange-900/30" },
+  },
+  "falta clave (por arca)": {
+    badge: { light: "bg-indigo-100 text-indigo-800", dark: "bg-indigo-500/20 text-indigo-400" },
+    row: { light: "bg-indigo-50 hover:bg-indigo-100", dark: "bg-indigo-900/20 hover:bg-indigo-900/30" },
+  },
+  "falta clave y documentación": {
+    badge: { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
+    row: { light: "bg-orange-50 hover:bg-orange-100", dark: "bg-orange-900/20 hover:bg-orange-900/30" },
+  },
+  "el afiliado cambió la clave": {
+    badge: { light: "bg-orange-200 text-orange-900", dark: "bg-orange-500/20 text-orange-400" },
+    row: { light: "bg-orange-50 hover:bg-orange-100", dark: "bg-orange-900/20 hover:bg-orange-900/30" },
+  },
+  "completa": {
+    badge: { light: "bg-lime-600 text-white", dark: "bg-lime-500/30 text-lime-300" },
+    row: { light: "bg-lime-50 hover:bg-lime-100", dark: "bg-lime-900/20 hover:bg-lime-900/30" },
   },
 }
 
@@ -305,6 +352,50 @@ const getSupervisorName = (audit: Audit): string => {
     return audit.asesor.supervisor.nombre
   }
   return "-"
+}
+
+const copyColumnToClipboard = async (
+  audits: Audit[],
+  columnKey: keyof Audit | "aporte",
+  fieldName: string,
+  toastFn: typeof toast
+) => {
+  try {
+    const values = audits
+      .map((audit) => {
+        if (columnKey === "nombre") return audit.nombre?.toUpperCase() || ""
+        if (columnKey === "aporte") return audit.aporte ? String(audit.aporte) : ""
+        return String(audit[columnKey] || "")
+      })
+      .filter((v) => v && v.trim() !== "")
+
+    if (values.length === 0) {
+      toastFn.error("No hay datos para copiar")
+      return
+    }
+
+    const text = values.join("\n")
+
+    // Intentar con clipboard API primero
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      // Fallback: usar textarea temporal
+      const textarea = document.createElement("textarea")
+      textarea.value = text
+      textarea.style.position = "fixed"
+      textarea.style.left = "-9999px"
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand("copy")
+      document.body.removeChild(textarea)
+    }
+
+    toastFn.success(`${values.length} ${fieldName} copiados`, { duration: 1500 })
+  } catch (err) {
+    console.error("Error copiando columna:", err)
+    toastFn.error("Error al copiar - verifique permisos del navegador")
+  }
 }
 
 const getSupervisorColor = (supervisorName: string, theme: string) => {
@@ -448,7 +539,7 @@ export function RegistroVentas() {
     return asesoresList.filter(a => a.numeroEquipo && equiposSupervisores.has(a.numeroEquipo))
   }, [asesoresList, selectedSupervisores, supervisoresList])
 
-  const isQRHechoFilterActive = selectedEstados.some(e => 
+  const isQRHechoFilterActive = selectedEstados.some(e =>
     e.toLowerCase() === "qr hecho"
   )
 
@@ -528,36 +619,46 @@ export function RegistroVentas() {
       const params = buildParams()
       const { data } = await api.audits.list(params)
       const auditsArray = Array.isArray(data) ? data : []
-      
+
       // Filtrar registros que:
-      // 1. Estado actual es "Completa", O
-      // 2. Tienen "Completa" en su historial, O
+      // 1. Estado actual es "Completa" o estados de seguimiento post-venta, O
+      // 2. Tienen alguno de esos estados en su historial, O
       // 3. Estado actual es "QR hecho" o variantes (para coincidir con Liquidación)
+      const estadosIncluidos = [
+        "completa",
+        "falta clave",
+        "falta clave (por arca)",
+        "rehacer vídeo",
+        "falta clave y documentación",
+        "falta documentación",
+        "autovinculación"
+      ]
+
       const filteredAudits = auditsArray.filter((audit: Audit) => {
         const statusLower = (audit.status || "").toLowerCase().trim()
-        
+
         // ✅ Incluir registros con estado "QR hecho" o variantes (igual que Liquidación)
-        if (statusLower === "qr hecho" || 
-            statusLower === "qr hecho (temporal)" || 
-            statusLower === "qr hecho, pero pendiente de aprobación" ||
-            statusLower === "cargada" ||
-            statusLower === "aprobada") {
+        if (statusLower === "qr hecho" ||
+          statusLower === "qr hecho (temporal)" ||
+          statusLower === "qr hecho pero pendiente de aprobación" ||
+          statusLower === "cargada" ||
+          statusLower === "aprobada") {
           return true
         }
-        
-        // Verificar si el estado actual es "Completa"
-        if (statusLower === "completa") return true
-        
-        // Verificar si statusHistory contiene "Completa"
+
+        // Verificar si el estado actual es uno de los estados incluidos
+        if (estadosIncluidos.includes(statusLower)) return true
+
+        // Verificar si statusHistory contiene alguno de los estados incluidos
         if (audit.statusHistory && Array.isArray(audit.statusHistory)) {
           return audit.statusHistory.some(
-            (h) => (h.value || "").toLowerCase() === "completa"
+            (h) => estadosIncluidos.includes((h.value || "").toLowerCase())
           )
         }
-        
+
         return false
       })
-      
+
       setAudits(filteredAudits)
     } catch (err) {
       console.error(err)
@@ -586,7 +687,7 @@ export function RegistroVentas() {
       const supervisoresData = asesoresData
         .filter((u: User) => {
           const isActive = u?.active !== false
-          return isActive && (u.role === "supervisor" || u.role === "Supervisor") && u.nombre
+          return isActive && (u.role === "supervisor" || u.role === "Supervisor" || u.role === "encargado" || u.role === "Encargado") && u.nombre
         })
         .sort((a: User, b: User) => a.nombre.localeCompare(b.nombre))
       setSupervisoresList(supervisoresData)
@@ -754,7 +855,7 @@ export function RegistroVentas() {
           const response = await api.audits.bulkImport({ records: batch })
           totalSuccess += response.data.successCount || 0
           totalErrors += response.data.errorCount || 0
-          
+
           if (response.data.errors) {
             allRejected = [...allRejected, ...response.data.errors.map((e: any) => ({
               row: e.row + processedCount,
@@ -950,189 +1051,189 @@ export function RegistroVentas() {
             )}
           />
 
-            <div ref={estadoFilterRef} className="relative">
-              <button
-                onClick={() => setIsEstadoDropdownOpen(!isEstadoDropdownOpen)}
-                className={cn(
-                  "w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm",
-                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
-                )}
-              >
-                <span className="truncate">{formatMultiLabel(selectedEstados, "Estado", "estados")}</span>
-                <ChevronDown className="w-4 h-4" />
-              </button>
-              {isEstadoDropdownOpen && (
-                <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
-                  <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
+          <div ref={estadoFilterRef} className="relative">
+            <button
+              onClick={() => setIsEstadoDropdownOpen(!isEstadoDropdownOpen)}
+              className={cn(
+                "w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm",
+                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+              )}
+            >
+              <span className="truncate">{formatMultiLabel(selectedEstados, "Estado", "estados")}</span>
+              <ChevronDown className="w-4 h-4" />
+            </button>
+            {isEstadoDropdownOpen && (
+              <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEstados(STATUS_OPTIONS)}
+                    className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    Seleccionar todos
+                  </button>
+                  {selectedEstados.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => setSelectedEstados(STATUS_OPTIONS)}
+                      onClick={() => setSelectedEstados([])}
                       className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
                     >
-                      Seleccionar todos
+                      Limpiar
                     </button>
-                    {selectedEstados.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedEstados([])}
-                        className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                      >
-                        Limpiar
-                      </button>
-                    )}
-                  </div>
-                  {STATUS_OPTIONS.map((estado) => (
-                    <label key={estado} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedEstados.includes(estado)}
-                        onChange={() => toggleSelection(estado, setSelectedEstados)}
-                        className="accent-blue-600"
-                      />
-                      <span className="dark:text-gray-200">{estado}</span>
-                    </label>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
+                {STATUS_OPTIONS.map((estado) => (
+                  <label key={estado} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedEstados.includes(estado)}
+                      onChange={() => toggleSelection(estado, setSelectedEstados)}
+                      className="accent-blue-600"
+                    />
+                    <span className="dark:text-gray-200">{estado}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
 
-            <div ref={supervisorFilterRef} className="relative">
-              <button
-                onClick={() => setIsSupervisorDropdownOpen(!isSupervisorDropdownOpen)}
-                className={cn(
-                  "w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm",
-                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
-                )}
-              >
-                <span className="truncate">{formatMultiLabel(selectedSupervisores, "Supervisor", "supervisores")}</span>
-                <ChevronDown className="w-4 h-4" />
-              </button>
-              {isSupervisorDropdownOpen && (
-                <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
-                  <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
+          <div ref={supervisorFilterRef} className="relative">
+            <button
+              onClick={() => setIsSupervisorDropdownOpen(!isSupervisorDropdownOpen)}
+              className={cn(
+                "w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm",
+                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+              )}
+            >
+              <span className="truncate">{formatMultiLabel(selectedSupervisores, "Supervisor", "supervisores")}</span>
+              <ChevronDown className="w-4 h-4" />
+            </button>
+            {isSupervisorDropdownOpen && (
+              <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSupervisores(supervisoresList.map(s => s.nombre))}
+                    className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    Seleccionar todos
+                  </button>
+                  {selectedSupervisores.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => setSelectedSupervisores(supervisoresList.map(s => s.nombre))}
+                      onClick={() => setSelectedSupervisores([])}
                       className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
                     >
-                      Seleccionar todos
+                      Limpiar
                     </button>
-                    {selectedSupervisores.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedSupervisores([])}
-                        className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                      >
-                        Limpiar
-                      </button>
-                    )}
-                  </div>
-                  {supervisoresList.map((sup) => (
-                    <label key={sup._id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedSupervisores.includes(sup.nombre)}
-                        onChange={() => toggleSelection(sup.nombre, setSelectedSupervisores)}
-                        className="accent-blue-600"
-                      />
-                      <span className="dark:text-gray-200">{sup.nombre}</span>
-                    </label>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
+                {supervisoresList.map((sup) => (
+                  <label key={sup._id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedSupervisores.includes(sup.nombre)}
+                      onChange={() => toggleSelection(sup.nombre, setSelectedSupervisores)}
+                      className="accent-blue-600"
+                    />
+                    <span className="dark:text-gray-200">{sup.nombre}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
 
-            <div ref={asesorFilterRef} className="relative">
-              <button
-                onClick={() => setIsAsesorDropdownOpen(!isAsesorDropdownOpen)}
-                className={cn(
-                  "w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm",
-                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
-                )}
-              >
-                <span className="truncate">{formatMultiLabel(selectedAsesores, "Asesor", "asesores")}</span>
-                <ChevronDown className="w-4 h-4" />
-              </button>
-              {isAsesorDropdownOpen && (
-                <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
-                  <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
+          <div ref={asesorFilterRef} className="relative">
+            <button
+              onClick={() => setIsAsesorDropdownOpen(!isAsesorDropdownOpen)}
+              className={cn(
+                "w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm",
+                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+              )}
+            >
+              <span className="truncate">{formatMultiLabel(selectedAsesores, "Asesor", "asesores")}</span>
+              <ChevronDown className="w-4 h-4" />
+            </button>
+            {isAsesorDropdownOpen && (
+              <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAsesores(filteredAsesoresList.map(a => a.nombre))}
+                    className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    Seleccionar todos
+                  </button>
+                  {selectedAsesores.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => setSelectedAsesores(filteredAsesoresList.map(a => a.nombre))}
+                      onClick={() => setSelectedAsesores([])}
                       className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
                     >
-                      Seleccionar todos
+                      Limpiar
                     </button>
-                    {selectedAsesores.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedAsesores([])}
-                        className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                      >
-                        Limpiar
-                      </button>
-                    )}
-                  </div>
-                  {filteredAsesoresList.map((asesor) => (
-                    <label key={asesor._id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedAsesores.includes(asesor.nombre)}
-                        onChange={() => toggleSelection(asesor.nombre, setSelectedAsesores)}
-                        className="accent-blue-600"
-                      />
-                      <span className="dark:text-gray-200">{asesor.nombre}</span>
-                    </label>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
+                {filteredAsesoresList.map((asesor) => (
+                  <label key={asesor._id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedAsesores.includes(asesor.nombre)}
+                      onChange={() => toggleSelection(asesor.nombre, setSelectedAsesores)}
+                      className="accent-blue-600"
+                    />
+                    <span className="dark:text-gray-200">{asesor.nombre}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
 
-            <div ref={administradorFilterRef} className="relative">
-              <button
-                onClick={() => setIsAdministradorDropdownOpen(!isAdministradorDropdownOpen)}
-                className={cn(
-                  "w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm",
-                  theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
-                )}
-              >
-                <span className="truncate">{formatMultiLabel(selectedAdministradores, "Administrativo", "admins")}</span>
-                <ChevronDown className="w-4 h-4" />
-              </button>
-              {isAdministradorDropdownOpen && (
-                <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
-                  <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
+          <div ref={administradorFilterRef} className="relative">
+            <button
+              onClick={() => setIsAdministradorDropdownOpen(!isAdministradorDropdownOpen)}
+              className={cn(
+                "w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm",
+                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+              )}
+            >
+              <span className="truncate">{formatMultiLabel(selectedAdministradores, "Administrativo", "admins")}</span>
+              <ChevronDown className="w-4 h-4" />
+            </button>
+            {isAdministradorDropdownOpen && (
+              <div className="absolute z-50 mt-1 w-full max-h-56 overflow-y-auto rounded-lg shadow-lg border bg-white dark:bg-gray-800 dark:border-gray-700">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAdministradores(administradoresList.map(a => a.nombre))}
+                    className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    Seleccionar todos
+                  </button>
+                  {selectedAdministradores.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => setSelectedAdministradores(administradoresList.map(a => a.nombre))}
+                      onClick={() => setSelectedAdministradores([])}
                       className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
                     >
-                      Seleccionar todos
+                      Limpiar
                     </button>
-                    {selectedAdministradores.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedAdministradores([])}
-                        className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                      >
-                        Limpiar
-                      </button>
-                    )}
-                  </div>
-                  {administradoresList.map((admin) => (
-                    <label key={admin._id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedAdministradores.includes(admin.nombre)}
-                        onChange={() => toggleSelection(admin.nombre, setSelectedAdministradores)}
-                        className="accent-blue-600"
-                      />
-                      <span className="dark:text-gray-200">{admin.nombre}</span>
-                    </label>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
+                {administradoresList.map((admin) => (
+                  <label key={admin._id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedAdministradores.includes(admin.nombre)}
+                      onChange={() => toggleSelection(admin.nombre, setSelectedAdministradores)}
+                      className="accent-blue-600"
+                    />
+                    <span className="dark:text-gray-200">{admin.nombre}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
 
         </div>
 
@@ -1276,19 +1377,73 @@ export function RegistroVentas() {
             )}>
               <tr>
                 <th className="px-2 py-2 text-center w-[100px]">Fecha</th>
-                <th className="px-2 py-2 text-center min-w-[150px]">Afiliado</th>
-                <th className="px-2 py-2 text-center w-[100px]">CUIL</th>
-                <th className="px-2 py-2 text-center w-[100px]">Teléfono</th>
+                <th className="px-2 py-2 text-center min-w-[150px]">
+                  <button
+                    onClick={() => copyColumnToClipboard(visibleAudits, "nombre", "Afiliados", toast)}
+                    className="inline-flex items-center gap-1 hover:text-blue-500 dark:hover:text-blue-400 transition-colors group/hdr"
+                    title="Copiar toda la columna"
+                  >
+                    Afiliado
+                    <Copy className="w-3 h-3 opacity-0 group-hover/hdr:opacity-70 transition-opacity" />
+                  </button>
+                </th>
+                <th className="px-2 py-2 text-center w-[100px]">
+                  <button
+                    onClick={() => copyColumnToClipboard(visibleAudits, "cuil", "CUILs", toast)}
+                    className="inline-flex items-center gap-1 hover:text-blue-500 dark:hover:text-blue-400 transition-colors group/hdr"
+                    title="Copiar toda la columna"
+                  >
+                    CUIL
+                    <Copy className="w-3 h-3 opacity-0 group-hover/hdr:opacity-70 transition-opacity" />
+                  </button>
+                </th>
+                <th className="px-2 py-2 text-center w-[100px]">
+                  <button
+                    onClick={() => copyColumnToClipboard(visibleAudits, "telefono", "Teléfonos", toast)}
+                    className="inline-flex items-center gap-1 hover:text-blue-500 dark:hover:text-blue-400 transition-colors group/hdr"
+                    title="Copiar toda la columna"
+                  >
+                    Teléfono
+                    <Copy className="w-3 h-3 opacity-0 group-hover/hdr:opacity-70 transition-opacity" />
+                  </button>
+                </th>
                 <th className="px-2 py-2 text-center w-[90px]">O.S. Ven</th>
                 <th className="px-2 py-2 text-center min-w-[100px]">Supervisor</th>
                 <th className="px-2 py-2 text-center min-w-[100px]">Asesor</th>
                 <th className="px-2 py-2 text-center min-w-[100px]">Estado</th>
-                <th className="px-2 py-2 text-center w-[80px]">Aporte</th>
-                <th className="px-2 py-2 text-center w-[100px]">CUIT</th>
+                <th className="px-2 py-2 text-center w-[80px]">
+                  <button
+                    onClick={() => copyColumnToClipboard(visibleAudits, "aporte", "Aportes", toast)}
+                    className="inline-flex items-center gap-1 hover:text-blue-500 dark:hover:text-blue-400 transition-colors group/hdr"
+                    title="Copiar toda la columna"
+                  >
+                    Aporte
+                    <Copy className="w-3 h-3 opacity-0 group-hover/hdr:opacity-70 transition-opacity" />
+                  </button>
+                </th>
+                <th className="px-2 py-2 text-center w-[100px]">
+                  <button
+                    onClick={() => copyColumnToClipboard(visibleAudits, "cuit", "CUITs", toast)}
+                    className="inline-flex items-center gap-1 hover:text-blue-500 dark:hover:text-blue-400 transition-colors group/hdr"
+                    title="Copiar toda la columna"
+                  >
+                    CUIT
+                    <Copy className="w-3 h-3 opacity-0 group-hover/hdr:opacity-70 transition-opacity" />
+                  </button>
+                </th>
                 <th className="px-2 py-2 text-center w-[100px]">Datos Extra</th>
                 <th className="px-2 py-2 text-center w-[100px]">Obs. Privada</th>
                 <th className="px-2 py-2 text-center w-[80px]">Clave</th>
-                <th className="px-2 py-2 text-center w-[100px]">Email</th>
+                <th className="px-2 py-2 text-center w-[100px]">
+                  <button
+                    onClick={() => copyColumnToClipboard(visibleAudits, "email", "Emails", toast)}
+                    className="inline-flex items-center gap-1 hover:text-blue-500 dark:hover:text-blue-400 transition-colors group/hdr"
+                    title="Copiar toda la columna"
+                  >
+                    Email
+                    <Copy className="w-3 h-3 opacity-0 group-hover/hdr:opacity-70 transition-opacity" />
+                  </button>
+                </th>
                 <th className="px-2 py-2 text-center min-w-[100px]">Admin</th>
                 <th className="px-2 py-2 text-center w-[80px]">Acciones</th>
               </tr>
@@ -1374,7 +1529,7 @@ export function RegistroVentas() {
                         )}
                       >
                         <td className={cn("px-2 py-2 text-center", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
-                          {((audit.statusAdministrativo || audit.status) || "").toLowerCase() === "qr hecho" && audit.fechaCreacionQR ? (
+                          {audit.fechaCreacionQR ? (
                             <div className="flex flex-col items-center">
                               <span className="text-purple-500 font-medium">
                                 {formatDateOnly(audit.fechaCreacionQR)}
@@ -1387,85 +1542,85 @@ export function RegistroVentas() {
                             formatDateTime(audit.scheduledAt)
                           )}
                         </td>
-                    <td className="px-2 py-2 text-center font-medium truncate max-w-[150px]" title={audit.nombre}>
-                      {audit.nombre ? audit.nombre.toUpperCase() : "-"}
-                    </td>
-                    <td className={cn("px-2 py-2 text-center font-mono truncate", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
-                      {audit.cuil || "-"}
-                    </td>
-                    <td className={cn("px-2 py-2 text-center font-mono truncate", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
-                      {audit.telefono || "-"}
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <span className={cn(
-                        "inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium truncate max-w-[80px]",
-                        getObraSocialVendidaColor(audit.obraSocialVendida, theme)
-                      )}>
-                        {audit.obraSocialVendida || "-"}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <span className={cn(
-                        "px-2 py-0.5 rounded text-[10px] font-medium truncate max-w-[120px] inline-block",
-                        getSupervisorColor(getSupervisorName(audit), theme)
-                      )} title={getSupervisorName(audit)}>
-                        {getSupervisorName(audit)}
-                      </span>
-                    </td>
-                    <td className={cn("px-2 py-2 text-center", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
-                      {audit.asesor?.nombre || "-"}
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <span className={cn(
-                        "inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium truncate max-w-[120px]",
-                        getStatusColor(audit.statusAdministrativo || audit.status, theme)
-                      )} title={audit.statusAdministrativo || audit.status}>
-                        {audit.statusAdministrativo || audit.status || "-"}
-                      </span>
-                    </td>
-                    <td className={cn("px-2 py-2 text-center font-semibold", getAporteColor(audit.aporte, theme))}>
-                      {audit.aporte ? `$${audit.aporte.toLocaleString()}` : "-"}
-                    </td>
-                    <td className={cn("px-2 py-2 text-center font-mono truncate", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
-                      {audit.cuit || "-"}
-                    </td>
-                    <td className="px-2 py-2 text-center max-w-[100px] truncate" title={audit.datosExtra}>
-                      {audit.datosExtra ? audit.datosExtra.charAt(0).toUpperCase() + audit.datosExtra.slice(1).toLowerCase() : "-"}
-                    </td>
-                    <td className="px-2 py-2 text-center max-w-[100px] truncate" title={audit.observacionPrivada}>
-                      {audit.observacionPrivada ? audit.observacionPrivada.charAt(0).toUpperCase() + audit.observacionPrivada.slice(1).toLowerCase() : "-"}
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      {audit.clave || "-"}
-                    </td>
-                    <td className="px-2 py-2 text-center max-w-[100px] truncate" title={audit.email}>
-                      {audit.email || "-"}
-                    </td>
-                    <td className={cn("px-2 py-2 text-center", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
-                      {audit.administrador?.nombre || "-"}
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <div className="flex items-center justify-center gap-1 transition-opacity">
-                        <button
-                          onClick={() => openEditModal(audit)}
-                          className="p-1 hover:bg-blue-100 text-blue-600 rounded dark:hover:bg-blue-900/30 dark:text-blue-400"
-                          title="Editar"
-                        >
-                          <Pencil className="w-3 h-3" />
-                        </button>
-                        {isGerencia && (
-                          <button
-                            onClick={() => handleDeleteAudit(audit._id)}
-                            className="p-1 hover:bg-red-100 text-red-600 rounded dark:hover:bg-red-900/30 dark:text-red-400"
-                            title="Eliminar"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
-                        </div>
-                      </td>
-                    </tr>
-                  </>
+                        <td className="px-2 py-2 text-center font-medium truncate max-w-[150px]" title={audit.nombre}>
+                          {audit.nombre ? audit.nombre.toUpperCase() : "-"}
+                        </td>
+                        <td className={cn("px-2 py-2 text-center font-mono truncate", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
+                          {audit.cuil || "-"}
+                        </td>
+                        <td className={cn("px-2 py-2 text-center font-mono truncate", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
+                          {audit.telefono || "-"}
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <span className={cn(
+                            "inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium truncate max-w-[80px]",
+                            getObraSocialVendidaColor(audit.obraSocialVendida, theme)
+                          )}>
+                            {audit.obraSocialVendida || "-"}
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <span className={cn(
+                            "px-2 py-0.5 rounded text-[10px] font-medium truncate max-w-[120px] inline-block",
+                            getSupervisorColor(getSupervisorName(audit), theme)
+                          )} title={getSupervisorName(audit)}>
+                            {getSupervisorName(audit)}
+                          </span>
+                        </td>
+                        <td className={cn("px-2 py-2 text-center", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                          {audit.asesor?.nombre || "-"}
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <span className={cn(
+                            "inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium truncate max-w-[120px]",
+                            getStatusColor(audit.statusAdministrativo || audit.status, theme)
+                          )} title={audit.statusAdministrativo || audit.status}>
+                            {audit.statusAdministrativo || audit.status || "-"}
+                          </span>
+                        </td>
+                        <td className={cn("px-2 py-2 text-center font-semibold", getAporteColor(audit.aporte, theme))}>
+                          {audit.aporte ? `$${audit.aporte.toLocaleString()}` : "-"}
+                        </td>
+                        <td className={cn("px-2 py-2 text-center font-mono truncate", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
+                          {audit.cuit || "-"}
+                        </td>
+                        <td className="px-2 py-2 text-center max-w-[100px] truncate" title={audit.datosExtra}>
+                          {audit.datosExtra ? audit.datosExtra.charAt(0).toUpperCase() + audit.datosExtra.slice(1).toLowerCase() : "-"}
+                        </td>
+                        <td className="px-2 py-2 text-center max-w-[100px] truncate" title={audit.observacionPrivada}>
+                          {audit.observacionPrivada ? audit.observacionPrivada.charAt(0).toUpperCase() + audit.observacionPrivada.slice(1).toLowerCase() : "-"}
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          {audit.clave || "-"}
+                        </td>
+                        <td className="px-2 py-2 text-center max-w-[100px] truncate" title={audit.email}>
+                          {audit.email || "-"}
+                        </td>
+                        <td className={cn("px-2 py-2 text-center", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
+                          {audit.administrador?.nombre || "-"}
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <div className="flex items-center justify-center gap-1 transition-opacity">
+                            <button
+                              onClick={() => openEditModal(audit)}
+                              className="p-1 hover:bg-blue-100 text-blue-600 rounded dark:hover:bg-blue-900/30 dark:text-blue-400"
+                              title="Editar"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                            {isGerencia && (
+                              <button
+                                onClick={() => handleDeleteAudit(audit._id)}
+                                className="p-1 hover:bg-red-100 text-red-600 rounded dark:hover:bg-red-900/30 dark:text-red-400"
+                                title="Eliminar"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    </>
                   )
                 })
               )}
@@ -1491,7 +1646,7 @@ export function RegistroVentas() {
       )}
 
       {/* Slide-in Drawer: Carga Masiva */}
-      <div 
+      <div
         className={cn(
           "fixed top-0 right-0 h-full z-40 transition-transform duration-300 ease-out",
           "w-full sm:w-[420px] max-w-[90vw]",
@@ -1500,8 +1655,8 @@ export function RegistroVentas() {
       >
         <div className={cn(
           "h-full overflow-y-auto shadow-2xl border-l",
-          theme === "dark" 
-            ? "bg-gray-900 border-white/10" 
+          theme === "dark"
+            ? "bg-gray-900 border-white/10"
             : "bg-white border-gray-200"
         )}>
           <div className="sticky top-0 z-10 px-4 py-3 border-b flex items-center justify-between"
@@ -1526,8 +1681,8 @@ export function RegistroVentas() {
             {/* Zona de carga */}
             <div className={cn(
               "rounded-lg border-2 border-dashed p-4 text-center transition-colors",
-              theme === "dark" 
-                ? "border-white/20 hover:border-purple-500/50 bg-white/5" 
+              theme === "dark"
+                ? "border-white/20 hover:border-purple-500/50 bg-white/5"
                 : "border-gray-300 hover:border-purple-400 bg-gray-50"
             )}>
               <input
@@ -1569,7 +1724,7 @@ export function RegistroVentas() {
                   </span>
                 </div>
                 <div className="w-full h-1.5 rounded-full bg-gray-300 dark:bg-gray-700 overflow-hidden">
-                  <div 
+                  <div
                     className="h-full bg-purple-500 transition-all duration-300"
                     style={{ width: `${uploadProgress.total > 0 ? (uploadProgress.processed / uploadProgress.total) * 100 : 0}%` }}
                   />
@@ -1597,7 +1752,7 @@ export function RegistroVentas() {
                     <span className="text-red-500">✗ {uploadProgress.errors} rechazados</span>
                   )}
                 </div>
-                
+
                 {uploadProgress.rejectedRecords.length > 0 && (
                   <button
                     onClick={downloadRejectedRecords}

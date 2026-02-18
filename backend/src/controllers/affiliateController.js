@@ -28,25 +28,26 @@ const path = require("path");
 const fs = require("fs").promises;
 const { v4: uuidv4 } = require("uuid");
 
-/** Middleware: Solo usuarios de rol Gerencia */
+/** Middleware: Solo usuarios de rol Gerencia o Encargado */
 exports.requireGerencia = (req, res, next) => {
-    if (req.user.role !== "gerencia") {
+    const role = req.user.role?.toLowerCase();
+    if (role !== "gerencia" && role !== "encargado") {
         logger.warn(`⚠️ Acceso denegado a base de afiliados: ${req.user.email} (rol: ${req.user.role})`);
         return res.status(403).json({
             error: "Acceso denegado",
-            message: "Solo usuarios de rol Gerencia pueden acceder a esta funcionalidad"
+            message: "Solo usuarios de rol Gerencia o Encargado pueden acceder a esta funcionalidad"
         });
     }
     next();
 };
 
-// 🔐 Middleware: Gerencia o Supervisor
+// 🔐 Middleware: Gerencia o Supervisor o Encargado
 exports.requireSupervisorOrGerencia = (req, res, next) => {
     const role = req.user.role?.toLowerCase();
-    if (role !== "gerencia" && role !== "supervisor" && role !== "administrativo") {
+    if (role !== "gerencia" && role !== "supervisor" && role !== "administrativo" && role !== "encargado") {
         return res.status(403).json({
             error: "Acceso denegado",
-            message: "Solo Supervisores o Gerencia pueden acceder"
+            message: "Solo Supervisores, Gerencia o Encargado pueden acceder"
         });
     }
     next();
@@ -90,11 +91,11 @@ exports.uploadAffiliates = async (req, res) => {
             duplicatesReportPath = await generateDuplicatesReport(result.duplicates, originalName);
         }
 
-        logger.info(`✅ Procesamiento completo: ${result.valid.length} válidos, ${result.duplicates.length} duplicados`);
+        logger.info(`✅ Procesamiento completo: ${result.validCount} válidos, ${result.duplicates.length} duplicados`);
 
         res.json({
             success: true,
-            imported: result.valid.length,
+            imported: result.validCount,
             duplicates: result.duplicates.length,
             total: rawData.length,
             batchId: result.batchId,
@@ -121,163 +122,219 @@ exports.uploadAffiliates = async (req, res) => {
 // 🔍 Función auxiliar: procesar datos de afiliados
 async function processAffiliatesData(rawData, userId, sourceFile) {
     const batchId = uuidv4();
-    const valid = [];
+    let validCount = 0;
     const duplicates = [];
 
-    /* Obtener todos los teléfonos existentes en la BD */
-    const existingPhones = new Set();
-    const existingCUILs = new Set();
+    /* ------------------------------------------------------------------
+       OPTIMIZACIÓN DE MEMORIA Y PERFORMANCE: PROCESAMIENTO POR LOTES
+       Evita cargar toda la BD en memoria y evita queries gigantes.
+       ------------------------------------------------------------------ */
 
-    const existingAffiliates = await Affiliate.find({}, { cuil: 1, telefono1: 1, telefono2: 1, telefono3: 1, telefono4: 1, telefono5: 1, uploadDate: 1 }).lean();
-
-    for (const aff of existingAffiliates) {
-        if (aff.cuil) existingCUILs.add(normalizeString(aff.cuil));
-        if (aff.telefono1) existingPhones.add(normalizePhone(aff.telefono1));
-        if (aff.telefono2) existingPhones.add(normalizePhone(aff.telefono2));
-        if (aff.telefono3) existingPhones.add(normalizePhone(aff.telefono3));
-        if (aff.telefono4) existingPhones.add(normalizePhone(aff.telefono4));
-        if (aff.telefono5) existingPhones.add(normalizePhone(aff.telefono5));
-    }
-
-    /* Mapear afiliados existentes por CUIL para obtener fecha de carga */
-    const cuilToDate = {};
-    for (const aff of existingAffiliates) {
-        if (aff.cuil) {
-            cuilToDate[normalizeString(aff.cuil)] = aff.uploadDate;
-        }
-    }
-
-    /* Teléfonos del archivo actual (para detectar duplicados dentro del mismo archivo) */
+    // Sets globales para chequear duplicados dentro del mismo archivo (entre chunks)
     const currentBatchPhones = new Set();
     const currentBatchCUILs = new Set();
 
-    for (let i = 0; i < rawData.length; i++) {
-        const row = rawData[i];
+    const CHUNK_SIZE = 1000;
 
-        try {
-            // 🔍 DEBUG: Mostrar headers de la primera fila
-            if (i === 0) {
-                logger.info("📋 Headers encontrados en Excel:", Object.keys(row));
-            }
+    for (let i = 0; i < rawData.length; i += CHUNK_SIZE) {
+        //logger.info(`🔄 Procesando lote ${i / CHUNK_SIZE + 1} (${Math.min(i + CHUNK_SIZE, rawData.length)}/${rawData.length})...`);
+        const chunk = rawData.slice(i, i + CHUNK_SIZE);
 
-            /* Normalizar campos obligatorios con headers tolerantes */
-            const normalized = {
-                nombre: extractField(row, ["nombre", "name", "nombreyapellido", "apellidoynombre", "fullname"]),
-                cuil: extractField(row, ["cuil", "cuit", "dni", "documento"]),
-                obraSocial: extractField(row, ["obrasocial", "obra social", "obra_social", "os", "cobertura"]),
-                localidad: extractField(row, ["localidad", "ciudad", "location", "city"]),
-                telefono1: extractField(row, ["telefono_1", "telefono1", "tel_1", "tel1", "phone_1", "phone1", "telefono", "celular"])
-            };
+        /* 1. Pre-fetch para este Lote Específico */
+        const chunkCUILs = new Set();
+        const chunkPhones = new Set();
 
-            // 🔍 DEBUG: Mostrar datos normalizados de la primera fila
-            if (i === 0) {
-                logger.info("📊 Primera fila normalizada:", normalized);
-            }
+        chunk.forEach(row => {
+            const cuil = extractField(row, ["cuil", "cuit", "dni", "documento"]);
+            if (cuil) chunkCUILs.add(normalizeString(cuil));
 
-            /* Validar campos obligatorios */
-            const missingFields = [];
-            if (!normalized.nombre) missingFields.push("Nombre");
-            if (!normalized.cuil) missingFields.push("CUIL");
-            if (!normalized.obraSocial) missingFields.push("Obra Social");
-            if (!normalized.localidad) missingFields.push("Localidad");
-            if (!normalized.telefono1) missingFields.push("Teléfono");
+            const tel = extractField(row, ["telefono_1", "telefono1", "tel_1", "tel1", "phone_1", "phone1", "telefono", "celular"]);
+            if (tel) chunkPhones.add(normalizePhone(tel));
+        });
 
-            if (missingFields.length > 0) {
-                duplicates.push({
-                    row: i + 2, // +2 porque Excel empieza en 1 y hay header
-                    data: row,
-                    reason: `Campos obligatorios faltantes: ${missingFields.join(", ")}`,
-                    type: "invalid"
-                });
-                continue;
-            }
+        // Consultar DB solo para este lote
+        const existingPhones = new Set();
+        const existingCUILs = new Set();
+        const cuilToDate = {};
 
-            /* Normalizar teléfono y CUIL */
-            const normalizedPhone1 = normalizePhone(normalized.telefono1);
-            const normalizedCUIL = normalizeString(normalized.cuil);
+        if (chunkCUILs.size > 0 || chunkPhones.size > 0) {
+            try {
+                const existingAffiliates = await Affiliate.find({
+                    $or: [
+                        { cuil: { $in: Array.from(chunkCUILs) } },
+                        { telefono1: { $in: Array.from(chunkPhones) } },
+                        { telefono2: { $in: Array.from(chunkPhones) } },
+                        { telefono3: { $in: Array.from(chunkPhones) } }
+                    ]
+                }, { cuil: 1, telefono1: 1, telefono2: 1, telefono3: 1, uploadDate: 1 }).lean();
 
-            // 🔍 DEBUG: Mostrar normalización de primeras filas
-            if (i < 3) {
-                logger.info(`📱 Fila ${i + 1} - Tel original: "${normalized.telefono1}" → Normalizado: "${normalizedPhone1}"`);
-                logger.info(`🆔 Fila ${i + 1} - CUIL original: "${normalized.cuil}" → Normalizado: "${normalizedCUIL}"`);
-            }
-
-            /* Detectar duplicados */
-            let isDuplicate = false;
-            let duplicateReason = "";
-
-            // 1. Verificar si el CUIL ya existe en BD
-            if (existingCUILs.has(normalizedCUIL)) {
-                isDuplicate = true;
-                const uploadDate = cuilToDate[normalizedCUIL];
-                duplicateReason = `CUIL duplicado (ya cargado el ${uploadDate ? new Date(uploadDate).toLocaleDateString("es-AR") : "fecha desconocida"})`;
-            }
-            // 2. Verificar si el CUIL ya está en el archivo actual
-            else if (currentBatchCUILs.has(normalizedCUIL)) {
-                isDuplicate = true;
-                duplicateReason = "CUIL duplicado dentro del mismo archivo";
-                if (i < 5) {
-                    logger.warn(`⚠️ Fila ${i + 2}: CUIL duplicado detectado: "${normalizedCUIL}"`);
+                for (const aff of existingAffiliates) {
+                    if (aff.cuil) {
+                        const normCuil = normalizeString(aff.cuil);
+                        existingCUILs.add(normCuil);
+                        cuilToDate[normCuil] = aff.uploadDate;
+                    }
+                    if (aff.telefono1) existingPhones.add(normalizePhone(aff.telefono1));
+                    if (aff.telefono2) existingPhones.add(normalizePhone(aff.telefono2));
+                    if (aff.telefono3) existingPhones.add(normalizePhone(aff.telefono3));
                 }
+            } catch (queryErr) {
+                logger.error(`❌ Error consultando DB para lote ${i}:`, queryErr);
+                throw queryErr; // Si falla la consulta, abortar lote
             }
-
-            if (isDuplicate) {
-                duplicates.push({
-                    row: i + 2,
-                    data: row,
-                    reason: duplicateReason,
-                    type: "duplicate"
-                });
-                continue;
-            }
-
-            /* Agregar a sets de control */
-            currentBatchPhones.add(normalizedPhone1);
-            currentBatchCUILs.add(normalizedCUIL);
-
-            /* Extraer campos opcionales */
-            const telefono2 = extractField(row, ["telefono_2", "telefono2", "tel_2", "tel2", "phone_2", "phone2"]);
-            const telefono3 = extractField(row, ["telefono_3", "telefono3", "tel_3", "tel3", "phone_3", "phone3"]);
-            const telefono4 = extractField(row, ["telefono_4", "telefono4", "tel_4", "tel4"]);
-            const telefono5 = extractField(row, ["telefono_5", "telefono5", "tel_5", "tel5"]);
-            const edad = extractField(row, ["edad", "age", "años"]);
-            const codigoObraSocial = extractField(row, ["codigoobrasocial", "codigo_obra_social", "codigo_os", "codigoos", "codigodeobrasocial", "codigo de obra social"]);
-
-            /* Crear afiliado */
-            const affiliate = new Affiliate({
-                nombre: normalized.nombre,
-                cuil: normalizedCUIL,  // ✅ Ya normalizado
-                obraSocial: normalized.obraSocial,
-                localidad: normalized.localidad,
-                telefono1: normalizedPhone1,  // ✅ Guardar normalizado
-                telefono2: telefono2 ? normalizePhone(telefono2) : undefined,
-                telefono3: telefono3 ? normalizePhone(telefono3) : undefined,
-                telefono4: telefono4 ? normalizePhone(telefono4) : undefined,
-                telefono5: telefono5 ? normalizePhone(telefono5) : undefined,
-                edad: edad ? parseInt(edad) : undefined,
-                codigoObraSocial: codigoObraSocial || undefined,
-                uploadedBy: userId,
-                sourceFile,
-                batchId,
-                dataSource: 'fresh',
-                additionalData: extractAdditionalFields(row)
-            });
-
-            await affiliate.save();
-            valid.push(affiliate);
-
-        } catch (error) {
-            logger.error(`Error procesando fila ${i + 2}:`, error);
-            duplicates.push({
-                row: i + 2,
-                data: row,
-                reason: `Error de procesamiento: ${error.message}`,
-                type: "error"
-            });
         }
-    }
 
-    return { valid, duplicates, batchId };
+        /* 2. Procesar Filas del Lote */
+        const chunkToInsert = [];
+
+        for (let j = 0; j < chunk.length; j++) {
+            const row = chunk[j];
+            const originalRowIndex = i + j + 2; // +1 zero-based, +1 header
+
+            try {
+                // ... (Normalizacion y validacion sin cambios) ...
+
+                // 🔍 DEBUG: Mostrar headers solo la primera vez absoluta
+                if (i === 0 && j === 0) {
+                    logger.info("📋 Headers encontrados en Excel:", Object.keys(row));
+                }
+
+                /* Normalizar campos obligatorios con headers tolerantes */
+                const normalized = {
+                    nombre: extractField(row, ["nombre", "name", "nombreyapellido", "apellidoynombre", "fullname"]),
+                    cuil: extractField(row, ["cuil", "cuit", "dni", "documento"]),
+                    obraSocial: extractField(row, ["obrasocial", "obra social", "obra_social", "os", "cobertura"]),
+                    localidad: extractField(row, ["localidad", "ciudad", "location", "city"]),
+                    telefono1: extractField(row, ["telefono_1", "telefono1", "tel_1", "tel1", "phone_1", "phone1", "telefono", "celular"])
+                };
+
+                /* Validar campos obligatorios */
+                const missingFields = [];
+                if (!normalized.nombre) missingFields.push("Nombre");
+                if (!normalized.cuil) missingFields.push("CUIL");
+                if (!normalized.obraSocial) missingFields.push("Obra Social");
+                if (!normalized.localidad) missingFields.push("Localidad");
+                if (!normalized.telefono1) missingFields.push("Teléfono");
+
+                if (missingFields.length > 0) {
+                    duplicates.push({
+                        row: originalRowIndex,
+                        data: row,
+                        reason: `Campos obligatorios faltantes: ${missingFields.join(", ")}`,
+                        type: "invalid"
+                    });
+                    continue;
+                }
+
+                /* Normalizar teléfono y CUIL */
+                const normalizedPhone1 = normalizePhone(normalized.telefono1);
+                const normalizedCUIL = normalizeString(normalized.cuil);
+
+                /* Detectar duplicados */
+                let isDuplicate = false;
+                let duplicateReason = "";
+
+                // 2.1 Verificar si el CUIL ya existe en BD
+                if (existingCUILs.has(normalizedCUIL)) {
+                    isDuplicate = true;
+                    const uploadDate = cuilToDate[normalizedCUIL];
+                    duplicateReason = `CUIL duplicado (ya cargado el ${uploadDate ? new Date(uploadDate).toLocaleDateString("es-AR") : "fecha desconocida"})`;
+                }
+                // 2.2 Verificar teléfono en BD
+                else if (existingPhones.has(normalizedPhone1)) {
+                    isDuplicate = true;
+                    duplicateReason = `Teléfono duplicado en base de datos`;
+                }
+                // 2.3 Verificar dentro del archivo
+                else if (currentBatchCUILs.has(normalizedCUIL)) {
+                    isDuplicate = true;
+                    duplicateReason = "CUIL duplicado dentro del mismo archivo";
+                }
+                else if (currentBatchPhones.has(normalizedPhone1)) {
+                    isDuplicate = true;
+                    duplicateReason = "Teléfono duplicado dentro del mismo archivo";
+                }
+
+                if (isDuplicate) {
+                    duplicates.push({
+                        row: originalRowIndex,
+                        data: row,
+                        reason: duplicateReason,
+                        type: "duplicate"
+                    });
+                    continue;
+                }
+
+                /* Agregar a sets de control */
+                currentBatchPhones.add(normalizedPhone1);
+                currentBatchCUILs.add(normalizedCUIL);
+
+                /* Extraer campos opcionales */
+                const telefono2 = extractField(row, ["telefono_2", "telefono2", "tel_2", "tel2", "phone_2", "phone2"]);
+                const telefono3 = extractField(row, ["telefono_3", "telefono3", "tel_3", "tel3", "phone_3", "phone3"]);
+                const telefono4 = extractField(row, ["telefono_4", "telefono4", "tel_4", "tel4"]);
+                const telefono5 = extractField(row, ["telefono_5", "telefono5", "tel_5", "tel5"]);
+                const edad = extractField(row, ["edad", "age", "años"]);
+                const codigoObraSocial = extractField(row, ["codigoobrasocial", "codigo_obra_social", "codigo_os", "codigoos", "codigodeobrasocial", "codigo de obra social"]);
+
+                /* Crear objeto afiliado (SIN GUARDAR AUN) */
+                const affiliate = {
+                    nombre: normalized.nombre,
+                    cuil: normalizedCUIL,
+                    obraSocial: normalized.obraSocial,
+                    localidad: normalized.localidad,
+                    telefono1: normalizedPhone1,
+                    telefono2: telefono2 ? normalizePhone(telefono2) : undefined,
+                    telefono3: telefono3 ? normalizePhone(telefono3) : undefined,
+                    telefono4: telefono4 ? normalizePhone(telefono4) : undefined,
+                    telefono5: telefono5 ? normalizePhone(telefono5) : undefined,
+                    edad: edad ? parseInt(edad) : undefined,
+                    codigoObraSocial: codigoObraSocial || undefined,
+                    uploadedBy: userId,
+                    sourceFile,
+                    batchId,
+                    dataSource: 'fresh',
+                    additionalData: extractAdditionalFields(row)
+                };
+
+                chunkToInsert.push(affiliate);
+
+            } catch (error) {
+                logger.error(`Error procesando fila ${originalRowIndex}:`, error);
+                duplicates.push({
+                    row: originalRowIndex,
+                    data: row,
+                    reason: `Error de procesamiento: ${error.message}`,
+                    type: "error"
+                });
+            }
+        } // Fin loop interno
+
+        /* 3. Insertar Lote en BD (Bulk Insert) */
+        if (chunkToInsert.length > 0) {
+            try {
+                // ordered: false permite que si uno falla, los otros sigan (aunque ya pre-validamos)
+                const result = await Affiliate.insertMany(chunkToInsert, { ordered: false });
+                validCount += result.length;
+            } catch (bulkError) {
+                logger.error(`❌ Error en Bulk Insert del lote ${i}:`, bulkError);
+                // Si falla el bulk, intentamos uno por uno para salvar los que se puedan?
+                // O simplemente reportamos error genérico para el lote.
+                // Dado que ya pre-validamos duplicados, un error aquí sería raro (validación de esquema o conexión).
+                // Vamos a reportar error genérico para este sub-lote para no complicar en exceso.
+
+                // Si es un error de Mongoose (validación) podríamos ver details
+                duplicates.push({
+                    row: `Lote iniciado en fila ${i + 2}`,
+                    data: {},
+                    reason: `Error crítico guardando lote: ${bulkError.message}`,
+                    type: "error"
+                });
+            }
+        }
+    } // Fin loop externo (Chunks)
+
+    return { validCount, duplicates, batchId };
 }
 
 // 🔧 Extraer campo con headers tolerantes
@@ -318,14 +375,34 @@ function extractAdditionalFields(row) {
         "telefono_4", "telefono4", "tel_4", "tel4",
         "telefono_5", "telefono5", "tel_5", "tel5",
         "edad", "age", "años",
-        "codigoobrasocial", "codigo_obra_social", "codigo_os", "codigoos"
+        "codigoobrasocial", "codigo_obra_social", "codigo_os", "codigoos", "codigodeobrasocial", "codigo de obra social"
     ];
 
     const additional = {};
     for (const key in row) {
+        // Ignorar claves vacías o nulas
+        if (!key || key.trim() === "") continue;
+
         const normalizedKey = normalizeString(key);
         if (!standardFields.some(f => normalizeString(f) === normalizedKey)) {
-            additional[key] = String(row[key]);
+            // Sanitizar clave: 
+            // 1. Reemplazar puntos por guiones bajos
+            // 2. Eliminar cualquier caracter que no sea alfanumérico, espacio, guion bajo o guion medio
+            // 3. Asegurar que no empiece con $ (Mongo lo prohíbe)
+            let safeKey = String(key)
+                .replace(/\./g, "_")
+                .replace(/[^a-zA-Z0-9 _-]/g, "") // Eliminar caracteres raros
+                .trim();
+
+            // Si empieza con $, quitarlo
+            if (safeKey.startsWith("$")) {
+                safeKey = safeKey.replace(/^\$+/, "");
+            }
+
+            // Si después de limpiar queda vacío, ignorar
+            if (safeKey) {
+                additional[safeKey] = String(row[key]);
+            }
         }
     }
     return Object.keys(additional).length > 0 ? additional : undefined;
@@ -513,7 +590,7 @@ exports.getSupervisorStats = async (req, res) => {
 
         // Debug: Ver total de affiliates asignados a este supervisor
         const totalAssigned = await Affiliate.countDocuments(baseFilter);
-        
+
         // ✅ FIX: Usar campo dataSource para clasificar
         // Datos Frescos: dataSource = 'fresh' o sin dataSource (legacy), y no usados
         const freshCount = await Affiliate.countDocuments({
@@ -531,7 +608,7 @@ exports.getSupervisorStats = async (req, res) => {
             dataSource: 'reusable',
             isUsed: { $ne: true }
         });
-        
+
         // Debug log
         logger.info(`📊 getSupervisorStats para ${req.user.nombre}: total=${totalAssigned}, fresh=${freshCount}, reusable=${reusableCount}`);
 
@@ -733,15 +810,15 @@ const ESTADOS_REUTILIZABLE_24H = [
 
 async function calcularClasificacion() {
     const cuilsUsadosSet = new Set();
-    
+
     const leadAssignmentsUsados = await LeadAssignment.find({
         status: { $in: ['Venta', 'No le interesa'] }
     }).populate('affiliate', 'cuil').lean();
-    
+
     for (const la of leadAssignmentsUsados) {
         if (la.affiliate?.cuil) cuilsUsadosSet.add(la.affiliate.cuil);
     }
-    
+
     const cuilsAuditUsados = await Audit.distinct('cuil', {
         cuil: { $exists: true, $ne: null },
         status: { $in: ESTADOS_USADO_AUDITORIAS }
@@ -750,46 +827,46 @@ async function calcularClasificacion() {
 
     const cuilsReutilizablesSet = new Set();
     const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    
+
     const telefonosConMensajeExitoso = await Report.distinct('telefono', {
         messageStatus: { $in: ['enviado', 'recibido'] }
     });
-    
+
     if (telefonosConMensajeExitoso.length > 0) {
         const affiliatesConMensaje = await Affiliate.find({
             active: true,
             telefono1: { $in: telefonosConMensajeExitoso }
         }, 'cuil').lean();
-        
+
         for (const aff of affiliatesConMensaje) {
             if (aff.cuil && !cuilsUsadosSet.has(aff.cuil)) {
                 cuilsReutilizablesSet.add(aff.cuil);
             }
         }
     }
-    
+
     const leadAssignmentsReutilizables = await LeadAssignment.find({
         status: { $nin: ['Venta', 'Pendiente', 'No le interesa'] }
     }).populate('affiliate', 'cuil').lean();
-    
+
     for (const la of leadAssignmentsReutilizables) {
         if (la.affiliate?.cuil && !cuilsUsadosSet.has(la.affiliate.cuil)) {
             cuilsReutilizablesSet.add(la.affiliate.cuil);
         }
     }
-    
+
     const auditsReutilizables24h = await Audit.find({
         cuil: { $exists: true, $ne: null },
         status: { $in: ESTADOS_REUTILIZABLE_24H },
         updatedAt: { $lt: hace24h }
     }, 'cuil').lean();
-    
+
     for (const audit of auditsReutilizables24h) {
         if (audit.cuil && !cuilsUsadosSet.has(audit.cuil)) {
             cuilsReutilizablesSet.add(audit.cuil);
         }
     }
-    
+
     return { cuilsUsados: cuilsUsadosSet, cuilsReutilizables: cuilsReutilizablesSet };
 }
 
@@ -798,7 +875,7 @@ exports.getFreshData = async (req, res) => {
         const { cuilsUsados, cuilsReutilizables } = await calcularClasificacion();
         const cuilsNoFrescos = new Set([...cuilsUsados, ...cuilsReutilizables]);
 
-        const freshAffiliates = await Affiliate.find({ 
+        const freshAffiliates = await Affiliate.find({
             active: true,
             cuil: { $nin: Array.from(cuilsNoFrescos), $exists: true, $ne: null }
         })
@@ -835,10 +912,10 @@ exports.getReusableData = async (req, res) => {
             .lean();
 
         const cuilToAuditStatus = {};
-        const audits = await Audit.find({ 
-            cuil: { $in: Array.from(cuilsReutilizables) } 
+        const audits = await Audit.find({
+            cuil: { $in: Array.from(cuilsReutilizables) }
         }).select('cuil status').sort({ updatedAt: -1 }).lean();
-        
+
         for (const audit of audits) {
             if (audit.cuil && !cuilToAuditStatus[audit.cuil]) {
                 cuilToAuditStatus[audit.cuil] = audit.status;
@@ -1173,7 +1250,7 @@ exports.exportAllAffiliates = async (req, res) => {
         const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
         const filename = `base_afiliados_completa_${new Date().toISOString().split('T')[0]}.xlsx`;
-        
+
         res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
         res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         res.send(buffer);
@@ -1190,7 +1267,7 @@ exports.exportAllAffiliates = async (req, res) => {
 exports.cleanupFreshData = async (req, res) => {
     try {
         const batchId = `cleanup_${Date.now()}`;
-        
+
         // Obtener CUILs que YA están en auditorías
         const auditsWithCuil = await Audit.find({
             cuil: { $exists: true, $ne: null }
@@ -1265,7 +1342,7 @@ exports.getStockByObraSocial = async (req, res) => {
         // ========== STOCK REUTILIZABLE ==========
         // Audits con estados reutilizables que no han sido exportadas como reutilizables
         const reusableStatuses = ['No atendió', 'Tiene dudas', 'Reprogramada (falta confirmar hora)'];
-        
+
         const reusableCount = await Audit.countDocuments({
             status: { $in: reusableStatuses },
             $or: [

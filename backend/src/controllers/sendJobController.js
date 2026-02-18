@@ -131,20 +131,40 @@ exports.startJob = async (req, res) => {
             ? parseInt(req.body.pauseBetweenBatches, 10)
             : 1;
 
+        // Validar y procesar fecha de programación
+        let scheduledDate;
+        if (scheduledFor) {
+            scheduledDate = new Date(scheduledFor);
+            if (isNaN(scheduledDate.getTime())) {
+                return res.status(400).json({ error: "Fecha de programación inválida" });
+            }
+            // Permitir margen de 1 minuto para evitar rechazos por latencia
+            const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
+            if (scheduledDate < oneMinuteAgo) {
+                return res.status(400).json({
+                    error: "La fecha de programación debe ser en el futuro"
+                });
+            }
+            logger.info(`📅 Campaña programada para: ${scheduledDate.toISOString()} (local: ${scheduledDate.toLocaleString('es-AR')})`);
+        } else {
+            scheduledDate = new Date();
+            logger.info(`📅 Campaña de envío inmediato`);
+        }
+
         const job = new SendJob({
             name: name || finalMessage.slice(0, 30),
             createdBy,
             template: templateRef,
             message: finalMessage,
-            contacts: uniqueContactIds, // ✅ Usar IDs únicos (sin duplicados)
-            scheduledFor: scheduledFor || new Date(),
+            contacts: uniqueContactIds,
+            scheduledFor: scheduledDate,
             status: "pendiente",
             delayMin: Math.max(0, delayMin),
             delayMax: Math.max(delayMin, delayMax),
             batchSize: Math.max(1, batchSize),
             pauseBetweenBatchesMinutes: Math.max(0, pauseBetweenBatchesMinutes),
             stats: {
-                total: uniqueContactIds.length, // ✅ Total real sin duplicados
+                total: uniqueContactIds.length,
                 pending: uniqueContactIds.length,
                 sent: 0,
                 failed: 0,
@@ -329,7 +349,7 @@ exports.getJob = async (req, res) => {
         const role = String(req.user?.role || '').toLowerCase();
         const userId = req.user?._id?.toString();
         const userEquipo = req.user?.numeroEquipo || null;
-        const allowAll = ["admin", "gerencia"].includes(role);
+        const allowAll = ["admin", "gerencia", "encargado"].includes(role);
         let allowed = allowAll;
         if (!allowed) {
             if (role === "supervisor") {
@@ -361,7 +381,8 @@ exports.listJobs = async (req, res) => {
         const userEquipo = req.user?.numeroEquipo || null;
 
         let filter = {};
-        if (["admin", "gerencia"].includes(role)) {
+        if (["admin", "gerencia", "encargado"].includes(role)) {
+            // ✅ Gerencia/Admin/Encargado ven todo
             filter = {};
         } else if (role === "supervisor") {
             // mostrar jobs creados por usuarios del mismo numeroEquipo (incluyéndose)
@@ -378,7 +399,7 @@ exports.listJobs = async (req, res) => {
             .sort({ scheduledFor: -1, createdAt: -1 });
         let jobs = await query.exec();
 
-        // Post-filtrado por equipo para supervisor (porque createdBy.numeroEquipo es en documento poblado)
+        // Post-filtrado por equipo solo para supervisor (Encargado ve todo)
         if (role === "supervisor") {
             jobs = jobs.filter(j => j.createdBy && j.createdBy.numeroEquipo === userEquipo);
         }
@@ -394,7 +415,7 @@ exports.listJobs = async (req, res) => {
             const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
             const campaignCreatedAt = new Date(job.createdAt);
             let repliesCount = 0;
-            
+
             if (campaignCreatedAt >= twentyFourHoursAgo) {
                 const distinctPhones = await Message.distinct('from', {
                     job: job._id,
@@ -505,7 +526,7 @@ exports.exportAutoResponseReport = async (req, res) => {
         const userRole = req.user?.role?.toLowerCase();
         const userId = req.user?._id;
 
-        if (!["admin", "gerencia"].includes(userRole)) {
+        if (!["admin", "gerencia", "encargado"].includes(userRole)) {
             if (userRole === "supervisor") {
                 const jobCreatorEquipo = job.createdBy?.numeroEquipo;
                 const userEquipo = req.user?.numeroEquipo;

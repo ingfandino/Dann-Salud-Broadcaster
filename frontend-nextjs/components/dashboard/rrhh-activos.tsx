@@ -19,7 +19,10 @@ import {
   ImageIcon,
   Download,
   Upload,
-  Loader2
+  Loader2,
+  Ban,
+  Calendar,
+  AlertTriangle
 } from "lucide-react"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
@@ -58,6 +61,7 @@ interface Employee {
   notas?: string
   fechaBaja?: string
   motivoBaja?: string
+  motivoBajaNormalizado?: string | null
 }
 
 const cargoColors: Record<string, string> = {
@@ -72,7 +76,14 @@ const cargoColors: Record<string, string> = {
 export function RRHHActivos() {
   const { theme } = useTheme()
   const { user } = useAuth()
-  const canEdit = ['rr.hh', 'gerencia'].includes(user?.role?.toLowerCase() || '');
+  const userRole = user?.role?.toLowerCase() || '';
+  const isGerencia = userRole === 'gerencia';
+  const isRRHH = userRole === 'rr.hh';
+  const isSupervisorRole = userRole === 'supervisor';
+  // ✅ Supervisor puede editar (pero NO borrar)
+  const canEdit = isGerencia || isRRHH || isSupervisorRole;
+  // ✅ Solo Gerencia y RR.HH pueden borrar
+  const canDelete = isGerencia || isRRHH;
   
   // Detectar si es supervisor para filtrar por equipo
   const isSupervisor = ['supervisor', 'supervisor_reventa'].includes(user?.role?.toLowerCase() || '');
@@ -89,6 +100,12 @@ export function RRHHActivos() {
   const [editForm, setEditForm] = useState<Partial<Employee>>({})
   const [uploadingDNI, setUploadingDNI] = useState(false)
   const [newDNIFile, setNewDNIFile] = useState<File | null>(null)
+
+  // Suspension state
+  const [suspendModalOpen, setSuspendModalOpen] = useState(false)
+  const [suspendingUser, setSuspendingUser] = useState<Employee | null>(null)
+  const [suspensionForm, setSuspensionForm] = useState({ suspensionStart: '', suspensionEnd: '' })
+  const [suspending, setSuspending] = useState(false)
 
   useEffect(() => {
     fetchEmployees()
@@ -137,7 +154,8 @@ export function RRHHActivos() {
       activo: empleado.activo,
       notas: empleado.notas,
       fechaBaja: empleado.fechaBaja ? new Date(empleado.fechaBaja).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      motivoBaja: empleado.motivoBaja || ''
+      motivoBaja: empleado.motivoBaja || '',
+      motivoBajaNormalizado: empleado.motivoBajaNormalizado || null
     })
     setEditModalOpen(true)
   }
@@ -216,6 +234,77 @@ export function RRHHActivos() {
       console.error("Error deleting employee:", error)
       toast.error("Error al eliminar empleado")
     }
+  }
+
+  // Suspension handlers
+  const handleOpenSuspendModal = (empleado: Employee) => {
+    setSuspendingUser(empleado)
+    // Set default dates: today to tomorrow
+    const today = new Date().toISOString().split('T')[0]
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    setSuspensionForm({ suspensionStart: today, suspensionEnd: tomorrow })
+    setSuspendModalOpen(true)
+  }
+
+  const handleSuspendUser = async () => {
+    if (!suspendingUser?.userId?._id) return
+    if (!suspensionForm.suspensionStart || !suspensionForm.suspensionEnd) {
+      toast.error('Debe completar ambas fechas')
+      return
+    }
+
+    const startDate = new Date(suspensionForm.suspensionStart)
+    const endDate = new Date(suspensionForm.suspensionEnd)
+    if (endDate <= startDate) {
+      toast.error('La fecha de fin debe ser posterior a la de inicio')
+      return
+    }
+
+    try {
+      setSuspending(true)
+      await api.users.suspend(suspendingUser.userId._id, {
+        suspensionStart: suspensionForm.suspensionStart,
+        suspensionEnd: suspensionForm.suspensionEnd
+      })
+      toast.success(`Usuario ${suspendingUser.nombreCompleto} suspendido hasta ${endDate.toLocaleDateString('es-AR')}`)
+      setSuspendModalOpen(false)
+      setSuspendingUser(null)
+      fetchEmployees()
+    } catch (error: any) {
+      console.error('Error suspending user:', error)
+      toast.error(error.response?.data?.error || 'Error al suspender usuario')
+    } finally {
+      setSuspending(false)
+    }
+  }
+
+  const handleCancelSuspension = async (empleado: Employee) => {
+    if (!empleado.userId?._id) return
+    if (!confirm(`¿Cancelar la suspensión de ${empleado.nombreCompleto}?`)) return
+
+    try {
+      await api.users.cancelSuspension(empleado.userId._id)
+      toast.success('Suspensión cancelada')
+      fetchEmployees()
+    } catch (error: any) {
+      console.error('Error canceling suspension:', error)
+      toast.error(error.response?.data?.error || 'Error al cancelar suspensión')
+    }
+  }
+
+  // Check if user is currently suspended
+  const isUserSuspended = (empleado: Employee) => {
+    const userData = empleado.userId as any
+    if (!userData?.suspensionStart || !userData?.suspensionEnd) return false
+    const now = new Date()
+    const start = new Date(userData.suspensionStart)
+    const end = new Date(userData.suspensionEnd)
+    return now >= start && now <= end
+  }
+
+  const getSuspensionEndDate = (empleado: Employee) => {
+    const userData = empleado.userId as any
+    return userData?.suspensionEnd ? new Date(userData.suspensionEnd).toLocaleDateString('es-AR') : null
   }
 
   // Filter logic
@@ -433,22 +522,45 @@ export function RRHHActivos() {
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-2">
                           {canEdit && (
+                            <button
+                              onClick={() => handleEdit(emp)}
+                              className={cn(
+                                "p-1 rounded hover:bg-white/10 transition-colors",
+                                theme === "dark" ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-gray-700",
+                              )}
+                              title="Editar"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              onClick={() => handleDelete(emp._id)}
+                              className="p-1 rounded hover:bg-red-500/10 text-red-400 hover:text-red-500 transition-colors"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                          {isGerencia && (
                             <>
-                              <button
-                                onClick={() => handleEdit(emp)}
-                                className={cn(
-                                  "p-1 rounded hover:bg-white/10 transition-colors",
-                                  theme === "dark" ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-gray-700",
-                                )}
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleDelete(emp._id)}
-                                className="p-1 rounded hover:bg-red-500/10 text-red-400 hover:text-red-500 transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              {isUserSuspended(emp) ? (
+                                <button
+                                  onClick={() => handleCancelSuspension(emp)}
+                                  className="p-1 rounded hover:bg-green-500/10 text-orange-400 hover:text-green-500 transition-colors"
+                                  title={`Suspendido hasta ${getSuspensionEndDate(emp)} - Click para cancelar`}
+                                >
+                                  <AlertTriangle className="w-4 h-4" />
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleOpenSuspendModal(emp)}
+                                  className="p-1 rounded hover:bg-orange-500/10 text-gray-400 hover:text-orange-500 transition-colors"
+                                  title="Suspender cuenta"
+                                >
+                                  <Ban className="w-4 h-4" />
+                                </button>
+                              )}
                             </>
                           )}
                         </div>
@@ -652,18 +764,21 @@ export function RRHHActivos() {
                         >
                           Motivo de Baja *
                         </label>
-                        <textarea
-                          rows={2}
-                          value={editForm.motivoBaja}
-                          onChange={(e) => setEditForm({ ...editForm, motivoBaja: e.target.value })}
+                        <select
+                          value={editForm.motivoBajaNormalizado || ''}
+                          onChange={(e) => setEditForm({ ...editForm, motivoBajaNormalizado: e.target.value || null })}
                           className={cn(
-                            "w-full px-3 py-2 rounded-lg border text-sm resize-none",
+                            "w-full px-3 py-2 rounded-lg border text-sm",
                             theme === "dark"
-                              ? "bg-white/5 border-white/10 text-white placeholder-gray-500"
-                              : "bg-white border-gray-200 text-gray-800 placeholder-gray-400",
+                              ? "bg-white/5 border-white/10 text-white"
+                              : "bg-white border-gray-200 text-gray-800",
                           )}
-                          placeholder="Indique el motivo de la baja..."
-                        />
+                        >
+                          <option value="">Seleccionar motivo...</option>
+                          <option value="Renuncia">Renuncia</option>
+                          <option value="Despido por bajo rendimiento">Despido por bajo rendimiento</option>
+                          <option value="Despido por inasistencias">Despido por inasistencias</option>
+                        </select>
                       </div>
                     </div>
                   </div>
@@ -822,6 +937,130 @@ export function RRHHActivos() {
                   style={{ backgroundColor: "#17C787" }}
                 >
                   {uploadingDNI ? "Subiendo DNI..." : saving ? "Guardando..." : "Guardar Cambios"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </Portal>
+      )}
+
+      {/* Modal de Suspensión */}
+      {suspendModalOpen && suspendingUser && (
+        <Portal>
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div
+              className="absolute inset-0 bg-black/50"
+              onClick={() => setSuspendModalOpen(false)}
+            />
+            <div
+              className={cn(
+                "relative w-full max-w-md rounded-2xl border p-6 shadow-xl",
+                theme === "dark" ? "bg-[#1a1333] border-white/10" : "bg-white border-gray-200",
+              )}
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 rounded-full bg-orange-500/10">
+                  <Ban className="w-6 h-6 text-orange-500" />
+                </div>
+                <div>
+                  <h3 className={cn("text-lg font-semibold", theme === "dark" ? "text-white" : "text-gray-800")}>
+                    Suspender Cuenta
+                  </h3>
+                  <p className={cn("text-sm", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
+                    {suspendingUser.nombreCompleto}
+                  </p>
+                </div>
+              </div>
+
+              <div className={cn(
+                "p-3 rounded-lg mb-4 text-sm",
+                theme === "dark" ? "bg-orange-500/10 text-orange-300" : "bg-orange-50 text-orange-700"
+              )}>
+                <p className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>
+                    El usuario no podrá acceder a la plataforma durante el período de suspensión.
+                    Si está conectado, su sesión será cerrada automáticamente.
+                  </span>
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className={cn(
+                    "flex items-center gap-2 text-sm font-medium mb-2",
+                    theme === "dark" ? "text-gray-300" : "text-gray-700"
+                  )}>
+                    <Calendar className="w-4 h-4" />
+                    Fecha de inicio
+                  </label>
+                  <input
+                    type="date"
+                    value={suspensionForm.suspensionStart}
+                    onChange={(e) => setSuspensionForm({ ...suspensionForm, suspensionStart: e.target.value })}
+                    className={cn(
+                      "w-full px-3 py-2 rounded-lg border text-sm",
+                      theme === "dark"
+                        ? "bg-white/5 border-white/10 text-white"
+                        : "bg-white border-gray-200 text-gray-800",
+                    )}
+                  />
+                </div>
+
+                <div>
+                  <label className={cn(
+                    "flex items-center gap-2 text-sm font-medium mb-2",
+                    theme === "dark" ? "text-gray-300" : "text-gray-700"
+                  )}>
+                    <Calendar className="w-4 h-4" />
+                    Fecha de fin
+                  </label>
+                  <input
+                    type="date"
+                    value={suspensionForm.suspensionEnd}
+                    onChange={(e) => setSuspensionForm({ ...suspensionForm, suspensionEnd: e.target.value })}
+                    className={cn(
+                      "w-full px-3 py-2 rounded-lg border text-sm",
+                      theme === "dark"
+                        ? "bg-white/5 border-white/10 text-white"
+                        : "bg-white border-gray-200 text-gray-800",
+                    )}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => setSuspendModalOpen(false)}
+                  className={cn(
+                    "px-4 py-2 rounded-lg text-sm font-medium transition-colors border",
+                    theme === "dark"
+                      ? "border-white/10 text-gray-400 hover:bg-white/5"
+                      : "border-gray-200 text-gray-600 hover:bg-gray-50",
+                  )}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSuspendUser}
+                  disabled={suspending}
+                  className={cn(
+                    "px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors flex items-center gap-2",
+                    suspending ? "opacity-50 cursor-not-allowed" : "hover:opacity-90"
+                  )}
+                  style={{ backgroundColor: "#F97316" }}
+                >
+                  {suspending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Suspendiendo...
+                    </>
+                  ) : (
+                    <>
+                      <Ban className="w-4 h-4" />
+                      Suspender
+                    </>
+                  )}
                 </button>
               </div>
             </div>

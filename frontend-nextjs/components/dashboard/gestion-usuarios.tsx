@@ -29,15 +29,17 @@ const rolColors: Record<string, string> = {
   asesor: "#1E88E5",
   supervisor: "#17C787",
   auditor: "#F4C04A",
-  administrativo: "#9C27B0", // Purple
+  administrativo: "#9C27B0",
   gerencia: "#C8376B",
-  "rr.hh": "#607D8B", // Blue Grey
-  recuperador: "#FF5722", // Deep Orange
+  "rr.hh": "#607D8B",
+  recuperador: "#FF5722",
+  encargado: "#19803bff",
+  independiente: "#00ACC1",
 }
 
 
 
-const roles = ["asesor", "supervisor", "auditor", "administrativo", "gerencia", "RR.HH", "recuperador"]
+const roles = ["asesor", "supervisor", "auditor", "administrativo", "gerencia", "RR.HH", "recuperador", "encargado", "independiente"]
 
 export function GestionUsuarios() {
   const { theme } = useTheme()

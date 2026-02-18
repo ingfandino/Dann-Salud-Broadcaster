@@ -33,7 +33,13 @@ router.post('/', requireAuth, auditCtrl.createAudit);
 router.get('/', requireAuth, auditCtrl.getAuditsByDate);
 router.patch('/:id/status', requireAuth, auditCtrl.updateStatus);
 router.patch('/:id', requireAuth, auditCtrl.updateAudit);
-router.delete('/:id', requireAuth, auditCtrl.deleteAudit);
+// ⚠️ DELETE: rol "encargado" explícitamente prohibido
+router.delete('/:id', requireAuth, (req, res, next) => {
+    if (req.user.role === 'encargado') {
+        return res.status(403).json({ message: 'No autorizado para eliminar auditorías' });
+    }
+    next();
+}, auditCtrl.deleteAudit);
 
 // 📌 Multimedia
 router.post(

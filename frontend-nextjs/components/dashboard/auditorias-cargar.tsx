@@ -114,7 +114,7 @@ export function AuditoriasCargar() {
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     // Roles
-    const isSupervisor = user?.role === "Supervisor" || user?.role === "supervisor"
+    const isSupervisor = user?.role === "Supervisor" || user?.role === "supervisor" || user?.role === "encargado" || user?.role === "Encargado"
     const isGerenciaOrAuditor =
         user?.role === "Gerencia" || user?.role === "gerencia" ||
         user?.role === "Auditor" || user?.role === "auditor" ||
@@ -128,7 +128,7 @@ export function AuditoriasCargar() {
             const filtered = list
                 .filter((u: User) => {
                     const isActive = u?.active !== false
-                    return isActive && (u.role === "supervisor" || u.role === "Supervisor") && u.nombre
+                    return isActive && ["supervisor", "Supervisor", "encargado", "Encargado", "supervisor_reventa"].includes(u.role) && u.nombre
                 })
                 .sort((a: User, b: User) => a.nombre.localeCompare(b.nombre))
             setSupervisores(filtered)
@@ -149,7 +149,7 @@ export function AuditoriasCargar() {
             const filtered = list
                 .filter((u: User) => {
                     const isActive = u?.active !== false
-                    const isCorrectRole = ["asesor", "auditor", "supervisor"].includes(u.role?.toLowerCase())
+                    const isCorrectRole = ["asesor", "auditor", "supervisor", "encargado"].includes(u.role?.toLowerCase())
                     const isSameTeam = String(u.numeroEquipo) === String(targetTeam)
                     return isActive && isCorrectRole && isSameTeam && u.nombre
                 })

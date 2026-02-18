@@ -13,6 +13,7 @@ const Employee = require('../models/Employee');
 const User = require('../models/User');
 const Audit = require('../models/Audit');
 const InternalMessage = require('../models/InternalMessage');
+const separationController = require('./employeeSeparationController');
 
 /** Obtiene todos los empleados con datos de usuario */
 exports.getAllEmployees = async (req, res) => {
@@ -100,6 +101,26 @@ exports.createEmployee = async (req, res) => {
             return res.status(400).json({ message: 'Ya existe un empleado asociado a este usuario' });
         }
 
+        // ✅ VALIDACIÓN DE EQUIPO PARA SUPERVISOR/ENCARGADO
+        // Supervisor/Encargado solo puede crear empleados de su mismo equipo
+        const creatorRole = req.user?.role?.toLowerCase();
+        if (creatorRole === 'supervisor' || creatorRole === 'encargado') {
+            const supervisorNumeroEquipo = req.user.numeroEquipo ? String(req.user.numeroEquipo) : null;
+            const targetUserNumeroEquipo = user.numeroEquipo ? String(user.numeroEquipo) : null;
+
+            if (!supervisorNumeroEquipo) {
+                return res.status(403).json({
+                    message: 'Tu cuenta de supervisor no tiene un número de equipo asignado.'
+                });
+            }
+
+            if (supervisorNumeroEquipo !== targetUserNumeroEquipo) {
+                return res.status(403).json({
+                    message: 'Solo puedes crear empleados de tu mismo equipo.'
+                });
+            }
+        }
+
         const employee = new Employee({
             userId,
             nombreCompleto,
@@ -139,31 +160,52 @@ exports.updateEmployee = async (req, res) => {
 
         // Si se está desactivando, agregar fecha de baja y fecha de egreso
         if (updates.activo === false) {
-            if (!updates.fechaBaja) {
-                updates.fechaBaja = new Date();
-                updates.fechaEgreso = new Date();
-            }
+            const fechaBaja = updates.fechaBaja || new Date();
+            updates.fechaBaja = fechaBaja;
+            updates.fechaEgreso = fechaBaja;
 
-            // ✅ AUTOMATIC USER DEACTIVATION
-            // Si el empleado tiene un usuario asociado, desactivarlo también
+            // Obtener el empleado actual antes de actualizar
             const currentEmployee = await Employee.findById(id);
-            if (currentEmployee && currentEmployee.userId) {
-                await User.findByIdAndUpdate(currentEmployee.userId, { active: false });
-                console.log(`👤 Usuario ${currentEmployee.userId} desactivado automáticamente por baja de empleado.`);
+
+            if (currentEmployee) {
+                // ✅ AUTOMATIC USER DEACTIVATION
+                if (currentEmployee.userId) {
+                    await User.findByIdAndUpdate(currentEmployee.userId, { active: false });
+                    console.log(`👤 Usuario ${currentEmployee.userId} desactivado automáticamente por baja de empleado.`);
+                }
+
+                // ✅ AUTOMATIC SEPARATION RECORD CREATION
+                // Crear registro de baja para liquidaciones
+                try {
+                    await separationController.createSeparation(
+                        currentEmployee,
+                        req.user._id,
+                        updates.motivoBaja || currentEmployee.motivoBaja || '',
+                        fechaBaja
+                    );
+                    console.log(`📋 Registro de baja creado para: ${currentEmployee.nombreCompleto}`);
+                } catch (sepError) {
+                    console.error('Error al crear registro de baja:', sepError);
+                    // No bloqueamos la operación principal
+                }
             }
         }
 
-        // Si se está reactivando, limpiar fecha de baja y egreso
+        // Si se está reactivando, guardar fecha de reingreso y limpiar fecha de baja
         if (updates.activo === true) {
+            // ✅ GUARDAR FECHA DE REINGRESO para futuras liquidaciones
+            updates.fechaReingreso = new Date();
             updates.fechaBaja = null;
             updates.fechaEgreso = null;
             updates.motivoBaja = '';
+            updates.motivoBajaNormalizado = null;
 
             // Reactivar usuario asociado automáticamente
             const currentEmployee = await Employee.findById(id);
             if (currentEmployee && currentEmployee.userId) {
                 await User.findByIdAndUpdate(currentEmployee.userId, { active: true });
-                console.log(`👤 Usuario ${currentEmployee.userId} reactivado automáticamente por reactivación de empleado.`);
+                console.log(`👤 Usuario ${currentEmployee.userId} reactivado automáticamente.`);
+                console.log(`📅 Fecha de reingreso guardada: ${updates.fechaReingreso.toLocaleDateString()}`);
             }
         }
 
@@ -204,9 +246,9 @@ exports.deleteEmployee = async (req, res) => {
         // Eliminar el registro completamente
         await Employee.findByIdAndDelete(id);
 
-        // Si el usuario que eliminó es supervisor, notificar a RR.HH. y Gerencia
+        // Si el usuario que eliminó es supervisor/encargado, notificar a RR.HH. y Gerencia
         const userRole = req.user.role?.toLowerCase();
-        if (userRole === 'supervisor') {
+        if (userRole === 'supervisor' || userRole === 'encargado') {
             // Buscar usuarios de RR.HH. y Gerencia
             const recipients = await User.find({
                 $or: [
@@ -414,6 +456,36 @@ exports.getEmployeeStats = async (req, res) => {
                 qrMonth,
                 incomplete,
                 teamSize: teamMembers.length
+            };
+        }
+
+        // ENCARGADO: Estadísticas de TODOS los equipos (como Gerencia/Admin)
+        else if (role === 'encargado') {
+            // QR Hechos de TODOS los equipos en la última semana
+            const qrWeek = await Audit.countDocuments({
+                status: { $in: validStates },
+                createdAt: { $gte: startOfWeek }
+            });
+
+            // QR Hechos de TODOS los equipos en el mes actual
+            const qrMonth = await Audit.countDocuments({
+                status: { $in: validStates },
+                createdAt: { $gte: startOfMonth }
+            });
+
+            // Total de ventas incompletas de TODOS los equipos
+            const incomplete = await Audit.countDocuments({
+                status: { $nin: validStates }
+            });
+
+            // Contar todos los usuarios activos
+            const totalUsers = await User.countDocuments({ active: true });
+
+            stats.stats = {
+                qrWeek,
+                qrMonth,
+                incomplete,
+                totalUsers
             };
         }
 

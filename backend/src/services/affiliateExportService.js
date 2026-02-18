@@ -1289,16 +1289,16 @@ async function generateAndSendAffiliateCSVs() {
         if (config.sendType === "masivo") {
             logger.info("📤 Modo: Envío Masivo");
 
-            const supervisors = await User.find({ role: "supervisor", active: true }).lean();
+            const supervisors = await User.find({ role: { $in: ["supervisor", "independiente"] }, active: true }).lean();
 
             if (supervisors.length === 0) {
-                logger.warn("⚠️ No hay supervisores activos");
+                logger.warn("⚠️ No hay supervisores ni independientes activos");
                 config.lastExecuted = new Date();
                 await config.save();
                 return;
             }
 
-            logger.info(`👥 Supervisores activos: ${supervisors.length}`);
+            logger.info(`👥 Supervisores e Independientes activos: ${supervisors.length}`);
             
             // ✅ FIX: Set compartido para evitar que supervisores reciban los mismos reutilizables
             const sharedUsedReusableCuils = new Set();

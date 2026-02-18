@@ -593,6 +593,7 @@ export function MensajeriaMasiva() {
 
     try {
       setLoading(true)
+      const isScheduled = fechaEnvio && fechaEnvio.trim() !== ''
       await api.sendJobs.start({
         name: campaignName,
         templateId: template || undefined,
@@ -602,10 +603,14 @@ export function MensajeriaMasiva() {
         delayMax: parseInt(tiempoMax),
         batchSize: parseInt(tamanoLote),
         pauseBetweenBatches: parseInt(descanso),
-        scheduledAt: fechaEnvio || undefined
+        scheduledFor: isScheduled ? new Date(fechaEnvio).toISOString() : undefined
       })
 
-      toast.success("Campaña iniciada exitosamente")
+      toast.success(isScheduled
+        ? `Campaña programada para ${new Date(fechaEnvio).toLocaleString('es-AR')}`
+        : "Campaña iniciada exitosamente"
+      )
+
 
       /* Resetear formulario */
       setCampaignName("")

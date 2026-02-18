@@ -14,9 +14,9 @@ const { requireAuth } = require('../middlewares/authMiddleware');
 // Middleware para verificar que el usuario es Gerencia o Supervisor
 const isGerenciaOrSupervisor = (req, res, next) => {
     const role = req.user?.role?.toLowerCase();
-    if (role !== 'gerencia' && role !== 'supervisor') {
+    if (role !== 'gerencia' && role !== 'supervisor' && role !== 'encargado') {
         return res.status(403).json({ 
-            message: 'Acceso denegado. Solo Gerencia y Supervisores pueden acceder a este recurso.' 
+            message: 'Acceso denegado. Solo Gerencia, Supervisores y Encargados pueden acceder a este recurso.' 
         });
     }
     next();

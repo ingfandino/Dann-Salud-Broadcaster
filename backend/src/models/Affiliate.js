@@ -19,7 +19,7 @@ const mongoose = require("mongoose");
 const affiliateSchema = new mongoose.Schema(
     {
         /* ========== DATOS PERSONALES (OBLIGATORIOS) ========== */
-        
+
         /** Nombre completo del afiliado */
         nombre: {
             type: String,
@@ -56,12 +56,12 @@ const affiliateSchema = new mongoose.Schema(
         },
 
         /* ========== DATOS DE CONTACTO ADICIONALES ========== */
-        
+
         telefono2: { type: String, trim: true },
         telefono3: { type: String, trim: true },
         telefono4: { type: String, trim: true },
         telefono5: { type: String, trim: true },
-        
+
         /** Edad del afiliado */
         edad: {
             type: Number,
@@ -75,7 +75,7 @@ const affiliateSchema = new mongoose.Schema(
         },
 
         /* ========== METADATA DE IMPORTACIÓN ========== */
-        
+
         /** Usuario que subió el archivo */
         uploadedBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -102,7 +102,7 @@ const affiliateSchema = new mongoose.Schema(
         },
 
         /* ========== ESTADO Y EXPORTACIÓN ========== */
-        
+
         /** Estado activo/inactivo del registro */
         active: {
             type: Boolean,
@@ -125,7 +125,7 @@ const affiliateSchema = new mongoose.Schema(
         exportBatchId: { type: String },
 
         /* ========== GESTIÓN DE LEADS ========== */
-        
+
         /** Estado actual del lead en el proceso comercial */
         leadStatus: {
             type: String,
@@ -156,9 +156,9 @@ const affiliateSchema = new mongoose.Schema(
             default: false,
             index: true
         },
-        
+
         /* ========== ORIGEN Y TRAZABILIDAD ========== */
-        
+
         /** Origen del dato: fresh (nuevo), reusable (reciclado), extra */
         dataSource: {
             type: String,
@@ -170,6 +170,12 @@ const affiliateSchema = new mongoose.Schema(
             type: Boolean,
             default: false
         },
+        /** Indica si el teléfono principal NO tiene WhatsApp (detectado por fallo de envío) */
+        noWhatsApp: {
+            type: Boolean,
+            default: false,
+            index: true
+        },
         /** Referencia a la auditoría origen (si aplica) */
         sourceAuditId: {
             type: mongoose.Schema.Types.ObjectId,
@@ -177,7 +183,7 @@ const affiliateSchema = new mongoose.Schema(
         },
 
         /* ========== CONTROL DE OBSOLESCENCIA ========== */
-        
+
         /** Fecha en que se marcó como obsoleto */
         obsoletedAt: { type: Date },
         /** Batch que causó la obsolescencia */

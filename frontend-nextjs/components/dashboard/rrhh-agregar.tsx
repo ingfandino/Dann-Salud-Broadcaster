@@ -5,10 +5,11 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useTheme } from "./theme-provider"
 import { cn } from "@/lib/utils"
-import { RefreshCw, UserPlus, ImageIcon, Loader2 } from "lucide-react"
+import { RefreshCw, UserPlus, ImageIcon, Loader2, Lock } from "lucide-react"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
+import { useAuth } from "@/lib/auth"
 
 interface User {
   _id: string
@@ -26,6 +27,12 @@ interface Employee {
 export function RRHHAgregar() {
   const { theme } = useTheme()
   const router = useRouter()
+  const { user } = useAuth()
+  
+  // ✅ Detectar rol para restricciones
+  const userRole = user?.role?.toLowerCase() || '';
+  const isSupervisor = userRole === 'supervisor';
+  const myNumeroEquipo = user?.numeroEquipo ? String(user.numeroEquipo) : null;
 
   const [loading, setLoading] = useState(false)
   const [users, setUsers] = useState<User[]>([])
@@ -165,7 +172,19 @@ export function RRHHAgregar() {
   }
 
   // Filter available users (those who are not already employees)
-  const availableUsers = users.filter(u => !existingEmployees.has(u._id))
+  // ✅ Supervisor: solo puede ver usuarios de su mismo equipo
+  const availableUsers = users.filter(u => {
+    // Excluir usuarios que ya son empleados
+    if (existingEmployees.has(u._id)) return false;
+    
+    // Si es supervisor, solo mostrar usuarios de su equipo
+    if (isSupervisor && myNumeroEquipo) {
+      const userEquipo = u.numeroEquipo ? String(u.numeroEquipo) : null;
+      return userEquipo === myNumeroEquipo;
+    }
+    
+    return true;
+  })
 
   if (loadingData) {
     return (
@@ -275,18 +294,26 @@ export function RRHHAgregar() {
                 className={cn("text-sm font-medium mb-1 block", theme === "dark" ? "text-gray-300" : "text-gray-700")}
               >
                 Número de Equipo
+                {isSupervisor && <Lock className="w-3 h-3 inline ml-1 text-gray-400" />}
               </label>
               <input
                 type="text"
                 value={formData.numeroEquipo}
                 onChange={(e) => handleInputChange("numeroEquipo", e.target.value)}
+                disabled={isSupervisor} // ✅ Supervisor no puede cambiar el equipo
                 className={cn(
                   "w-full px-4 py-2.5 rounded-lg border text-sm",
                   theme === "dark"
                     ? "bg-white/5 border-white/10 text-white placeholder-gray-500"
                     : "bg-white border-gray-200 text-gray-800 placeholder-gray-400",
+                  isSupervisor && "opacity-60 cursor-not-allowed"
                 )}
               />
+              {isSupervisor && (
+                <p className={cn("text-xs mt-1", theme === "dark" ? "text-amber-400" : "text-amber-600")}>
+                  🔒 Solo puedes crear empleados de tu equipo ({myNumeroEquipo})
+                </p>
+              )}
             </div>
           </div>
 

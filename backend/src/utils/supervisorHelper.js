@@ -76,7 +76,7 @@ async function getSupervisorSnapshotForAudit(audit, asesor) {
         // 3. Buscar supervisor del numeroEquipo
         const supervisor = await User.findOne({
             numeroEquipo: String(targetNumeroEquipo),
-            role: { $in: ['supervisor', 'Supervisor'] },
+            role: { $in: ['supervisor', 'Supervisor', 'encargado'] },
             active: true
         }).select('_id nombre numeroEquipo');
 

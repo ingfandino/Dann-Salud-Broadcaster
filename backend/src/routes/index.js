@@ -36,6 +36,9 @@ const affiliateRoutes = require("./affiliates");
 const bannedWordRoutes = require("./bannedWords");
 const employeeRoutes = require("./employees");
 const phoneRoutes = require("./phones");
+const lowPerformanceRoutes = require("./lowPerformance");
+const employeeSeparationRoutes = require("./employeeSeparationRoutes");
+const evidenciaRoutes = require("./evidencias");
 
 // 📌 Rutas públicas
 router.use("/auth", authRoutes);
@@ -89,5 +92,8 @@ router.use("/banned-words", bannedWordRoutes);
 router.use("/employees", employeeRoutes);
 router.use("/phones", phoneRoutes);
 router.use("/assignments", require("./assignments"));
+router.use("/low-performance", lowPerformanceRoutes);
+router.use("/separations", employeeSeparationRoutes);
+router.use("/evidencias", evidenciaRoutes);
 
 module.exports = router;

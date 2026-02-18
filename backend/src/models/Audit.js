@@ -19,7 +19,7 @@ const { Schema } = mongoose;
 
 const AuditSchema = new Schema({
     /* ========== DATOS DEL AFILIADO ========== */
-    
+
     /** Nombre completo del afiliado */
     nombre: { type: String, required: true },
     /** CUIL del afiliado (opcional) */
@@ -32,9 +32,9 @@ const AuditSchema = new Schema({
     obraSocialAnterior: { type: String },
     /** Obra social a la que se afilia */
     obraSocialVendida: { type: String, enum: ['Binimed', 'Meplife', 'TURF'], required: true },
-    
+
     /* ========== PROGRAMACIÓN Y ASIGNACIONES ========== */
-    
+
     /** Fecha y hora programada para la auditoría */
     scheduledAt: { type: Date, required: true },
     /** Asesor que realizó la venta */
@@ -49,9 +49,9 @@ const AuditSchema = new Schema({
     administrador: { type: Schema.Types.ObjectId, ref: 'User' },
     /** Grupo/equipo al que pertenece */
     groupId: { type: Schema.Types.ObjectId, ref: 'Group' },
-    
+
     /* ========== ESTADO Y SEGUIMIENTO ========== */
-    
+
     /** Estado actual de la auditoría */
     status: { type: String, default: '' },
     /** Última actualización del estado */
@@ -62,9 +62,9 @@ const AuditSchema = new Schema({
     fechaCreacionQR: { type: Date, default: null },
     /** Flag para notificaciones de seguimiento 12h */
     followUpNotificationSent: { type: Boolean, default: false },
-    
+
     /* ========== RECUPERACIÓN ========== */
-    
+
     /** Fecha a partir de la cual es elegible para recuperación */
     recoveryEligibleAt: { type: Date, default: null },
     /** Indica si está en proceso de recuperación */
@@ -79,9 +79,11 @@ const AuditSchema = new Schema({
     isRecuperada: { type: Boolean, default: false },
     /** Indica si la venta está disponible para venta (usado en AFIP/Padrón) */
     disponibleParaVenta: { type: Boolean, default: false },
-    
+    /** Indica si es venta referida (supervisor puede ser Gerencia) */
+    isReferido: { type: Boolean, default: false },
+
     /* ========== LIQUIDACIÓN ========== */
-    
+
     /** Indica si está marcada para liquidación */
     isLiquidacion: { type: Boolean, default: false },
     /** Mes de liquidación (formato YYYY-MM) */
@@ -90,7 +92,7 @@ const AuditSchema = new Schema({
     liquidacionDeletedAt: { type: Date, default: null },
 
     /* ========== ARCHIVOS MULTIMEDIA ========== */
-    
+
     multimedia: {
         /** Imágenes de documentación */
         images: { type: [String], default: [] },
@@ -105,12 +107,12 @@ const AuditSchema = new Schema({
     },
 
     /* ========== NOTAS Y DATOS ADICIONALES ========== */
-    
+
     /** Notas adicionales sobre la auditoría */
     datosExtra: { type: String, default: "" },
-    
+
     /* ========== CAMPOS REGISTRO DE VENTAS ========== */
-    
+
     /** Aporte monetario del afiliado */
     aporte: { type: Number, default: null },
     /** CUIT del empleador */
@@ -134,9 +136,9 @@ const AuditSchema = new Schema({
         }],
         default: []
     },
-    
+
     /* ========== HISTORIALES DE CAMBIOS ========== */
-    
+
     /** Historial de cambios de estado */
     statusHistory: {
         type: [{
@@ -156,9 +158,30 @@ const AuditSchema = new Schema({
         }],
         default: []
     },
+    /** Historial de cambios de fecha de creación del QR */
+    fechaQRHistory: {
+        type: [{
+            value: { type: Date },                    // Fecha asignada
+            updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+            updatedAt: { type: Date, default: Date.now },
+            isAutomatic: { type: Boolean, default: false }  // true = auto (por QR hecho), false = manual
+        }],
+        default: []
+    },
+
+    /** Historial de cambios de Administrador */
+    administradorHistory: {
+        type: [{
+            previousAdmin: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+            newAdmin: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+            changedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+            changedAt: { type: Date, default: Date.now }
+        }],
+        default: []
+    },
 
     /* ========== TRAZABILIDAD DE SUPERVISOR ========== */
-    
+
     /** Snapshot del supervisor al momento de la venta */
     supervisorSnapshot: {
         _id: { type: Schema.Types.ObjectId, ref: 'User' },
@@ -174,9 +197,19 @@ const AuditSchema = new Schema({
  * Middleware pre-save: Calcula automáticamente el supervisorSnapshot
  * basándose en el asesor asignado y su historial de equipos.
  * Se ejecuta al crear o al modificar asesor/fechaCreacionQR/groupId.
+ * 
+ * EXCEPCIÓN: Si isReferido=true y ya hay supervisorSnapshot, NO se sobrescribe
+ * (permite asignar supervisores con rol Gerencia como Eliana Suarez)
  */
 AuditSchema.pre('save', async function (next) {
     try {
+        // ✅ FIX: Si es venta referida y ya tiene supervisorSnapshot, respetar la asignación manual
+        if (this.isReferido && this.supervisorSnapshot && this.supervisorSnapshot._id) {
+            const logger = require('../utils/logger');
+            logger.info(`[AUDIT_HOOK] Audit ${this._id}: isReferido=true, respetando supervisorSnapshot existente (${this.supervisorSnapshot.nombre})`);
+            return next();
+        }
+
         const shouldCalculate = this.isNew ||
             this.isModified('asesor') ||
             this.isModified('fechaCreacionQR') ||

@@ -41,9 +41,11 @@ import {
   XCircle,
   Building2,
   FileText,
+  FileArchive,
   KeyRound,
   Clock,
   FileCheck,
+  Banknote,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ThemeToggle } from "./theme-toggle"
@@ -115,6 +117,7 @@ const menuItems = [
     icon: Building2,
     submenu: [
       { id: "administracion-registro-ventas", label: "Registro de ventas", icon: FileText },
+      { id: "administracion-evidencias", label: "Evidencias", icon: FileArchive },
     ],
   },
   {
@@ -123,7 +126,9 @@ const menuItems = [
     icon: UsersRound,
     submenu: [
       { id: "rrhh-estadisticas", label: "Estadísticas", icon: ChartPie },
+      { id: "rrhh-bajo-rendimiento", label: "Bajo rendimiento", icon: AlertTriangle },
       { id: "rrhh-activos", label: "Activos", icon: UserCheck },
+      { id: "rrhh-bajas-liquidaciones", label: "Bajas y liquidaciones", icon: Banknote },
       { id: "rrhh-inactivos", label: "Inactivos", icon: UserX },
       { id: "rrhh-agregar", label: "Añadir empleado", icon: UserPlus },
       { id: "rrhh-telefonos", label: "Teléfonos", icon: Phone },
@@ -144,7 +149,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
       return menuItems // Gerencia sees everything
     }
 
-    if (role === 'asesor') {
+    if (role === 'asesor' || role === 'independiente') {
       return menuItems.filter(item => {
         if (item.id === 'reportes-globales' || item.id === 'mensajeria-masiva' || item.id === 'mensajeria-interna') return true
         if (item.id === 'auditorias') return true // Seguimiento, Crear turno, Liquidación
@@ -155,13 +160,13 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
-              sub.id === 'auditorias-seguimiento' || 
+              sub.id === 'auditorias-seguimiento' ||
               sub.id === 'auditorias-crear-turno' ||
-              sub.id === 'auditorias-liquidacion' // ✅ Asesor ahora ve Liquidación
+              sub.id === 'auditorias-liquidacion' // ✅ Asesor e Independiente ven Liquidación
             )
           }
         }
-        // Filtrar submenú de contactar-afiliados para asesor
+        // Filtrar submenú de contactar-afiliados para asesor e independiente
         if (item.id === 'contactar-afiliados' && item.submenu) {
           return {
             ...item,
@@ -212,6 +217,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
               sub.id === 'rrhh-estadisticas' ||
               sub.id === 'rrhh-activos' ||
               sub.id === 'rrhh-inactivos' ||
+              sub.id === 'rrhh-agregar' || // ✅ Supervisor puede añadir empleados (solo de su equipo)
               sub.id === 'rrhh-telefonos' // ✅ Supervisor ve Teléfonos
             )
           }
@@ -252,6 +258,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
               sub.id === 'rrhh-estadisticas' ||
               sub.id === 'rrhh-activos' ||
               sub.id === 'rrhh-inactivos' ||
+              sub.id === 'rrhh-agregar' || // ✅ Supervisor puede añadir empleados (solo de su equipo)
               sub.id === 'rrhh-telefonos' // ✅ Supervisor ve Teléfonos
             )
           }
@@ -306,11 +313,13 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
             return { ...item, submenu: item.submenu.filter(sub => sub.id === 'auditorias-seguimiento') }
           } else {
             // Seguimiento, Crear turno y Liquidación (auditor con equipo)
-            return { ...item, submenu: item.submenu.filter(sub => 
-              sub.id === 'auditorias-seguimiento' || 
-              sub.id === 'auditorias-crear-turno' ||
-              sub.id === 'auditorias-liquidacion' // ✅ Auditor con equipo ve Liquidación
-            )}
+            return {
+              ...item, submenu: item.submenu.filter(sub =>
+                sub.id === 'auditorias-seguimiento' ||
+                sub.id === 'auditorias-crear-turno' ||
+                sub.id === 'auditorias-liquidacion' // ✅ Auditor con equipo ve Liquidación
+              )
+            }
           }
         }
         // ✅ Auditor con equipo solo ve "Datos del día"
@@ -326,6 +335,75 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
 
     if (role === 'rr.hh') {
       return menuItems.filter(item => item.id === 'recursos-humanos' || item.id === 'mensajeria-interna')
+        .map(item => {
+          // RR.HH. no ve "Bajas y liquidaciones" (exclusivo de Gerencia)
+          if (item.id === 'recursos-humanos' && item.submenu) {
+            return {
+              ...item,
+              submenu: item.submenu.filter(sub => sub.id !== 'rrhh-bajas-liquidaciones')
+            }
+          }
+          return item
+        })
+    }
+
+    // ✅ NUEVO: Rol Encargado - Supervisor de Supervisores
+    // Acceso transversal a edición de ventas, pero NUNCA puede borrar
+    if (role === 'encargado') {
+      return menuItems.filter(item => {
+        // Acceso a Reportes de Mensajería (solo lectura)
+        if (item.id === 'reportes-globales') return true
+        // Acceso a Mensajería Masiva
+        if (item.id === 'mensajeria-masiva') return true
+        // Acceso completo a Auditorías (todas las interfaces hijas)
+        if (item.id === 'auditorias') return true
+        // Acceso a Contactar Afiliados (igual que Supervisor)
+        if (item.id === 'contactar-afiliados') return true
+        // Acceso a Base de Afiliados (igual que Supervisor)
+        if (item.id === 'base-afiliados') return true
+        // Acceso a Recursos Humanos (parcial, igual que Supervisor)
+        if (item.id === 'recursos-humanos') return true
+        return false
+      }).map(item => {
+        // Auditorías: TODAS las interfaces hijas (sin filtrar)
+        if (item.id === 'auditorias' && item.submenu) {
+          return item // Acceso completo
+        }
+        // Contactar Afiliados: igual que Supervisor
+        if (item.id === 'contactar-afiliados' && item.submenu) {
+          return {
+            ...item,
+            submenu: item.submenu.filter(sub =>
+              sub.id === 'contactar-afiliados-administracion' ||
+              sub.id === 'contactar-afiliados-datos-dia'
+            )
+          }
+        }
+        // Base de Afiliados: igual que Supervisor
+        if (item.id === 'base-afiliados' && item.submenu) {
+          return {
+            ...item,
+            submenu: item.submenu.filter(sub =>
+              sub.id === 'base-afiliados-estadistica' ||
+              sub.id === 'base-afiliados-configuracion'
+            )
+          }
+        }
+        // Recursos Humanos: igual que Supervisor
+        if (item.id === 'recursos-humanos' && item.submenu) {
+          return {
+            ...item,
+            submenu: item.submenu.filter(sub =>
+              sub.id === 'rrhh-estadisticas' ||
+              sub.id === 'rrhh-activos' ||
+              sub.id === 'rrhh-inactivos' ||
+              sub.id === 'rrhh-agregar' ||
+              sub.id === 'rrhh-telefonos'
+            )
+          }
+        }
+        return item
+      })
     }
 
     if (role === 'recuperador') {
@@ -334,16 +412,17 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
         if (item.id === 'reportes-globales') return true
         // Acceso a Mensajería Masiva (solo sus propias campañas - filtrado en backend)
         if (item.id === 'mensajeria-masiva') return true
-        // Acceso a Auditorías (Seguimiento solo lectura + interfaces de recuperación + Liquidación)
+        // Acceso a Auditorías (Seguimiento solo lectura + interfaces de recuperación + Liquidación + Crear turno)
         if (item.id === 'auditorias') return true
         return false
       }).map(item => {
         if (item.id === 'auditorias' && item.submenu) {
-          // Recuperador: Seguimiento (lectura), Falta clave, Rechazada, Pendiente, AFIP y Padrón, Liquidación
+          // Recuperador: Seguimiento (lectura), Crear turno, Falta clave, Rechazada, Pendiente, AFIP y Padrón, Liquidación
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
               sub.id === 'auditorias-seguimiento' ||
+              sub.id === 'auditorias-crear-turno' || // ✅ Recuperador puede crear turnos
               sub.id === 'auditorias-falta-clave' ||
               sub.id === 'auditorias-rechazada' ||
               sub.id === 'auditorias-pendiente' ||

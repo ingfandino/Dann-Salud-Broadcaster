@@ -54,11 +54,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         'auditorias-pendiente': '/dashboard/audits/pendiente',
         'auditorias-afip-padron': '/dashboard/audits/afip-padron',
         'rrhh-estadisticas': '/dashboard/hr/stats',
+        'rrhh-bajo-rendimiento': '/dashboard/hr/low-performance',
         'rrhh-activos': '/dashboard/hr/active',
+        'rrhh-bajas-liquidaciones': '/dashboard/hr/separations',
         'rrhh-inactivos': '/dashboard/hr/inactive',
         'rrhh-agregar': '/dashboard/hr/add',
         'rrhh-telefonos': '/dashboard/hr/phones',
         'administracion-registro-ventas': '/dashboard/admin/sales-record',
+        'administracion-evidencias': '/dashboard/admin/evidencias',
         'gestion-usuarios': '/dashboard/users',
     };
 

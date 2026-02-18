@@ -134,7 +134,7 @@ exports.reassign = async (req, res) => {
         }
 
         // Verificar que el supervisor existe y tiene rol supervisor
-        const supervisor = await User.findOne({ _id: supervisorId, role: 'supervisor', active: true });
+        const supervisor = await User.findOne({ _id: supervisorId, role: { $in: ['supervisor', 'supervisor_reventa', 'encargado'] }, active: true });
         if (!supervisor) {
             return res.status(404).json({ error: "Supervisor no encontrado o inactivo" });
         }
@@ -294,8 +294,8 @@ exports.updateStatus = async (req, res) => {
         if (userRole === 'gerencia' || userRole === 'auditor') {
             assignment = await LeadAssignment.findById(id);
         }
-        // ✅ Supervisor puede editar leads de su equipo
-        else if (userRole === 'supervisor') {
+        // ✅ Supervisor/Encargado puede editar leads de su equipo
+        else if (userRole === 'supervisor' || userRole === 'encargado') {
             // Buscar asesores del equipo del supervisor
             const teamMembers = await User.find({ 
                 numeroEquipo: req.user.numeroEquipo,

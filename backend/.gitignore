@@ -22,3 +22,10 @@ Thumbs.db
 
 # WhatsApp session
 .wwebjs_auth/
+
+# Evidencias (archivos ZIP)
+storage/evidencias/*.zip
+
+# Archivos temporales de uploads
+storage/temp/*
+!storage/temp/.gitkeep

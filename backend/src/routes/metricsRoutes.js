@@ -37,7 +37,7 @@ router.get("/dashboard", requireAuth, async (req, res) => {
         const role = (req.user.role || '').toLowerCase();
         let contactosQuery = { createdAt: { $gte: startOfDay, $lt: endOfDay } };
 
-        if (role === 'asesor' || role === 'auditor') {
+        if (role === 'asesor' || role === 'auditor' || role === 'independiente') {
             contactosQuery.createdBy = req.user._id;
         } else if (role === 'supervisor') {
             const myGroup = req.user.numeroEquipo;

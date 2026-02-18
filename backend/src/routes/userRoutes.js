@@ -80,7 +80,7 @@ router.put(
 router.get(
     "/",
     requireAuth,
-    permit("supervisor", "administrativo", "auditor", "gerencia", "RR.HH", "asesor", "recuperador"),
+    permit("supervisor", "administrativo", "auditor", "gerencia", "RR.HH", "asesor", "recuperador", "encargado", "independiente"),
     userController.getUsers
 );
 
@@ -109,7 +109,7 @@ router.get(
 router.get(
     "/groups",
     requireAuth,
-    permit("gerencia", "administrativo", "auditor", "supervisor", "RR.HH"),
+    permit("gerencia", "administrativo", "auditor", "supervisor", "RR.HH", "encargado"),
     async (req, res) => {
         try {
             const User = require("../models/User");
@@ -138,22 +138,37 @@ router.get(
 router.post(
     "/:id/team-change",
     requireAuth,
-    permit("gerencia", "administrativo", "RR.HH"),
+    permit("gerencia", "administrativo", "RR.HH", "encargado"),
     userController.addTeamChange
 );
 
 router.put(
     "/:id/team-history/:periodId",
     requireAuth,
-    permit("gerencia", "administrativo", "RR.HH"),
+    permit("gerencia", "administrativo", "RR.HH", "encargado"),
     userController.editTeamPeriod
 );
 
 router.delete(
     "/:id/team-history/:periodId",
     requireAuth,
-    permit("gerencia", "administrativo", "RR.HH"),
+    permit("gerencia", "administrativo", "RR.HH", "encargado"),
     userController.deleteTeamPeriod
+);
+
+// ✅ Suspension Management Routes (Solo Gerencia)
+router.post(
+    "/:id/suspend",
+    requireAuth,
+    permit("gerencia"),
+    userController.suspendUser
+);
+
+router.delete(
+    "/:id/suspend",
+    requireAuth,
+    permit("gerencia"),
+    userController.cancelSuspension
 );
 
 module.exports = router;

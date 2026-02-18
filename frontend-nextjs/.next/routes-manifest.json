@@ -60,10 +60,22 @@
       "namedRegex": "^/_not\\-found(?:/)?$"
     },
     {
+      "page": "/administracion/evidencias",
+      "regex": "^/administracion/evidencias(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/administracion/evidencias(?:/)?$"
+    },
+    {
       "page": "/dashboard",
       "regex": "^/dashboard(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/dashboard(?:/)?$"
+    },
+    {
+      "page": "/dashboard/admin/evidencias",
+      "regex": "^/dashboard/admin/evidencias(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/admin/evidencias(?:/)?$"
     },
     {
       "page": "/dashboard/admin/sales-record",
@@ -222,10 +234,22 @@
       "namedRegex": "^/dashboard/hr/inactive(?:/)?$"
     },
     {
+      "page": "/dashboard/hr/low-performance",
+      "regex": "^/dashboard/hr/low\\-performance(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/hr/low\\-performance(?:/)?$"
+    },
+    {
       "page": "/dashboard/hr/phones",
       "regex": "^/dashboard/hr/phones(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/dashboard/hr/phones(?:/)?$"
+    },
+    {
+      "page": "/dashboard/hr/separations",
+      "regex": "^/dashboard/hr/separations(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/hr/separations(?:/)?$"
     },
     {
       "page": "/dashboard/hr/stats",
