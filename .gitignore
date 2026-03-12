@@ -1,0 +1,19 @@
+# Node
+node_modules/
+**/node_modules/
+
+# Mongo backups
+*.bson
+backup/
+backups/
+dump/
+
+# WhatsApp sessions
+backend/.wwebjs_sessions/
+
+# logs
+logs
+*.log
+
+# env
+.env

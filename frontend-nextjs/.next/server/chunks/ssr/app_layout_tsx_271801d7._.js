@@ -1,0 +1,3 @@
+module.exports=[33290,a=>{"use strict";var b=a.i(7997);function c({children:a}){return(0,b.jsx)("html",{lang:"es",children:(0,b.jsx)("body",{className:"font-sans antialiased",children:a})})}a.s(["default",()=>c,"metadata",0,{title:"DANN+SALUD Online",description:"Sistema de gestión empresarial",generator:"v0.app",icons:{icon:[{url:"/icon-light-32x32.png",media:"(prefers-color-scheme: light)"},{url:"/icon-dark-32x32.png",media:"(prefers-color-scheme: dark)"},{url:"/icon.svg",type:"image/svg+xml"}],apple:"/apple-icon.png"}}])}];
+
+//# sourceMappingURL=app_layout_tsx_271801d7._.js.map

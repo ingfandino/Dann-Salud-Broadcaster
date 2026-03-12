@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "@floating-ui/react": "^0.27.16",
+    "bcryptjs": "^3.0.2",
+    "code": "^5.2.4",
+    "dotenv": "^17.2.2",
+    "mongoose": "^8.18.1",
+    "mongosh": "^2.5.8",
+    "vs": "^0.1.0"
+  }
+}

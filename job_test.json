@@ -1,0 +1,13 @@
+{
+    "name": "Campaña de prueba",
+    "template": "Hola {nombre}, gracias por confiar en nosotros. ¡{random|Te esperamos|Seguimos en contacto}!",
+    "contacts": [
+        {
+            "id": "<ID_CONTACTO_JUAN>"
+        },
+        {
+            "id": "<ID_CONTACTO_ANA>"
+        }
+    ],
+    "scheduledFor": "2025-09-22T18:00:00.000Z"
+}
