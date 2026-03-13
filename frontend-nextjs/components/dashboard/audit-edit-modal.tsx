@@ -625,7 +625,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                 // Check if user is supervisor of the group
                 // The audit's asesor has a numeroEquipo, and we need to check if current user is supervisor of that same team
                 const isSupervisorOfGroup = (() => {
-                    const isSupervisor = user?.role?.toLowerCase() === 'supervisor';
+                    const isSupervisor = user?.role?.toLowerCase() === 'supervisor' || user?.role?.toLowerCase() === 'encargado';
                     if (!isSupervisor) return false;
 
                     // Check if audit.asesor has numeroEquipo and it matches user's numeroEquipo
@@ -635,7 +635,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                     return auditTeam && userTeam && String(auditTeam) === String(userTeam);
                 })();
 
-                if (!isGerencia && !isSupervisorOfGroup && !isAssignedAuditor) {
+                if (!isGerencia && !isEncargado && !isSupervisorOfGroup && !isAssignedAuditor) {
                     toast.error("No tienes permiso para quitar al auditor asignado. Solo gerencia, el supervisor del equipo o el auditor mismo pueden hacerlo.");
                     setLoading(false);
                     return;

@@ -84,7 +84,7 @@ export function AuditoriasCrearTurno() {
   // Un auditor SIN numeroEquipo actúa como gerencia (puede ver todos los equipos)
   const isAuditorConEquipo = userRole === "auditor" && !!user?.numeroEquipo
   const isAsesor = userRole === "asesor" || isAuditorConEquipo || isRecuperador || isIndependiente // Independiente se comporta como asesor (autoasigna)
-  const isGerenciaOrAuditorSinEquipo = userRole === "gerencia" || (userRole === "auditor" && !user?.numeroEquipo)
+  const isGerenciaOrAuditorSinEquipo = userRole === "gerencia" || userRole === "encargado" || (userRole === "auditor" && !user?.numeroEquipo)
   
   // ✅ Encargado con numeroEquipo se comporta como supervisor de su equipo
   const isEncargadoConEquipo = isEncargado && !!user?.numeroEquipo
