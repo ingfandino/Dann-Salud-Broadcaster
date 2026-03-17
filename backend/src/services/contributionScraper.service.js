@@ -175,11 +175,16 @@ async function waitForCaptchaResolution(page, timeoutMs = 120000) {
             return "solved_advanced";
         }
         
+    try {
         const html = await page.content();
         if (!hasCaptcha(html) && !url.includes("recaptcha")) {
             logger.info(`✅ [ARCA-SCRAPER] CAPTCHA resuelto: Desapareció de la página actual.`);
             return "solved_current";
         }
+    } catch (e) {
+        // Ignorar errores si la página está navegando
+        logger.info(`⏳ [ARCA-SCRAPER] Esperando a que termine la navegación...`);
+    }
         
         await new Promise(r => setTimeout(r, 2000));
     }
@@ -347,16 +352,18 @@ async function scrapeCuilWithSession(cuil, session, { executionId = "manual", as
         
         // Read back the value to verify
         let typedValue = await inputLocator.inputValue();
-        logger.info(`📝 [ARCA-SCRAPER] Valor ingresado en DOM: '${typedValue}'`);
+        let normalizedTyped = (typedValue || "").replace(/\D/g, "");
+        logger.info(`📝 [ARCA-SCRAPER] Valor ingresado en DOM: '${typedValue}' (normalizado: '${normalizedTyped}')`);
         
-        if (!typedValue || !typedValue.includes(cuilClean)) {
-            logger.warn(`⚠️ [ARCA-SCRAPER] El valor leído ('${typedValue}') no coincide con el esperado ('${cuilClean}'). Re-intentando...`);
+        if (normalizedTyped !== cuilClean) {
+            logger.warn(`⚠️ [ARCA-SCRAPER] El valor leído ('${normalizedTyped}') no coincide con el esperado ('${cuilClean}'). Re-intentando...`);
             await inputLocator.click();
             await inputLocator.fill("");
             await inputLocator.pressSequentially(cuilClean, { delay: 150 });
             await inputLocator.evaluate(el => el.blur());
             typedValue = await inputLocator.inputValue();
-            logger.info(`📝 [ARCA-SCRAPER] Valor ingresado tras reintento: '${typedValue}'`);
+            normalizedTyped = (typedValue || "").replace(/\D/g, "");
+            logger.info(`📝 [ARCA-SCRAPER] Valor ingresado tras reintento: '${typedValue}' (normalizado: '${normalizedTyped}')`);
         }
 
         // Enviar formulario
@@ -369,6 +376,14 @@ async function scrapeCuilWithSession(cuil, session, { executionId = "manual", as
             logger.info(`✅ [ARCA-SCRAPER] Formulario enviado exitosamente, URL actual: ${page.url()}`);
         } catch (err) {
             logger.info(`⚠️ [ARCA-SCRAPER] El envío no avanzó a MuestraBasica.aspx en el tiempo esperado. Revisando estado...`);
+            
+            // Wait for page to be stable before reading content to avoid navigation race
+            try {
+                await page.waitForLoadState("domcontentloaded", { timeout: 5000 });
+            } catch (e) {
+                // Ignore timeout
+            }
+            
             const currentHtml = await page.content();
             
             // Si el html sigue teniendo captcha y seguimos en ingresoDatos
@@ -401,6 +416,9 @@ async function scrapeCuilWithSession(cuil, session, { executionId = "manual", as
         }
         
         logger.info(`✅ [ARCA-SCRAPER] Página de resultados | url=${page.url()}`);
+        
+        // Wait for page to be stable before reading content to avoid navigation race
+        await page.waitForLoadState("domcontentloaded");
 
         const resultHtml = await page.content();
         if (hasCaptcha(resultHtml)) {

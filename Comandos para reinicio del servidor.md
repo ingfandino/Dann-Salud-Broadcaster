@@ -10,6 +10,7 @@ sleep 5
 lsof -i :5000 || echo "Puerto 5000 libre"
 
 # 4. Iniciar backend solo
+node backend/scripts/runArcaAssisted.js --watch
 cd ~/Documentos/Dann-Salud-Broadcaster/backend
 pm2 start src/server.js --name backend -f
 

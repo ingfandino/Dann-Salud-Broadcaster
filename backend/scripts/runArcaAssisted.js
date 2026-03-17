@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const parseArgs = require("minimist");
 const connectDB = require("../src/config/db");
 const Affiliate = require("../src/models/Affiliate");
+const AffiliateContribution = require("../src/models/AffiliateContribution");
 const ArcaAssistedTask = require("../src/models/ArcaAssistedTask");
 const { BrowserSession, scrapeCuilWithSession } = require("../src/services/contributionScraper.service");
 
