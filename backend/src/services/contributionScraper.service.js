@@ -147,6 +147,9 @@ function buildCaptcha() {
     };
 }
 
+/**
+ * Construye el resultado estructurado de un error.
+ */
 function buildError(message) {
     return {
         ok: false,
@@ -155,6 +158,44 @@ function buildError(message) {
         checkedAt: new Date(),
         errorMessage: message,
     };
+}
+
+/**
+ * Espera a que el usuario resuelva el CAPTCHA manualmente.
+ */
+async function waitForCaptchaResolution(page, timeoutMs = 120000) {
+    logger.info(`⏳ [ARCA-SCRAPER] CAPTCHA detectado. Modo asistido: esperando resolución manual (hasta ${timeoutMs/1000}s)...`);
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < timeoutMs) {
+        const url = page.url();
+        
+        if (url.includes("MuestraBasica.aspx")) {
+            logger.info(`✅ [ARCA-SCRAPER] CAPTCHA resuelto: El usuario avanzó a resultados.`);
+            return "solved_advanced";
+        }
+        
+        const html = await page.content();
+        if (!hasCaptcha(html) && !url.includes("recaptcha")) {
+            logger.info(`✅ [ARCA-SCRAPER] CAPTCHA resuelto: Desapareció de la página actual.`);
+            return "solved_current";
+        }
+        
+        await new Promise(r => setTimeout(r, 2000));
+    }
+    
+    logger.warn(`⏰ [ARCA-SCRAPER] Timeout: El CAPTCHA no fue resuelto a tiempo.`);
+    return "timeout";
+}
+
+async function parseResult(page, cuilClean) {
+    const lastPeriod = await parseLastContributionPeriod(page);
+    if (lastPeriod) {
+        logger.info(`✅ [ARCA-SCRAPER] CUIL ${cuilClean} → último período: ${lastPeriod}`);
+        return buildSuccess(lastPeriod, cuilClean);
+    }
+    logger.info(`ℹ️ [ARCA-SCRAPER] CUIL ${cuilClean} → sin datos válidos`);
+    return buildNoData();
 }
 
 // ────────────────────────────────────────────────────────────
@@ -245,13 +286,13 @@ class BrowserSession {
  *
  * @param {string} cuil
  * @param {BrowserSession} session
- * @param {{ executionId?: string }} [opts]
+ * @param {{ executionId?: string, assistedMode?: boolean }} [opts]
  * @returns {Promise<{ ok: boolean, status: string, lastContributionPeriod: string|null, checkedAt: Date, errorMessage: string|null }>}
  */
-async function scrapeCuilWithSession(cuil, session, { executionId = "manual" } = {}) {
+async function scrapeCuilWithSession(cuil, session, { executionId = "manual", assistedMode = false } = {}) {
     const cuilClean = String(cuil).replace(/[-\s]/g, "");
     const page = session.page;
-    logger.info(`🔍 [ARCA-SCRAPER] Consultando CUIL: ${cuilClean} | executionId=${executionId}`);
+    logger.info(`🔍 [ARCA-SCRAPER] Consultando CUIL: ${cuilClean} | executionId=${executionId} | assistedMode=${assistedMode}`);
 
     try {
         // Asegurar que estamos en ingresoDatos.aspx
@@ -266,8 +307,14 @@ async function scrapeCuilWithSession(cuil, session, { executionId = "manual" } =
 
         const formHtml = await page.content();
         if (hasCaptcha(formHtml)) {
-            logger.warn(`⚠️ [ARCA-SCRAPER] CAPTCHA detectado en ingresoDatos.aspx | cuil=${cuilClean}`);
-            return buildCaptcha();
+            if (assistedMode) {
+                const res = await waitForCaptchaResolution(page, 120000);
+                if (res === "timeout") return buildCaptcha();
+                if (res === "solved_advanced") return await parseResult(page, cuilClean);
+            } else {
+                logger.warn(`⚠️ [ARCA-SCRAPER] CAPTCHA detectado en ingresoDatos.aspx | cuil=${cuilClean}`);
+                return buildCaptcha();
+            }
         }
 
         // Limpiar campo y rellenar CUIL
@@ -276,25 +323,49 @@ async function scrapeCuilWithSession(cuil, session, { executionId = "manual" } =
         logger.info(`📝 [ARCA-SCRAPER] CUIL ingresado: ${cuilClean}`);
 
         // Enviar formulario
-        await Promise.all([
-            page.waitForURL(/MuestraBasica\.aspx/i, { timeout: NAV_TIMEOUT_MS }),
-            page.click(SUBMIT_SEL, { timeout: ACTION_TIMEOUT_MS }),
-        ]);
+        try {
+            await Promise.all([
+                page.waitForURL(/MuestraBasica\.aspx/i, { timeout: NAV_TIMEOUT_MS }),
+                page.click(SUBMIT_SEL, { timeout: ACTION_TIMEOUT_MS }),
+            ]);
+        } catch (err) {
+            const currentHtml = await page.content();
+            if (hasCaptcha(currentHtml)) {
+                if (assistedMode) {
+                    const res = await waitForCaptchaResolution(page, 120000);
+                    if (res === "timeout") return buildCaptcha();
+                    if (res === "solved_advanced") return await parseResult(page, cuilClean);
+                    
+                    if (!page.url().includes("MuestraBasica.aspx")) {
+                        await Promise.all([
+                            page.waitForURL(/MuestraBasica\.aspx/i, { timeout: NAV_TIMEOUT_MS }),
+                            page.click(SUBMIT_SEL, { timeout: ACTION_TIMEOUT_MS }),
+                        ]);
+                    }
+                } else {
+                    logger.warn(`⚠️ [ARCA-SCRAPER] CAPTCHA detectado al enviar | cuil=${cuilClean}`);
+                    return buildCaptcha();
+                }
+            } else {
+                throw err;
+            }
+        }
+        
         logger.info(`✅ [ARCA-SCRAPER] Página de resultados | url=${page.url()}`);
 
         const resultHtml = await page.content();
         if (hasCaptcha(resultHtml)) {
-            logger.warn(`⚠️ [ARCA-SCRAPER] CAPTCHA detectado en resultado | cuil=${cuilClean}`);
-            return buildCaptcha();
+            if (assistedMode) {
+                const res = await waitForCaptchaResolution(page, 120000);
+                if (res === "timeout") return buildCaptcha();
+                if (res === "solved_advanced") return await parseResult(page, cuilClean);
+            } else {
+                logger.warn(`⚠️ [ARCA-SCRAPER] CAPTCHA detectado en resultado | cuil=${cuilClean}`);
+                return buildCaptcha();
+            }
         }
 
-        const lastPeriod = await parseLastContributionPeriod(page);
-        if (lastPeriod) {
-            logger.info(`✅ [ARCA-SCRAPER] CUIL ${cuilClean} → último período: ${lastPeriod}`);
-            return buildSuccess(lastPeriod, cuilClean);
-        }
-        logger.info(`ℹ️ [ARCA-SCRAPER] CUIL ${cuilClean} → sin datos válidos`);
-        return buildNoData();
+        return await parseResult(page, cuilClean);
 
     } catch (err) {
         const message = err.message || "Error desconocido";
