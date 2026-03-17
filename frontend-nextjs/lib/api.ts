@@ -114,6 +114,7 @@ export const api = {
             apiClient.patch(`/audits/${id}/revision`, data),
         getReventa: () => apiClient.get('/audits/reventa'),
         exportReventa: () => apiClient.get('/audits/reventa/export', { responseType: 'blob' }),
+        toggleEnProceso: (id: string) => apiClient.patch(`/audits/${id}/toggle-en-proceso`),
     },
 
     /* Recuperaciones */
@@ -355,6 +356,36 @@ export const api = {
         markPaid: (id: string) => apiClient.patch(`/separations/${id}/mark-paid`),
         updateMotivoBaja: (id: string, motivoBajaNormalizado: string | null) =>
             apiClient.patch(`/separations/${id}/motivo-baja`, { motivoBajaNormalizado }),
+    },
+
+    /* Control de Privilegios */
+    privileges: {
+        getStructure: () => apiClient.get('/privileges/structure'),
+        getMyPermissions: () => apiClient.get('/privileges/my-permissions'),
+        getByRole: (role: string) => apiClient.get(`/privileges/role/${encodeURIComponent(role)}`),
+        upsert: (data: {
+            role: string;
+            moduleId: string;
+            interfaceId: string;
+            level: 'module' | 'interface';
+            permissions: { acceder: boolean; ver: boolean; editar: boolean; eliminar: boolean };
+        }) => apiClient.post('/privileges', data),
+        getAuditLog: (params?: { role?: string; limit?: number; skip?: number }) =>
+            apiClient.get('/privileges/audit-log', { params }),
+        getCacheStatus: () => apiClient.get('/privileges/cache/status'),
+        flushCache: () => apiClient.post('/privileges/cache/flush'),
+    },
+
+    /* Aportes ARCA */
+    affiliateContributions: {
+        run: (data?: {
+            mode?: 'single' | 'selected' | 'filtered' | 'pending';
+            limit?: number;
+            cuil?: string;
+            affiliateIds?: string[];
+            filters?: { obraSocial?: string; localidad?: string };
+        }) => apiClient.post('/affiliate-contributions/run', data || {}),
+        getStats: () => apiClient.get('/affiliate-contributions/stats'),
     },
 
     /* Cliente raw para requests personalizados */

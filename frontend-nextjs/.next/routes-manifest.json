@@ -204,16 +204,10 @@
       "namedRegex": "^/dashboard/banned\\-words(?:/)?$"
     },
     {
-      "page": "/dashboard/banned-words/add",
-      "regex": "^/dashboard/banned\\-words/add(?:/)?$",
+      "page": "/dashboard/config/privileges",
+      "regex": "^/dashboard/config/privileges(?:/)?$",
       "routeKeys": {},
-      "namedRegex": "^/dashboard/banned\\-words/add(?:/)?$"
-    },
-    {
-      "page": "/dashboard/banned-words/detections",
-      "regex": "^/dashboard/banned\\-words/detections(?:/)?$",
-      "routeKeys": {},
-      "namedRegex": "^/dashboard/banned\\-words/detections(?:/)?$"
+      "namedRegex": "^/dashboard/config/privileges(?:/)?$"
     },
     {
       "page": "/dashboard/contabilidad",

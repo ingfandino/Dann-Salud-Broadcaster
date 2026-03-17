@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import {
   Filter, Download, Calendar, Pencil, Trash2,
   X, ChevronDown, ChevronUp, RefreshCw,
-  Upload, FileSpreadsheet, AlertCircle, CheckCircle2, FileWarning, Info, Copy
+  Upload, FileSpreadsheet, AlertCircle, CheckCircle2, FileWarning, Info, Copy, Play, Pause
 } from "lucide-react"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
@@ -93,6 +93,14 @@ interface Audit {
   email?: string
   mesPadron?: string
   statusAdministrativo?: string
+  enProceso?: {
+    activo: boolean
+    procesadoPor?: {
+      _id: string
+      nombre: string
+    }
+    iniciadoEn?: string
+  }
   statusHistory?: Array<{
     value: string
     updatedBy?: { nombre?: string }
@@ -783,8 +791,33 @@ export function RegistroVentas() {
   }
 
   const openEditModal = (audit: Audit) => {
+    // Verificar si la venta está siendo procesada por otro usuario
+    if (audit.enProceso?.activo && audit.enProceso.procesadoPor?._id !== user?._id) {
+      const procesador = audit.enProceso.procesadoPor?.nombre || 'Otro usuario'
+      toast.error(
+        `Esta venta está siendo procesada por ${procesador}. No puede editarla en este momento.`,
+        { duration: 4000 }
+      )
+      return
+    }
     setSelectedAudit(audit)
     setEditModalOpen(true)
+  }
+
+  const handleToggleEnProceso = async (audit: Audit) => {
+    try {
+      const { data } = await api.audits.toggleEnProceso(audit._id)
+      
+      // Actualizar el estado local
+      setAudits(prev => prev.map(a => 
+        a._id === audit._id ? data.audit : a
+      ))
+      
+      toast.success(data.message)
+    } catch (error: any) {
+      console.error('Error al cambiar estado en proceso:', error)
+      toast.error(error.response?.data?.message || 'Error al actualizar estado')
+    }
   }
 
   const handleBulkFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1529,10 +1562,21 @@ export function RegistroVentas() {
                       <tr
                         key={audit._id}
                         className={cn(
-                          "transition-colors group",
-                          getRowBackgroundByStatus(audit.statusAdministrativo || audit.status, theme) ||
-                          (idx % 2 === 0 ? "" : theme === "dark" ? "bg-white/[0.02]" : "bg-gray-50/50")
+                          "transition-colors group relative",
+                          // Animación de pulso para ventas en proceso
+                          audit.enProceso?.activo && "animate-pulse-slow",
+                          // Fondo destacado para ventas en proceso
+                          audit.enProceso?.activo
+                            ? theme === "dark"
+                              ? "bg-gradient-to-r from-orange-900/40 via-orange-800/30 to-orange-900/40 hover:from-orange-900/50 hover:via-orange-800/40 hover:to-orange-900/50 border-l-4 border-orange-500"
+                              : "bg-gradient-to-r from-orange-100 via-orange-50 to-orange-100 hover:from-orange-200 hover:via-orange-100 hover:to-orange-200 border-l-4 border-orange-500"
+                            : getRowBackgroundByStatus(audit.statusAdministrativo || audit.status, theme) ||
+                              (idx % 2 === 0 ? "" : theme === "dark" ? "bg-white/[0.02]" : "bg-gray-50/50")
                         )}
+                        title={audit.enProceso?.activo && audit.enProceso.procesadoPor?._id !== user?._id
+                          ? `⚠️ En proceso por: ${audit.enProceso.procesadoPor?.nombre || 'Otro usuario'}\n📋 Afiliado: ${audit.nombre}\n📞 CUIL: ${audit.cuil || 'N/A'}\n\n🔒 No puede editar esta venta mientras esté siendo procesada.`
+                          : undefined
+                        }
                       >
                         <td className={cn("px-2 py-2 text-center", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
                           {audit.fechaCreacionQR ? (
@@ -1607,6 +1651,25 @@ export function RegistroVentas() {
                         </td>
                         <td className="px-2 py-2 text-center">
                           <div className="flex items-center justify-center gap-1 transition-opacity">
+                            {/* Botón En Proceso - Solo visible para el administrativo asignado */}
+                            {audit.administrador?._id === user?._id && (
+                              <button
+                                onClick={() => handleToggleEnProceso(audit)}
+                                className={cn(
+                                  "p-1 rounded transition-colors",
+                                  audit.enProceso?.activo
+                                    ? "bg-orange-100 text-orange-600 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:hover:bg-orange-900/50"
+                                    : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-800 dark:text-gray-400"
+                                )}
+                                title={audit.enProceso?.activo ? "Marcar como disponible" : "Marcar como en proceso"}
+                              >
+                                {audit.enProceso?.activo ? (
+                                  <Pause className="w-3 h-3" />
+                                ) : (
+                                  <Play className="w-3 h-3" />
+                                )}
+                              </button>
+                            )}
                             <button
                               onClick={() => openEditModal(audit)}
                               className="p-1 hover:bg-blue-100 text-blue-600 rounded dark:hover:bg-blue-900/30 dark:text-blue-400"

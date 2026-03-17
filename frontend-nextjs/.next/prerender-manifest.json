@@ -577,56 +577,6 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/dashboard/banned-words/add": {
-      "experimentalBypassFor": [
-        {
-          "type": "header",
-          "key": "next-action"
-        },
-        {
-          "type": "header",
-          "key": "content-type",
-          "value": "multipart/form-data;.*"
-        }
-      ],
-      "initialRevalidateSeconds": false,
-      "srcRoute": "/dashboard/banned-words/add",
-      "dataRoute": "/dashboard/banned-words/add.rsc",
-      "prefetchDataRoute": null,
-      "allowHeader": [
-        "host",
-        "x-matched-path",
-        "x-prerender-revalidate",
-        "x-prerender-revalidate-if-generated",
-        "x-next-revalidated-tags",
-        "x-next-revalidate-tag-token"
-      ]
-    },
-    "/dashboard/banned-words/detections": {
-      "experimentalBypassFor": [
-        {
-          "type": "header",
-          "key": "next-action"
-        },
-        {
-          "type": "header",
-          "key": "content-type",
-          "value": "multipart/form-data;.*"
-        }
-      ],
-      "initialRevalidateSeconds": false,
-      "srcRoute": "/dashboard/banned-words/detections",
-      "dataRoute": "/dashboard/banned-words/detections.rsc",
-      "prefetchDataRoute": null,
-      "allowHeader": [
-        "host",
-        "x-matched-path",
-        "x-prerender-revalidate",
-        "x-prerender-revalidate-if-generated",
-        "x-next-revalidated-tags",
-        "x-next-revalidate-tag-token"
-      ]
-    },
     "/dashboard/banned-words": {
       "experimentalBypassFor": [
         {
@@ -642,6 +592,31 @@
       "initialRevalidateSeconds": false,
       "srcRoute": "/dashboard/banned-words",
       "dataRoute": "/dashboard/banned-words.rsc",
+      "prefetchDataRoute": null,
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
+    "/dashboard/config/privileges": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/dashboard/config/privileges",
+      "dataRoute": "/dashboard/config/privileges.rsc",
       "prefetchDataRoute": null,
       "allowHeader": [
         "host",
@@ -1156,8 +1131,8 @@
   "dynamicRoutes": {},
   "notFoundRoutes": [],
   "preview": {
-    "previewModeId": "4420baf04fbff835489fde968f426891",
-    "previewModeSigningKey": "ee73f37bca4eec53a776e18ddb00c68e0362cce5791d5f2920fc5aa4cae1ef2c",
-    "previewModeEncryptionKey": "70142c5db1660c0a7472dc66a159d39a73eb9d2ef5e5b7f2a247a59a17dd263d"
+    "previewModeId": "2fbff689d2cc3d6096b1d7a3335eb850",
+    "previewModeSigningKey": "278bbf3c00f5768c7af03aef68e6068b1bd9ffaa68074e2a58a4543de9f6f7b0",
+    "previewModeEncryptionKey": "29e51d030a538699a50d30b4dad62cc77875390f7a4937586d01bb46f2d7fd1d"
   }
 }

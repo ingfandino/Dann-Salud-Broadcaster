@@ -19,6 +19,7 @@
 const Affiliate = require("../models/Affiliate");
 const Audit = require("../models/Audit");
 const AffiliateExportConfig = require("../models/AffiliateExportConfig");
+const AffiliateContribution = require("../models/AffiliateContribution");
 const User = require("../models/User");
 const LeadAssignment = require("../models/LeadAssignment");
 const Report = require("../models/Report");
@@ -503,6 +504,35 @@ exports.searchAffiliates = async (req, res) => {
         }
 
         const affiliates = await queryBuilder.lean();
+
+        // ── Enriquecer con datos de verificación de aportes ──
+        if (affiliates.length) {
+            const affiliateIds = affiliates.map((a) => a._id);
+            const contributions = await AffiliateContribution.find(
+                { affiliateId: { $in: affiliateIds } },
+                { affiliateId: 1, lastContributionPeriod: 1, "verification.status": 1, "verification.checkedAt": 1 }
+            ).lean();
+
+            const contribMap = {};
+            for (const c of contributions) {
+                contribMap[String(c.affiliateId)] = c;
+            }
+
+            for (const affiliate of affiliates) {
+                const contrib = contribMap[String(affiliate._id)];
+                affiliate.contribution = contrib
+                    ? {
+                          lastContributionPeriod: contrib.lastContributionPeriod || null,
+                          verificationStatus: contrib.verification?.status || "pending",
+                          verificationCheckedAt: contrib.verification?.checkedAt || null,
+                      }
+                    : {
+                          lastContributionPeriod: null,
+                          verificationStatus: "pending",
+                          verificationCheckedAt: null,
+                      };
+            }
+        }
 
         res.json({
             affiliates,

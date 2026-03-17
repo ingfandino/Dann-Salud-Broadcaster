@@ -22,6 +22,12 @@ import { useAuth } from "@/lib/auth"
 import * as XLSX from "xlsx"
 
 // Interfaces
+interface ContributionData {
+    lastContributionPeriod: string | null
+    verificationStatus: 'pending' | 'success' | 'no_data' | 'captcha' | 'error'
+    verificationCheckedAt: string | null
+}
+
 interface Audit {
     _id: string
     nombre: string
@@ -64,6 +70,7 @@ interface Audit {
         nombre: string
         numeroEquipo: string
     }
+    contribution?: ContributionData
 }
 
 interface User {
@@ -87,6 +94,19 @@ const formatDateTime = (value: string) => {
         hour12: false
     })
     return `${formattedDate} ${formattedTime}`
+}
+
+const getContributionBadge = (contrib: ContributionData | undefined, theme: string | undefined) => {
+    if (!contrib || contrib.verificationStatus === 'pending') {
+        return { label: 'Pendiente', cls: theme === 'dark' ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-500' }
+    }
+    switch (contrib.verificationStatus) {
+        case 'success':  return { label: 'OK', cls: theme === 'dark' ? 'bg-green-900 text-green-300' : 'bg-green-100 text-green-700' }
+        case 'no_data':  return { label: 'Sin datos', cls: theme === 'dark' ? 'bg-yellow-900 text-yellow-300' : 'bg-yellow-100 text-yellow-700' }
+        case 'captcha':  return { label: 'CAPTCHA', cls: theme === 'dark' ? 'bg-orange-900 text-orange-300' : 'bg-orange-100 text-orange-700' }
+        case 'error':    return { label: 'Error', cls: theme === 'dark' ? 'bg-red-900 text-red-300' : 'bg-red-100 text-red-700' }
+        default:         return { label: 'Pendiente', cls: theme === 'dark' ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-500' }
+    }
 }
 
 const getSupervisorName = (audit: Audit): string => {
@@ -659,12 +679,14 @@ export function BaseAfiliadosExitosas() {
                                 <th className="px-6 py-4">Obra Social</th>
                                 <th className="px-6 py-4">Asesor</th>
                                 <th className="px-6 py-4">Supervisor</th>
+                                <th className="px-6 py-4">Últ. Aporte</th>
+                                <th className="px-6 py-4">Verificación</th>
                             </tr>
                         </thead>
                         <tbody className={cn("divide-y", theme === "dark" ? "divide-white/5" : "divide-gray-100")}>
                             {loading ? (
                                 <tr>
-                                    <td colSpan={8} className="px-6 py-8 text-center">
+                                    <td colSpan={10} className="px-6 py-8 text-center">
                                         <div className="flex items-center justify-center gap-2">
                                             <RefreshCw className="w-5 h-5 animate-spin text-purple-500" />
                                             <span className="text-gray-500">Cargando datos...</span>
@@ -673,7 +695,7 @@ export function BaseAfiliadosExitosas() {
                                 </tr>
                             ) : audits.length === 0 ? (
                                 <tr>
-                                    <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                                    <td colSpan={10} className="px-6 py-8 text-center text-gray-500">
                                         No se encontraron afiliaciones exitosas
                                     </td>
                                 </tr>
@@ -703,6 +725,19 @@ export function BaseAfiliadosExitosas() {
                                             <span className={cn("px-2 py-1 rounded-md text-xs font-medium", getSupervisorColor(getSupervisorName(audit), theme))}>
                                                 {getSupervisorName(audit)}
                                             </span>
+                                        </td>
+                                        <td className={cn("px-6 py-4 whitespace-nowrap font-mono text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                                            {audit.contribution?.lastContributionPeriod || "-"}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            {(() => {
+                                                const badge = getContributionBadge(audit.contribution, theme)
+                                                return (
+                                                    <span className={cn("px-2 py-1 rounded-md text-xs font-medium", badge.cls)}>
+                                                        {badge.label}
+                                                    </span>
+                                                )
+                                            })()}
                                         </td>
                                     </tr>
                                 ))

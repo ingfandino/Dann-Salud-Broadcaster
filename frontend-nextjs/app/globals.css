@@ -348,6 +348,15 @@
   }
 }
 
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
 .animate-float-rotate {
   animation: float-rotate 20s ease-in-out infinite;
 }
@@ -369,6 +378,10 @@
 .animate-gradient-shift {
   background-size: 200% 200%;
   animation: gradient-shift 5s ease infinite;
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 3s ease-in-out infinite;
 }
 
 /* Fix for dropdown options - ensure text is always readable */

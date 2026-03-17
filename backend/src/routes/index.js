@@ -40,6 +40,8 @@ const lowPerformanceRoutes = require("./lowPerformance");
 const employeeSeparationRoutes = require("./employeeSeparationRoutes");
 const evidenciaRoutes = require("./evidencias");
 const expenseRoutes = require("./expenses");
+const privilegeRoutes = require("./privilegeRoutes");
+const affiliateContributionRoutes = require("./affiliateContributions");
 
 // 📌 Rutas públicas
 router.use("/auth", authRoutes);
@@ -97,5 +99,7 @@ router.use("/low-performance", lowPerformanceRoutes);
 router.use("/separations", employeeSeparationRoutes);
 router.use("/evidencias", evidenciaRoutes);
 router.use("/expenses", expenseRoutes);
+router.use("/privileges", privilegeRoutes);
+router.use("/affiliate-contributions", affiliateContributionRoutes);
 
 module.exports = router;

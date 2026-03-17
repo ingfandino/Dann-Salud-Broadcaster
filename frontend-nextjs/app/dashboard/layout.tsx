@@ -40,12 +40,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         'base-afiliados-frescos': '/dashboard/affiliates/fresh',
         'base-afiliados-reutilizables': '/dashboard/affiliates/reusable',
         'base-afiliados-fallidas': '/dashboard/affiliates/failed',
-        'contactar-afiliados': '/dashboard/contact/admin',
+        'herramientas-contacto': '/dashboard/contact/admin',
         'contactar-afiliados-administracion': '/dashboard/contact/admin',
         'contactar-afiliados-datos-dia': '/dashboard/contact/today',
-        'palabras-prohibidas-lista': '/dashboard/banned-words',
-        'palabras-prohibidas-detecciones': '/dashboard/banned-words/detections',
-        'palabras-prohibidas-agregar': '/dashboard/banned-words/add',
+        'palabras-prohibidas-mensajeria': '/dashboard/banned-words',
         'auditorias-seguimiento': '/dashboard/audits/follow-up',
         'auditorias-crear-turno': '/dashboard/audits/create',
         'auditorias-liquidacion': '/dashboard/audits/liquidation',
@@ -65,6 +63,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         'administracion-evidencias': '/dashboard/admin/evidencias',
         'gestion-usuarios': '/dashboard/users',
         'contabilidad': '/dashboard/contabilidad',
+        'configuracion-privilegios': '/dashboard/config/privileges',
     };
 
     /* Sincronizar activeSection con pathname */

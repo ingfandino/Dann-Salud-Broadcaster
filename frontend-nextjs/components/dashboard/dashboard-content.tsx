@@ -22,9 +22,7 @@ import { BaseAfiliadosConfiguracion } from "./base-afiliados-configuracion"
 import { BaseAfiliadosLista } from "./base-afiliados-lista"
 import { BaseAfiliadosCargar } from "./base-afiliados-cargar"
 import { BaseAfiliadosExitosas } from "./base-afiliados-exitosas"
-import { PalabrasProhibidas } from "./palabras-prohibidas"
-import { PalabrasProhibidasDetecciones } from "./palabras-prohibidas-detecciones"
-import { PalabrasProhibidasAgregar } from "./palabras-prohibidas-agregar"
+import { PalabrasProhibidasMensajeria } from "./palabras-prohibidas-mensajeria"
 import { AuditoriasSeguimiento } from "./auditorias-seguimiento"
 import { AuditoriasCrearTurno } from "./auditorias-crear-turno"
 import { AuditoriasLiquidacion } from "./auditorias-liquidacion"
@@ -75,10 +73,7 @@ const sectionTitles: Record<string, string> = {
   "contactar-afiliados": "Contactar Afiliados",
   "contactar-afiliados-administracion": "Administración de datos",
   "contactar-afiliados-datos-dia": "Datos del día",
-  "palabras-prohibidas": "Palabras Prohibidas",
-  "palabras-prohibidas-lista": "Lista de palabras",
-  "palabras-prohibidas-detecciones": "Detecciones",
-  "palabras-prohibidas-agregar": "Agregar palabra",
+  "palabras-prohibidas-mensajeria": "Palabras prohibidas para mensajería",
   auditorias: "Auditorías",
   "auditorias-seguimiento": "Seguimiento",
   "auditorias-crear-turno": "Crear turno",
@@ -99,6 +94,7 @@ const sectionTitles: Record<string, string> = {
   "administracion-registro-ventas": "Registro de Ventas",
   "administracion-evidencias": "Evidencias",
   "gestion-usuarios": "Gestión de Usuarios",
+  "configuracion-sistema": "Configuración de sistema",
 }
 
 export function DashboardContent({ activeSection, onSectionChange }: DashboardContentProps) {
@@ -228,16 +224,8 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
       return <ContactarDatosDia />
     }
 
-    if (activeSection === "palabras-prohibidas-lista") {
-      return <PalabrasProhibidas />
-    }
-
-    if (activeSection === "palabras-prohibidas-detecciones") {
-      return <PalabrasProhibidasDetecciones />
-    }
-
-    if (activeSection === "palabras-prohibidas-agregar") {
-      return <PalabrasProhibidasAgregar />
+    if (activeSection === "palabras-prohibidas-mensajeria") {
+      return <PalabrasProhibidasMensajeria />
     }
 
     if (activeSection === "auditorias-seguimiento") {
@@ -253,62 +241,18 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
     }
 
     if (activeSection === "auditorias-falta-clave") {
-      // Acceso: Gerencia, Recuperador, Encargado, Supervisor, Independiente, Administrativo
-      const role = user?.role?.toLowerCase()
-      const allowedRoles = ['gerencia', 'recuperador', 'encargado', 'supervisor', 'independiente', 'administrativo']
-      if (!allowedRoles.includes(role || '')) {
-        return (
-          <div className="flex flex-col items-center justify-center h-64 text-center">
-            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
-            <p className="text-gray-500 mt-2">No tenés permisos para acceder a esta sección.</p>
-          </div>
-        )
-      }
       return <AuditoriasFaltaClave />
     }
 
     if (activeSection === "auditorias-rechazada") {
-      // Acceso: Gerencia, Recuperador, Encargado, Supervisor, Independiente, Administrativo
-      const role = user?.role?.toLowerCase()
-      const allowedRoles = ['gerencia', 'recuperador', 'encargado', 'supervisor', 'independiente', 'administrativo']
-      if (!allowedRoles.includes(role || '')) {
-        return (
-          <div className="flex flex-col items-center justify-center h-64 text-center">
-            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
-            <p className="text-gray-500 mt-2">No tenés permisos para acceder a esta sección.</p>
-          </div>
-        )
-      }
       return <AuditoriasRechazada />
     }
 
     if (activeSection === "auditorias-pendiente") {
-      // Acceso: Gerencia, Recuperador, Encargado, Supervisor, Independiente, Administrativo
-      const role = user?.role?.toLowerCase()
-      const allowedRoles = ['gerencia', 'recuperador', 'encargado', 'supervisor', 'independiente', 'administrativo']
-      if (!allowedRoles.includes(role || '')) {
-        return (
-          <div className="flex flex-col items-center justify-center h-64 text-center">
-            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
-            <p className="text-gray-500 mt-2">No tenés permisos para acceder a esta sección.</p>
-          </div>
-        )
-      }
       return <AuditoriasPendiente />
     }
 
     if (activeSection === "auditorias-afip-padron") {
-      // Acceso: Gerencia, Recuperador, Encargado, Supervisor, Independiente, Administrativo
-      const role = user?.role?.toLowerCase()
-      const allowedRoles = ['gerencia', 'recuperador', 'encargado', 'supervisor', 'independiente', 'administrativo']
-      if (!allowedRoles.includes(role || '')) {
-        return (
-          <div className="flex flex-col items-center justify-center h-64 text-center">
-            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
-            <p className="text-gray-500 mt-2">No tenés permisos para acceder a esta sección.</p>
-          </div>
-        )
-      }
       return <AuditoriasAfipPadron />
     }
 

@@ -127,6 +127,12 @@ const AuditSchema = new Schema({
     mesPadron: { type: String, default: null },
     /** Estado específico de Registro de Ventas (sin mapear) */
     statusAdministrativo: { type: String, default: null },
+    /** Indica si el registro está siendo procesado por un administrativo */
+    enProceso: {
+        activo: { type: Boolean, default: false },
+        procesadoPor: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+        iniciadoEn: { type: Date, default: null }
+    },
     /** Historial de cambios en datosExtra */
     datosExtraHistory: {
         type: [{

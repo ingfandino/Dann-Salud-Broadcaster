@@ -8,7 +8,7 @@
 
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { 
   BarChart3, 
   MessageSquare, 
@@ -23,6 +23,7 @@ import {
   ChevronDown,
   ChartPie,
   FileDown,
+  Settings,
   Settings2,
   ListOrdered,
   Upload,
@@ -52,6 +53,7 @@ import { cn } from "@/lib/utils"
 import { ThemeToggle } from "./theme-toggle"
 import { useTheme } from "./theme-provider"
 import { useAuth } from "@/lib/auth"
+import { api } from "@/lib/api"
 
 interface SidebarProps {
   activeSection: string
@@ -62,53 +64,44 @@ interface SidebarProps {
 }
 
 const menuItems = [
-  { id: "reportes-globales", label: "Reportes de Mensajería", icon: BarChart3 },
-  { id: "mensajeria-masiva", label: "Mensajería Masiva", icon: MessageSquare },
+  {
+    id: "herramientas-contacto",
+    label: "Herramientas de contacto",
+    icon: Phone,
+    submenu: [
+      { id: "contactar-afiliados-administracion", label: "Administración de datos", icon: Settings2 },
+      { id: "contactar-afiliados-datos-dia", label: "Datos del día", icon: ListOrdered },
+      { id: "mensajeria-masiva", label: "Mensajería Masiva", icon: MessageSquare },
+      { id: "reportes-globales", label: "Reportes de Mensajería", icon: BarChart3 },
+    ],
+  },
   {
     id: "base-afiliados",
     label: "Base de Afiliados",
     icon: Users,
     submenu: [
-      { id: "base-afiliados-estadistica", label: "Estadística", icon: ChartPie },
-      { id: "base-afiliados-lista", label: "Lista de afiliados", icon: ListOrdered },
-      { id: "base-afiliados-exitosas", label: "Afiliaciones exitosas", icon: UsersRound },
-      { id: "base-afiliados-fallidas", label: "Afiliaciones fallidas", icon: XCircle },
-      { id: "base-afiliados-frescos", label: "Datos frescos", icon: Sparkles },
-      { id: "base-afiliados-reutilizables", label: "Datos reutilizables", icon: Recycle },
-      { id: "base-afiliados-cargar", label: "Cargar archivo", icon: Upload },
-      { id: "base-afiliados-configuracion", label: "Configuración de envíos", icon: Settings2 },
+      { id: "base-afiliados-estadistica",   label: "Estadísticas",            icon: ChartPie },
+      { id: "base-afiliados-lista",          label: "Lista de afiliados",      icon: Users },
+      { id: "base-afiliados-exitosas",       label: "Afiliaciones exitosas",   icon: UserCheck },
+      { id: "base-afiliados-fallidas",       label: "Afiliaciones fallidas",   icon: UserX },
+      { id: "base-afiliados-frescos",        label: "Datos frescos",           icon: Sparkles },
+      { id: "base-afiliados-reutilizables",  label: "Datos reutilizables",     icon: Recycle },
+      { id: "base-afiliados-cargar",         label: "Cargar archivo",          icon: Upload },
+      { id: "base-afiliados-configuracion",  label: "Configuración de envíos", icon: Settings2 },
     ],
   },
-  {
-    id: "contactar-afiliados",
-    label: "Contactar Afiliados",
-    icon: Phone,
-    submenu: [
-      { id: "contactar-afiliados-administracion", label: "Administración de datos", icon: Settings2 },
-      { id: "contactar-afiliados-datos-dia", label: "Datos del día", icon: ListOrdered },
-    ],
-  },
-  {
-    id: "palabras-prohibidas",
-    label: "Palabras Prohibidas",
-    icon: ShieldAlert,
-    submenu: [
-      { id: "palabras-prohibidas-lista", label: "Lista de palabras", icon: Shield },
-      { id: "palabras-prohibidas-detecciones", label: "Detecciones", icon: AlertTriangle },
-      { id: "palabras-prohibidas-agregar", label: "Agregar palabra", icon: Plus },
-    ],
-  },
+
   {
     id: "auditorias",
     label: "Auditorías",
     icon: ClipboardList,
     submenu: [
       { id: "auditorias-seguimiento", label: "Seguimiento", icon: Search },
+      { id: "auditorias-falta-clave", label: "Falta clave", icon: KeyRound },
+      { id: "auditorias-pendiente", label: "Pendiente", icon: Clock },
+      { id: "auditorias-rechazada", label: "Rechazada", icon: XCircle },
       { id: "auditorias-crear-turno", label: "Crear turno", icon: CalendarPlus },
       { id: "auditorias-liquidacion", label: "Liquidación", icon: DollarSign },
-      { id: "auditorias-falta-clave", label: "Falta clave", icon: KeyRound },
-      { id: "auditorias-rechazada", label: "Rechazada", icon: XCircle },
-      { id: "auditorias-pendiente", label: "Pendiente", icon: Clock },
       { id: "auditorias-afip-padron", label: "AFIP y Padrón", icon: FileCheck },
       { id: "auditorias-reventa", label: "Disponibles para reventa", icon: Recycle },
     ],
@@ -127,26 +120,119 @@ const menuItems = [
     label: "Recursos Humanos",
     icon: UsersRound,
     submenu: [
-      { id: "rrhh-estadisticas", label: "Estadísticas", icon: ChartPie },
-      { id: "rrhh-bajo-rendimiento", label: "Bajo rendimiento", icon: AlertTriangle },
+      { id: "rrhh-agregar", label: "Añadir empleado", icon: UserPlus },
       { id: "rrhh-activos", label: "Activos", icon: UserCheck },
       { id: "rrhh-bajas-liquidaciones", label: "Bajas y liquidaciones", icon: Banknote },
+      { id: "rrhh-bajo-rendimiento", label: "Bajo rendimiento", icon: AlertTriangle },
+      { id: "rrhh-estadisticas", label: "Estadísticas", icon: ChartPie },
       { id: "rrhh-inactivos", label: "Inactivos", icon: UserX },
-      { id: "rrhh-agregar", label: "Añadir empleado", icon: UserPlus },
       { id: "rrhh-telefonos", label: "Teléfonos", icon: Phone },
     ],
   },
   { id: "contabilidad", label: "Contabilidad", icon: Wallet },
-  { id: "gestion-usuarios", label: "Gestión de Usuarios", icon: UserCog },
+  {
+    id: "configuracion-sistema",
+    label: "Configuración de sistema",
+    icon: Settings,
+    submenu: [
+      { id: "configuracion-privilegios", label: "Control de privilegios", icon: Shield },
+      { id: "gestion-usuarios", label: "Gestión de Usuarios", icon: UserCog },
+      { id: "palabras-prohibidas-mensajeria", label: "Palabras prohibidas para mensajería", icon: ShieldAlert },
+    ],
+  },
 ]
+
+/** Applies dynamic permission overrides on top of the static filtered list.
+ *  Rules per interface:
+ *   - dynamic acceder=true  → always show (even if static hides it)
+ *   - dynamic acceder=false → always hide (even if static shows it)
+ *   - no dynamic entry      → follow static result
+ */
+function applyDynamicPermissions(
+  staticItems: typeof menuItems,
+  dynamicMap: Record<string, boolean>
+): typeof menuItems {
+  if (Object.keys(dynamicMap).length === 0) return staticItems;
+
+  const staticIfaceIds = new Set<string>();
+  for (const item of staticItems) {
+    if (!item.submenu) {
+      staticIfaceIds.add(item.id);
+    } else {
+      for (const sub of item.submenu) staticIfaceIds.add(sub.id);
+    }
+  }
+
+  return menuItems
+    .filter(item => {
+      if (!item.submenu) {
+        const d = dynamicMap[item.id];
+        if (d === true) return true;
+        if (d === false) return false;
+        return staticIfaceIds.has(item.id);
+      }
+      return item.submenu.some(sub => {
+        const d = dynamicMap[sub.id];
+        if (d === true) return true;
+        if (d === false) return false;
+        return staticIfaceIds.has(sub.id);
+      });
+    })
+    .map(item => {
+      if (!item.submenu) return item;
+      return {
+        ...item,
+        submenu: item.submenu.filter(sub => {
+          const d = dynamicMap[sub.id];
+          if (d === true) return true;
+          if (d === false) return false;
+          return staticIfaceIds.has(sub.id);
+        }),
+      };
+    }) as typeof menuItems;
+}
 
 export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose, onLogout }: SidebarProps) {
   const { theme } = useTheme()
   const { user } = useAuth()
 
+  const [dynamicPermsMap, setDynamicPermsMap] = useState<Record<string, boolean>>({});
+  const [dynamicPermsLoaded, setDynamicPermsLoaded] = useState(false);
+
+  useEffect(() => {
+    const role = user?.role?.toLowerCase();
+    if (!role || role === 'desarrollador' || role === 'gerencia') {
+      setDynamicPermsLoaded(true);
+      return;
+    }
+    setDynamicPermsLoaded(false);
+    api.privileges.getMyPermissions()
+      .then((res: any) => {
+        if (res.data?.fullAccess) {
+          setDynamicPermsMap({});
+          setDynamicPermsLoaded(true);
+          return;
+        }
+        const records: Array<{ interfaceId: string; permissions: { acceder: boolean } }> =
+          res.data?.permissions || [];
+        const map: Record<string, boolean> = {};
+        for (const r of records) {
+          if (r.permissions) map[r.interfaceId] = r.permissions.acceder ?? false;
+        }
+        setDynamicPermsMap(map);
+        setDynamicPermsLoaded(true);
+      })
+      .catch(() => setDynamicPermsLoaded(true));
+  }, [user?.role]);
+
   // Filter menu items based on user role
   const getFilteredMenuItems = () => {
     const role = user?.role?.toLowerCase()
+
+    // Desarrollador bypasses all privilege checks — full access
+    if (role === 'desarrollador') {
+      return menuItems
+    }
 
     if (role === 'gerencia') {
       return menuItems // Gerencia sees everything
@@ -154,9 +240,9 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
 
     if (role === 'asesor') {
       return menuItems.filter(item => {
-        if (item.id === 'reportes-globales' || item.id === 'mensajeria-masiva' || item.id === 'mensajeria-interna') return true
+        if (item.id === 'mensajeria-interna') return true
         if (item.id === 'auditorias') return true
-        if (item.id === 'contactar-afiliados') return true
+        if (item.id === 'herramientas-contacto') return true
         return false
       }).map(item => {
         if (item.id === 'auditorias' && item.submenu) {
@@ -169,11 +255,13 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
             )
           }
         }
-        if (item.id === 'contactar-afiliados' && item.submenu) {
+        if (item.id === 'herramientas-contacto' && item.submenu) {
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
-              sub.id === 'contactar-afiliados-datos-dia'
+              sub.id === 'contactar-afiliados-datos-dia' ||
+              sub.id === 'mensajeria-masiva' ||
+              sub.id === 'reportes-globales'
             )
           }
         }
@@ -183,9 +271,9 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
 
     if (role === 'independiente') {
       return menuItems.filter(item => {
-        if (item.id === 'reportes-globales' || item.id === 'mensajeria-masiva' || item.id === 'mensajeria-interna') return true
+        if (item.id === 'mensajeria-interna') return true
         if (item.id === 'auditorias') return true
-        if (item.id === 'contactar-afiliados') return true
+        if (item.id === 'herramientas-contacto') return true
         return false
       }).map(item => {
         if (item.id === 'auditorias' && item.submenu) {
@@ -202,11 +290,13 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
             )
           }
         }
-        if (item.id === 'contactar-afiliados' && item.submenu) {
+        if (item.id === 'herramientas-contacto' && item.submenu) {
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
-              sub.id === 'contactar-afiliados-datos-dia'
+              sub.id === 'contactar-afiliados-datos-dia' ||
+              sub.id === 'mensajeria-masiva' ||
+              sub.id === 'reportes-globales'
             )
           }
         }
@@ -216,47 +306,11 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
 
     if (role === 'supervisor') {
       return menuItems.filter(item => {
-        if (item.id === 'reportes-globales' || item.id === 'mensajeria-masiva' || item.id === 'mensajeria-interna') return true
-        if (item.id === 'auditorias') {
-          return {
-            ...item,
-            submenu: item.submenu?.filter(sub =>
-              sub.id === 'auditorias-seguimiento' ||
-              sub.id === 'auditorias-crear-turno' ||
-              sub.id === 'auditorias-liquidacion'
-            )
-          }
-        }
-        if (item.id === 'contactar-afiliados') {
-          return {
-            ...item,
-            submenu: item.submenu?.filter(sub =>
-              sub.id === 'contactar-afiliados-administracion' ||
-              sub.id === 'contactar-afiliados-datos-dia' // ✅ Supervisor ahora ve ambas
-            )
-          }
-        }
-        if (item.id === 'base-afiliados') {
-          return {
-            ...item,
-            submenu: item.submenu?.filter(sub =>
-              sub.id === 'base-afiliados-estadistica' ||
-              sub.id === 'base-afiliados-configuracion'
-            )
-          }
-        }
-        if (item.id === 'recursos-humanos') {
-          return {
-            ...item,
-            submenu: item.submenu?.filter(sub =>
-              sub.id === 'rrhh-estadisticas' ||
-              sub.id === 'rrhh-activos' ||
-              sub.id === 'rrhh-inactivos' ||
-              sub.id === 'rrhh-agregar' || // ✅ Supervisor puede añadir empleados (solo de su equipo)
-              sub.id === 'rrhh-telefonos' // ✅ Supervisor ve Teléfonos
-            )
-          }
-        }
+        if (item.id === 'mensajeria-interna') return true
+        if (item.id === 'auditorias') return true
+        if (item.id === 'herramientas-contacto') return true
+        if (item.id === 'base-afiliados') return true
+        if (item.id === 'recursos-humanos') return true
         return false
       }).map(item => {
         if (item.id === 'auditorias' && item.submenu) {
@@ -278,16 +332,19 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
-              sub.id === 'base-afiliados-estadistica'
+              sub.id === 'base-afiliados-estadistica' ||
+              sub.id === 'base-afiliados-configuracion'
             )
           }
         }
-        if (item.id === 'contactar-afiliados' && item.submenu) {
+        if (item.id === 'herramientas-contacto' && item.submenu) {
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
               sub.id === 'contactar-afiliados-administracion' ||
-              sub.id === 'contactar-afiliados-datos-dia' // ✅ Supervisor ahora ve ambas
+              sub.id === 'contactar-afiliados-datos-dia' ||
+              sub.id === 'mensajeria-masiva' ||
+              sub.id === 'reportes-globales'
             )
           }
         }
@@ -298,8 +355,8 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
               sub.id === 'rrhh-estadisticas' ||
               sub.id === 'rrhh-activos' ||
               sub.id === 'rrhh-inactivos' ||
-              sub.id === 'rrhh-agregar' || // ✅ Supervisor puede añadir empleados (solo de su equipo)
-              sub.id === 'rrhh-telefonos' // ✅ Supervisor ve Teléfonos
+              sub.id === 'rrhh-agregar' ||
+              sub.id === 'rrhh-telefonos'
             )
           }
         }
@@ -342,12 +399,10 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
           }
           return false;
         } else {
-          // Case 1.2: Reportes, Mensajería, Seguimiento, Crear turno, Contactar Afiliados
-          if (item.id === 'reportes-globales') return true;
-          if (item.id === 'mensajeria-masiva') return true;
+          // Case 1.2: Reportes, Mensajería, Seguimiento, Crear turno, Herramientas de contacto
           if (item.id === 'mensajeria-interna') return true;
           if (item.id === 'auditorias') return true;
-          if (item.id === 'contactar-afiliados') return true; // ✅ Auditor con equipo ve Datos del día
+          if (item.id === 'herramientas-contacto') return true;
           return false;
         }
       }).map(item => {
@@ -370,11 +425,15 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
             }
           }
         }
-        // ✅ Auditor con equipo solo ve "Datos del día"
-        if (item.id === 'contactar-afiliados' && item.submenu) {
+        // ✅ Auditor con equipo ve "Datos del día", "Mensajería Masiva", "Reportes"
+        if (item.id === 'herramientas-contacto' && item.submenu) {
           return {
             ...item,
-            submenu: item.submenu.filter(sub => sub.id === 'contactar-afiliados-datos-dia')
+            submenu: item.submenu.filter(sub => 
+              sub.id === 'contactar-afiliados-datos-dia' ||
+              sub.id === 'mensajeria-masiva' ||
+              sub.id === 'reportes-globales'
+            )
           }
         }
         return item;
@@ -399,35 +458,31 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
     // Acceso transversal a edición de ventas, pero NUNCA puede borrar
     if (role === 'encargado') {
       return menuItems.filter(item => {
-        // Acceso a Reportes de Mensajería (solo lectura)
-        if (item.id === 'reportes-globales') return true
-        // Acceso a Mensajería Masiva
-        if (item.id === 'mensajeria-masiva') return true
+        // Acceso a Herramientas de contacto
+        if (item.id === 'herramientas-contacto') return true
         // Acceso completo a Auditorías (todas las interfaces hijas)
         if (item.id === 'auditorias') return true
-        // Acceso a Contactar Afiliados (igual que Supervisor)
-        if (item.id === 'contactar-afiliados') return true
         // Acceso a Base de Afiliados (igual que Supervisor)
         if (item.id === 'base-afiliados') return true
         // Acceso a Recursos Humanos (incluye Bajo rendimiento y Bajas y liquidaciones)
         if (item.id === 'recursos-humanos') return true
         // Acceso a Contabilidad
         if (item.id === 'contabilidad') return true
-        // Acceso a Gestión de Usuarios
-        if (item.id === 'gestion-usuarios') return true
         return false
       }).map(item => {
         // Auditorías: TODAS las interfaces hijas (sin filtrar)
         if (item.id === 'auditorias' && item.submenu) {
           return item // Acceso completo
         }
-        // Contactar Afiliados: igual que Supervisor
-        if (item.id === 'contactar-afiliados' && item.submenu) {
+        // Herramientas de contacto: igual que Supervisor + mensajería
+        if (item.id === 'herramientas-contacto' && item.submenu) {
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
               sub.id === 'contactar-afiliados-administracion' ||
-              sub.id === 'contactar-afiliados-datos-dia'
+              sub.id === 'contactar-afiliados-datos-dia' ||
+              sub.id === 'mensajeria-masiva' ||
+              sub.id === 'reportes-globales'
             )
           }
         }
@@ -462,14 +517,21 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
 
     if (role === 'recuperador') {
       return menuItems.filter(item => {
-        // Acceso a Reportes de Mensajería (solo sus propias campañas - filtrado en backend)
-        if (item.id === 'reportes-globales') return true
-        // Acceso a Mensajería Masiva (solo sus propias campañas - filtrado en backend)
-        if (item.id === 'mensajeria-masiva') return true
+        // Acceso a Herramientas de contacto
+        if (item.id === 'herramientas-contacto') return true
         // Acceso a Auditorías (Seguimiento solo lectura + interfaces de recuperación + Liquidación + Crear turno)
         if (item.id === 'auditorias') return true
         return false
       }).map(item => {
+        if (item.id === 'herramientas-contacto' && item.submenu) {
+          return {
+            ...item,
+            submenu: item.submenu.filter(sub =>
+              sub.id === 'mensajeria-masiva' ||
+              sub.id === 'reportes-globales'
+            )
+          }
+        }
         if (item.id === 'auditorias' && item.submenu) {
           // Recuperador: Seguimiento (lectura), Crear turno, Falta clave, Rechazada, Pendiente, AFIP y Padrón, Liquidación
           return {
@@ -493,15 +555,17 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
     return []
   }
 
-  const filteredMenuItems = getFilteredMenuItems()
+  const filteredMenuItems = dynamicPermsLoaded
+    ? applyDynamicPermissions(getFilteredMenuItems(), dynamicPermsMap)
+    : getFilteredMenuItems()
 
   const getInitialExpandedMenu = () => {
     if (activeSection.startsWith("base-afiliados")) return "base-afiliados"
-    if (activeSection.startsWith("palabras-prohibidas")) return "palabras-prohibidas"
+    if (activeSection.startsWith("palabras-prohibidas") || activeSection === "gestion-usuarios" || activeSection === "configuracion-privilegios") return "configuracion-sistema"
     if (activeSection.startsWith("auditorias")) return "auditorias"
     if (activeSection.startsWith("rrhh")) return "recursos-humanos"
     if (activeSection.startsWith("administracion")) return "administracion"
-    if (activeSection.startsWith("contactar-afiliados")) return "contactar-afiliados"
+    if (["contactar-afiliados-administracion", "contactar-afiliados-datos-dia", "mensajeria-masiva", "reportes-globales"].includes(activeSection)) return "herramientas-contacto"
     return null
   }
   const [expandedMenu, setExpandedMenu] = useState<string | null>(getInitialExpandedMenu())

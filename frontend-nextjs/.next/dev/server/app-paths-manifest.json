@@ -1,1 +1,6 @@
-{}
+{
+  "/dashboard/affiliates/list/page": "app/dashboard/affiliates/list/page.js",
+  "/dashboard/affiliates/stats/page": "app/dashboard/affiliates/stats/page.js",
+  "/login/page": "app/login/page.js",
+  "/page": "app/page.js"
+}

@@ -39,6 +39,9 @@ require("./cron/phoneRechargeNotificationJob");
 
 // ✅ Cron job para Liberación de Padrón (primer día de cada mes a las 00:01)
 require("./cron/padronReleaseJob");
+
+// ✅ Cron job para Verificación de Aportes ARCA (lunes 03:00 hs)
+require("./cron/affiliateContributionCron");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const errorHandler = require("./middlewares/errorHandler");

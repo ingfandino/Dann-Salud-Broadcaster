@@ -236,28 +236,19 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
-// Validate ../../../app/dashboard/banned-words/add/page.tsx
-{
-  type __IsExpected<Specific extends AppPageConfig<"/dashboard/banned-words/add">> = Specific
-  const handler = {} as typeof import("../../../app/dashboard/banned-words/add/page.js")
-  type __Check = __IsExpected<typeof handler>
-  // @ts-ignore
-  type __Unused = __Check
-}
-
-// Validate ../../../app/dashboard/banned-words/detections/page.tsx
-{
-  type __IsExpected<Specific extends AppPageConfig<"/dashboard/banned-words/detections">> = Specific
-  const handler = {} as typeof import("../../../app/dashboard/banned-words/detections/page.js")
-  type __Check = __IsExpected<typeof handler>
-  // @ts-ignore
-  type __Unused = __Check
-}
-
 // Validate ../../../app/dashboard/banned-words/page.tsx
 {
   type __IsExpected<Specific extends AppPageConfig<"/dashboard/banned-words">> = Specific
   const handler = {} as typeof import("../../../app/dashboard/banned-words/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../../app/dashboard/config/privileges/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/dashboard/config/privileges">> = Specific
+  const handler = {} as typeof import("../../../app/dashboard/config/privileges/page.js")
   type __Check = __IsExpected<typeof handler>
   // @ts-ignore
   type __Unused = __Check

@@ -1,0 +1,80 @@
+/* [project]/components/dashboard/stats-card.module.css [app-client] (css) */
+.stats-card-module__osY9FG__cardPrimaryLight {
+  transform-origin: center;
+  color: #334155 !important;
+  background-image: linear-gradient(135deg, #0078a01a 0%, #ffffff80 100%) !important;
+  border: 1px solid #0078a033 !important;
+}
+
+.stats-card-module__osY9FG__glowPrimaryLight {
+  background-image: linear-gradient(135deg, #009ccf, #0078a0) !important;
+}
+
+.stats-card-module__osY9FG__textPrimaryLight {
+  color: #0078a0 !important;
+}
+
+.stats-card-module__osY9FG__iconPrimaryLight {
+  color: #fff !important;
+  background-color: #0078a0 !important;
+  background-image: none !important;
+}
+
+.stats-card-module__osY9FG__progressPrimaryLight {
+  background-color: #0078a0 !important;
+  background-image: none !important;
+}
+
+.stats-card-module__osY9FG__cardSecondaryLight {
+  transform-origin: center;
+  color: #334155 !important;
+  background-image: linear-gradient(135deg, #00c7941a 0%, #ffffff80 100%) !important;
+  border: 1px solid #00c79433 !important;
+}
+
+.stats-card-module__osY9FG__glowSecondaryLight {
+  background-image: linear-gradient(135deg, #34d399, #00c794) !important;
+}
+
+.stats-card-module__osY9FG__textSecondaryLight {
+  color: #00c794 !important;
+}
+
+.stats-card-module__osY9FG__iconSecondaryLight {
+  color: #fff !important;
+  background-color: #00c794 !important;
+  background-image: none !important;
+}
+
+.stats-card-module__osY9FG__progressSecondaryLight {
+  background-color: #00c794 !important;
+  background-image: none !important;
+}
+
+.stats-card-module__osY9FG__cardAccentLight {
+  transform-origin: center;
+  color: #334155 !important;
+  background-image: linear-gradient(135deg, #ff9f431a 0%, #ffffff80 100%) !important;
+  border: 1px solid #ff9f4333 !important;
+}
+
+.stats-card-module__osY9FG__glowAccentLight {
+  background-image: linear-gradient(135deg, #fcd34d, #ff9f43) !important;
+}
+
+.stats-card-module__osY9FG__textAccentLight {
+  color: #ff9f43 !important;
+}
+
+.stats-card-module__osY9FG__iconAccentLight {
+  color: #fff !important;
+  background-color: #ff9f43 !important;
+  background-image: none !important;
+}
+
+.stats-card-module__osY9FG__progressAccentLight {
+  background-color: #ff9f43 !important;
+  background-image: none !important;
+}
+
+/*# sourceMappingURL=components_dashboard_stats-card_module_cd3f68c4.css.map*/

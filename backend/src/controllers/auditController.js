@@ -15,6 +15,7 @@
 const Audit = require('../models/Audit');
 const User = require('../models/User');
 const InternalMessage = require('../models/InternalMessage');
+const AffiliateContribution = require('../models/AffiliateContribution');
 const {
     emitNewAudit,
     emitAuditUpdate,
@@ -643,6 +644,37 @@ exports.getAuditsByDate = async (req, res) => {
 
             return getFechaOrden(a) - getFechaOrden(b);
         });
+
+        // ── Enriquecer con datos de aportes ARCA (por CUIL) ──
+        if (audits.length) {
+            const cuils = [...new Set(audits.map((a) => a.cuil).filter(Boolean))];
+            if (cuils.length) {
+                const contributions = await AffiliateContribution.find(
+                    { cuil: { $in: cuils } },
+                    { cuil: 1, lastContributionPeriod: 1, "verification.status": 1, "verification.checkedAt": 1 }
+                ).lean();
+
+                const contribMap = {};
+                for (const c of contributions) {
+                    contribMap[c.cuil] = c;
+                }
+
+                for (const audit of audits) {
+                    const contrib = audit.cuil ? contribMap[audit.cuil] : null;
+                    audit.contribution = contrib
+                        ? {
+                              lastContributionPeriod: contrib.lastContributionPeriod || null,
+                              verificationStatus: contrib.verification?.status || "pending",
+                              verificationCheckedAt: contrib.verification?.checkedAt || null,
+                          }
+                        : {
+                              lastContributionPeriod: null,
+                              verificationStatus: "pending",
+                              verificationCheckedAt: null,
+                          };
+                }
+            }
+        }
 
         res.json(audits);
     } catch (err) {
@@ -2151,5 +2183,61 @@ exports.exportReventa = async (req, res) => {
     } catch (err) {
         logger.error("Error en exportReventa:", err);
         res.status(500).json({ message: "Error al exportar reventa: " + err.message });
+    }
+};
+
+/**
+ * Toggle estado "en proceso" de una auditoría
+ * Solo el administrativo asignado puede marcar/desmarcar
+ */
+exports.toggleEnProceso = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userId = req.user._id;
+
+        const audit = await Audit.findById(id);
+        if (!audit) {
+            return res.status(404).json({ message: 'Auditoría no encontrada' });
+        }
+
+        // Verificar que el usuario sea el administrativo asignado
+        if (!audit.administrador || audit.administrador.toString() !== userId.toString()) {
+            return res.status(403).json({ 
+                message: 'Solo el administrativo asignado puede marcar esta venta como en proceso' 
+            });
+        }
+
+        // Toggle del estado
+        const nuevoEstado = !audit.enProceso.activo;
+        
+        audit.enProceso = {
+            activo: nuevoEstado,
+            procesadoPor: nuevoEstado ? userId : null,
+            iniciadoEn: nuevoEstado ? new Date() : null
+        };
+
+        await audit.save();
+
+        // Poblar datos para respuesta
+        const auditPopulated = await Audit.findById(id)
+            .populate('asesor', 'nombre email numeroEquipo supervisor')
+            .populate('administrador', 'nombre email')
+            .populate('auditor', 'nombre email')
+            .populate('enProceso.procesadoPor', 'nombre email')
+            .lean();
+
+        // Emitir actualización por socket para todos los usuarios
+        emitAuditUpdate(auditPopulated);
+
+        logger.info(`[TOGGLE_EN_PROCESO] Audit ${id} ${nuevoEstado ? 'marcada' : 'desmarcada'} como en proceso por ${req.user.nombre}`);
+
+        res.json({ 
+            ok: true, 
+            audit: auditPopulated,
+            message: nuevoEstado ? 'Venta marcada como en proceso' : 'Venta desmarcada'
+        });
+    } catch (err) {
+        logger.error("Error en toggleEnProceso:", err);
+        res.status(500).json({ message: "Error al actualizar estado: " + err.message });
     }
 };
