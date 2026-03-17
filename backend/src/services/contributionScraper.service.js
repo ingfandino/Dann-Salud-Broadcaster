@@ -244,6 +244,26 @@ class BrowserSession {
             acceptDownloads: false,
         });
 
+        // Suppress unwanted help/popup windows
+        context.on('page', async (newPage) => {
+            const url = newPage.url();
+            if (url.includes('app/ayuda/ayuda.htm') || url.includes('/ayuda/')) {
+                logger.info(`🚫 [ARCA-SESSION] Popup de ayuda detectado y bloqueado: ${url}`);
+                await newPage.close().catch(() => {});
+            } else {
+                // Also listen for navigation on new pages in case they navigate after creation
+                newPage.on('framenavigated', async (frame) => {
+                    if (frame === newPage.mainFrame()) {
+                        const frameUrl = frame.url();
+                        if (frameUrl.includes('app/ayuda/ayuda.htm') || frameUrl.includes('/ayuda/')) {
+                            logger.info(`🚫 [ARCA-SESSION] Popup navegando a ayuda detectado y bloqueado: ${frameUrl}`);
+                            await newPage.close().catch(() => {});
+                        }
+                    }
+                });
+            }
+        });
+
         const pages = context.pages();
         const page  = pages.length > 0 ? pages[0] : await context.newPage();
 
@@ -310,10 +330,34 @@ async function scrapeCuilWithSession(cuil, session, { executionId = "manual", as
             logger.info(`👀 [ARCA-SCRAPER] CAPTCHA visible en la página, intentando continuar de todas formas...`);
         }
 
-        // Limpiar campo y rellenar CUIL
-        await page.fill(CUIL_SEL, "", { timeout: ACTION_TIMEOUT_MS });
-        await page.fill(CUIL_SEL, cuilClean, { timeout: ACTION_TIMEOUT_MS });
-        logger.info(`📝 [ARCA-SCRAPER] CUIL ingresado: ${cuilClean}`);
+        // Limpiar campo y rellenar CUIL interactivamente
+        logger.info(`📝 [ARCA-SCRAPER] Preparando para ingresar CUIL: ${cuilClean} usando selector ${CUIL_SEL}`);
+        
+        // Wait for input to be attached and visible
+        await page.waitForSelector(CUIL_SEL, { state: 'visible', timeout: ACTION_TIMEOUT_MS });
+        const inputLocator = page.locator(CUIL_SEL).first();
+        
+        // Click to focus, clear it, and type sequentially
+        await inputLocator.click();
+        await inputLocator.fill(""); // Clear existing
+        await inputLocator.pressSequentially(cuilClean, { delay: 100 });
+        
+        // Trigger blur/change events just in case
+        await inputLocator.evaluate(el => el.blur());
+        
+        // Read back the value to verify
+        let typedValue = await inputLocator.inputValue();
+        logger.info(`📝 [ARCA-SCRAPER] Valor ingresado en DOM: '${typedValue}'`);
+        
+        if (!typedValue || !typedValue.includes(cuilClean)) {
+            logger.warn(`⚠️ [ARCA-SCRAPER] El valor leído ('${typedValue}') no coincide con el esperado ('${cuilClean}'). Re-intentando...`);
+            await inputLocator.click();
+            await inputLocator.fill("");
+            await inputLocator.pressSequentially(cuilClean, { delay: 150 });
+            await inputLocator.evaluate(el => el.blur());
+            typedValue = await inputLocator.inputValue();
+            logger.info(`📝 [ARCA-SCRAPER] Valor ingresado tras reintento: '${typedValue}'`);
+        }
 
         // Enviar formulario
         try {
