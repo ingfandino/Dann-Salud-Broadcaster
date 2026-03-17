@@ -131,7 +131,7 @@ export function BaseAfiliadosLista() {
         payload.limit = arcaLimit
       }
       const { data } = await api.affiliateContributions.run(payload)
-      toast.success(`Verificación iniciada: ${data.queued} afiliado(s). ID: ${data.executionId?.slice(0, 8)}…`)
+      toast.success(data.message || `Tarea encolada correctamente.`)
       setArcaModalOpen(false)
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Error al iniciar verificación de aportes')

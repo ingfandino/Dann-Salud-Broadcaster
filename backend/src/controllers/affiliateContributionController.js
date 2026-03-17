@@ -7,7 +7,7 @@
  */
 
 const { v4: uuidv4 } = require("uuid");
-const AffiliateContribution = require("../models/AffiliateContribution");
+const ArcaAssistedTask = require("../models/ArcaAssistedTask");
 const Affiliate = require("../models/Affiliate");
 const { verifyAffiliate, verifyBatch, getPendingAffiliates, saveResult } = require("../services/contributionSync.service");
 const logger = require("../utils/logger");
@@ -28,89 +28,25 @@ exports.runVerification = async (req, res) => {
     try {
         const { mode = "pending", affiliateIds = [], cuil, filters = {}, limit = 1 } = req.body;
         const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 1, 500));
-        const executionId = uuidv4();
-        const checkedBy = req.user?.nombre || req.user?.email || "manual";
-
-        const options = {
-            executionType: "manual",
-            executionId,
-            checkedBy,
-            minDelayMs: 2000,
-            maxDelayMs: 5000,
-        };
-
-        // ── single CUIL ──
-        if (mode === "single") {
-            if (!cuil?.trim()) {
-                return res.status(400).json({ error: "Se requiere 'cuil' para el modo 'single'" });
-            }
-            const affiliate = await Affiliate.findOne({ cuil: cuil.trim(), active: true }, { _id: 1, cuil: 1 }).lean();
-            if (!affiliate) {
-                return res.status(404).json({ error: `CUIL ${cuil} no encontrado o inactivo` });
-            }
-
-            logger.info(`🚀 [CONTRIBUTION-RUN] Modo single | executionId=${executionId} | cuil=${cuil.trim()}`);
-            res.json({ executionId, queued: 1, message: `Verificación iniciada para CUIL ${cuil.trim()}. ID: ${executionId}` });
-
-            setImmediate(async () => {
-                try {
-                    const stats = await verifyBatch([affiliate], options);
-                    logger.info(`✅ [CONTRIBUTION-RUN] ${executionId} completado: ${JSON.stringify(stats)}`);
-                } catch (err) {
-                    logger.error(`❌ [CONTRIBUTION-RUN] ${executionId} error: ${err.message}`);
-                }
-            });
-            return;
-        }
-
-        let affiliates = [];
-
-        if (mode === "selected") {
-            if (!affiliateIds.length) {
-                return res.status(400).json({ error: "Debe proveer affiliateIds para el modo 'selected'" });
-            }
-            affiliates = await Affiliate.find({ _id: { $in: affiliateIds }, active: true }, { _id: 1, cuil: 1 }).lean();
-
-        } else if (mode === "filtered") {
-            const filter = { active: true };
-            if (cuil) filter.cuil = { $regex: cuil.trim(), $options: "i" };
-            if (filters.obraSocial)  filter.obraSocial  = { $regex: filters.obraSocial,  $options: "i" };
-            if (filters.localidad)   filter.localidad   = { $regex: filters.localidad,   $options: "i" };
-            affiliates = await Affiliate.find(filter, { _id: 1, cuil: 1 }).lean();
-
-        } else {
-            affiliates = await getPendingAffiliates();
-        }
-
-        // Apply limit
-        affiliates = affiliates.slice(0, safeLimit);
-
-        if (!affiliates.length) {
-            return res.json({
-                executionId,
-                queued: 0,
-                message: "No hay afiliados para verificar",
-            });
-        }
-
-        logger.info(`🚀 [CONTRIBUTION-RUN] Ejecución manual iniciada | ID=${executionId} | mode=${mode} | queued=${affiliates.length} | limit=${safeLimit}`);
-
-        res.json({
-            executionId,
-            queued: affiliates.length,
-            message: `Verificación iniciada para ${affiliates.length} afiliado(s). ID: ${executionId}`,
+        
+        // En lugar de disparar el scraper aquí, encolamos una tarea
+        const newTask = new ArcaAssistedTask({
+            mode,
+            cuil: mode === "single" ? cuil?.trim() : null,
+            affiliateIds: mode === "selected" ? affiliateIds : [],
+            filters: mode === "filtered" ? filters : {},
+            limit: safeLimit,
+            requestedBy: req.user ? req.user.id : null,
         });
 
-        setImmediate(async () => {
-            try {
-                const stats = await verifyBatch(affiliates, options);
-                logger.info(`✅ [CONTRIBUTION-RUN] ${executionId} completado: ${JSON.stringify(stats)}`);
-                if (stats.captchaDetected) {
-                    logger.warn(`⚠️ [CONTRIBUTION-RUN] ${executionId} paused por CAPTCHA en posición ${stats.captchaPausedAt}`);
-                }
-            } catch (err) {
-                logger.error(`❌ [CONTRIBUTION-RUN] ${executionId} error: ${err.message}`);
-            }
+        await newTask.save();
+        
+        logger.info(`🚀 [CONTRIBUTION-RUN] Tarea ARCA encolada | taskId=${newTask._id} | mode=${mode} | limit=${safeLimit}`);
+
+        res.json({
+            taskId: newTask._id,
+            queued: true,
+            message: `Tarea encolada correctamente. Por favor ejecuta el script local asistido para procesarla.`,
         });
 
     } catch (err) {
@@ -125,6 +61,7 @@ exports.runVerification = async (req, res) => {
  */
 exports.getStats = async (req, res) => {
     try {
+        const AffiliateContribution = require("../models/AffiliateContribution");
         const stats = await AffiliateContribution.aggregate([
             {
                 $group: {
