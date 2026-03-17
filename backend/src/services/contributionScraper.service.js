@@ -307,14 +307,7 @@ async function scrapeCuilWithSession(cuil, session, { executionId = "manual", as
 
         const formHtml = await page.content();
         if (hasCaptcha(formHtml)) {
-            if (assistedMode) {
-                const res = await waitForCaptchaResolution(page, 120000);
-                if (res === "timeout") return buildCaptcha();
-                if (res === "solved_advanced") return await parseResult(page, cuilClean);
-            } else {
-                logger.warn(`⚠️ [ARCA-SCRAPER] CAPTCHA detectado en ingresoDatos.aspx | cuil=${cuilClean}`);
-                return buildCaptcha();
-            }
+            logger.info(`👀 [ARCA-SCRAPER] CAPTCHA visible en la página, intentando continuar de todas formas...`);
         }
 
         // Limpiar campo y rellenar CUIL
@@ -324,26 +317,38 @@ async function scrapeCuilWithSession(cuil, session, { executionId = "manual", as
 
         // Enviar formulario
         try {
+            logger.info(`🖱️ [ARCA-SCRAPER] Intentando enviar formulario (clic en Continuar)...`);
             await Promise.all([
                 page.waitForURL(/MuestraBasica\.aspx/i, { timeout: NAV_TIMEOUT_MS }),
                 page.click(SUBMIT_SEL, { timeout: ACTION_TIMEOUT_MS }),
             ]);
+            logger.info(`✅ [ARCA-SCRAPER] Formulario enviado exitosamente, URL actual: ${page.url()}`);
         } catch (err) {
+            logger.info(`⚠️ [ARCA-SCRAPER] El envío no avanzó a MuestraBasica.aspx en el tiempo esperado. Revisando estado...`);
             const currentHtml = await page.content();
-            if (hasCaptcha(currentHtml)) {
+            
+            // Si el html sigue teniendo captcha y seguimos en ingresoDatos
+            if (hasCaptcha(currentHtml) && page.url().includes("ingresoDatos.aspx")) {
                 if (assistedMode) {
                     const res = await waitForCaptchaResolution(page, 120000);
                     if (res === "timeout") return buildCaptcha();
-                    if (res === "solved_advanced") return await parseResult(page, cuilClean);
                     
+                    // The user solved it and we advanced to MuestraBasica.aspx
+                    if (res === "solved_advanced") {
+                        return await parseResult(page, cuilClean);
+                    }
+                    
+                    // The user solved the captcha widget but the form was not submitted
+                    // Attempt submission again
                     if (!page.url().includes("MuestraBasica.aspx")) {
+                        logger.info(`🖱️ [ARCA-SCRAPER] CAPTCHA resuelto, re-intentando envío del formulario...`);
                         await Promise.all([
                             page.waitForURL(/MuestraBasica\.aspx/i, { timeout: NAV_TIMEOUT_MS }),
                             page.click(SUBMIT_SEL, { timeout: ACTION_TIMEOUT_MS }),
                         ]);
                     }
                 } else {
-                    logger.warn(`⚠️ [ARCA-SCRAPER] CAPTCHA detectado al enviar | cuil=${cuilClean}`);
+                    logger.warn(`⚠️ [ARCA-SCRAPER] CAPTCHA efectivamente bloqueante detectado al enviar | cuil=${cuilClean}`);
                     return buildCaptcha();
                 }
             } else {
