@@ -52,6 +52,9 @@ export function BaseAfiliadosLista() {
 
   const arcaPanelRef = useRef<HTMLDivElement>(null)
 
+  const isDanielFandino = user?.nombre?.toLowerCase().includes("daniel") && 
+                          user?.nombre?.toLowerCase().includes("fandiño")
+
   // Cierra el panel de ARCA al hacer clic afuera
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -303,6 +306,7 @@ export function BaseAfiliadosLista() {
                 <div className="grid grid-cols-2 gap-1.5">
                   {([
                     { id: 'single',   label: 'Un CUIL' },
+                    { id: 'selected', label: 'Seleccionados' },
                     { id: 'filtered', label: 'Filtrados' },
                     { id: 'pending',  label: 'Pendientes' },
                   ] as const).map(m => (
@@ -371,12 +375,17 @@ export function BaseAfiliadosLista() {
               {arcaMode === 'filtered' && searchTerm && (
                 <p className={cn('text-xs mb-3 opacity-70')}>Filtro: &quot;{searchTerm}&quot;</p>
               )}
+              {arcaMode === 'selected' && (
+                <p className={cn('text-xs mb-3', selectedIds.length === 0 ? 'text-red-400' : 'opacity-70')}>
+                  {selectedIds.length === 0 ? 'No hay registros seleccionados en la tabla.' : `${selectedIds.length} registro(s) seleccionado(s).`}
+                </p>
+              )}
 
               {/* Actions */}
               <div className="flex justify-end pt-2 border-t dark:border-white/10 border-gray-100">
                 <button
                   onClick={handleRunContributions}
-                  disabled={runningContributions}
+                  disabled={runningContributions || (arcaMode === 'selected' && selectedIds.length === 0)}
                   className={cn(
                     'flex w-full justify-center items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium text-white transition-all disabled:opacity-50',
                     theme === 'dark' ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-indigo-500 hover:bg-indigo-600'
@@ -410,6 +419,29 @@ export function BaseAfiliadosLista() {
                     : "bg-purple-50/50 border-b border-purple-100",
                 )}
               >
+                <th className="px-4 py-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={afiliados.length > 0 && afiliados.every(a => selectedIds.includes(a._id))}
+                    ref={input => {
+                      if (input) {
+                        const someSelected = afiliados.some(a => selectedIds.includes(a._id))
+                        const allSelected = afiliados.every(a => selectedIds.includes(a._id))
+                        input.indeterminate = someSelected && !allSelected
+                      }
+                    }}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        const newIds = Array.from(new Set([...selectedIds, ...afiliados.map(a => a._id)]))
+                        setSelectedIds(newIds)
+                      } else {
+                        const visibleIds = afiliados.map(a => a._id)
+                        setSelectedIds(selectedIds.filter(id => !visibleIds.includes(id)))
+                      }
+                    }}
+                    className="rounded border-gray-300 text-indigo-500 focus:ring-indigo-500"
+                  />
+                </th>
                 {["Nombre", "CUIL", "Obra Social", "Teléfono", "Localidad", "Cargado", "Últ. Aporte", "Verificación", "Acciones"].map((header) => (
                   <th
                     key={header}
@@ -426,7 +458,7 @@ export function BaseAfiliadosLista() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center">
+                  <td colSpan={10} className="px-4 py-8 text-center">
                     <div className={cn("text-sm", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
                       Cargando...
                     </div>
@@ -434,7 +466,7 @@ export function BaseAfiliadosLista() {
                 </tr>
               ) : afiliados.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center">
+                  <td colSpan={10} className="px-4 py-8 text-center">
                     <div className={cn("text-sm", theme === "dark" ? "text-gray-400" : "text-gray-600")}>
                       No se encontraron afiliados
                     </div>
@@ -447,8 +479,23 @@ export function BaseAfiliadosLista() {
                     className={cn(
                       "border-b transition-colors",
                       theme === "dark" ? "border-white/5 hover:bg-white/5" : "border-purple-50 hover:bg-purple-50/50",
+                      selectedIds.includes(afiliado._id) && (theme === 'dark' ? "bg-white/10" : "bg-indigo-50/50")
                     )}
                   >
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(afiliado._id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedIds([...selectedIds, afiliado._id])
+                          } else {
+                            setSelectedIds(selectedIds.filter(id => id !== afiliado._id))
+                          }
+                        }}
+                        className="rounded border-gray-300 text-indigo-500 focus:ring-indigo-500"
+                      />
+                    </td>
                     <td className={cn("px-4 py-3 font-medium", theme === "dark" ? "text-white" : "text-gray-700")}>
                       {afiliado.nombre}
                     </td>
