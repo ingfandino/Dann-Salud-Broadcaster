@@ -18,7 +18,6 @@ import { MensajeriaMasiva } from "./mensajeria-masiva"
 import { MensajeriaInternaModal } from "./mensajeria-interna-modal"
 import { BaseAfiliadosEstadistica } from "./base-afiliados-estadistica"
 import { BaseAfiliadosExportaciones } from "./base-afiliados-exportaciones"
-import { BaseAfiliadosConfiguracion } from "./base-afiliados-configuracion"
 import { BaseAfiliadosLista } from "./base-afiliados-lista"
 import { BaseAfiliadosCargar } from "./base-afiliados-cargar"
 import { BaseAfiliadosExitosas } from "./base-afiliados-exitosas"
@@ -29,7 +28,6 @@ import { AuditoriasLiquidacion } from "./auditorias-liquidacion"
 import { AuditoriasFaltaClave } from "./auditorias-falta-clave"
 import { AuditoriasRechazada } from "./auditorias-rechazada"
 import { AuditoriasPendiente } from "./auditorias-pendiente"
-import { AuditoriasAfipPadron } from "./auditorias-afip-padron"
 import { AuditoriasReventa } from "./auditorias-reventa"
 import { RRHHEstadisticas } from "./rrhh-estadisticas"
 import { RRHHBajoRendimiento } from "./rrhh-bajo-rendimiento"
@@ -44,12 +42,18 @@ import { FreshData } from "./fresh-data"
 import { ReusableData } from "./reusable-data"
 import { ContactAffiliates } from "./contact-affiliates"
 import { FailedAffiliations } from "./failed-affiliations"
+import { BaseAfiliadosNativa } from "./base-afiliados-nativa"
 import { ContactarAdministracion } from "./contactar-administracion"
 import { ContactarDatosDia } from "./contactar-datos-dia"
 import { useAuth } from "@/lib/auth"
 import { Evidencias } from "./evidencias"
 import { api } from "@/lib/api"
 import { useSocket } from "@/lib/socket"
+import { ConfiguracionProcesamientoDocumental } from "./configuracion-procesamiento-documental"
+import { ProcesamientoDocumental } from "./procesamiento-documental"
+import { ObrasSociales } from "./obras-sociales"
+import { ChequeoDatos } from "./chequeo-datos"
+import { ChequeadoAdministrativo } from "./chequeado-administrativo"
 
 interface DashboardContentProps {
   activeSection: string
@@ -60,18 +64,19 @@ const sectionTitles: Record<string, string> = {
   "reportes-globales": "Reportes de Mensajería",
   "mensajeria-masiva": "Mensajería Masiva",
   "base-afiliados": "Base de Afiliados",
-  "base-afiliados-estadistica": "Estadística",
+  "base-afiliados-estadistica": "Estado de la Base",
   "base-afiliados-exitosas": "Afiliaciones exitosas",
   "base-afiliados-exportaciones": "Exportaciones",
-  "base-afiliados-configuracion": "Configuración de envíos",
   "base-afiliados-lista": "Lista de afiliados",
 
   "base-afiliados-cargar": "Cargar archivo",
   "base-afiliados-frescos": "Datos frescos",
   "base-afiliados-reutilizables": "Datos reutilizables",
   "base-afiliados-fallidas": "Afiliaciones fallidas",
+  "base-afiliados-nativa": "Base nativa",
   "contactar-afiliados": "Contactar Afiliados",
   "contactar-afiliados-administracion": "Administración de datos",
+  "chequeo-datos": "Chequeo de datos",
   "contactar-afiliados-datos-dia": "Datos del día",
   "palabras-prohibidas-mensajeria": "Palabras prohibidas para mensajería",
   auditorias: "Auditorías",
@@ -81,7 +86,6 @@ const sectionTitles: Record<string, string> = {
   "auditorias-falta-clave": "Falta Clave",
   "auditorias-rechazada": "Rechazada",
   "auditorias-pendiente": "Pendiente",
-  "auditorias-afip-padron": "AFIP y Padrón",
   "recursos-humanos": "Recursos Humanos",
   "rrhh-estadisticas": "Estadísticas de Empleados",
   "rrhh-bajo-rendimiento": "Bajo Rendimiento",
@@ -92,9 +96,13 @@ const sectionTitles: Record<string, string> = {
   "rrhh-telefonos": "Teléfonos Corporativos",
   "administracion": "Administración",
   "administracion-registro-ventas": "Registro de Ventas",
+  "administracion-chequeado": "Chequeado Administrativo",
   "administracion-evidencias": "Evidencias",
+  "procesamiento-documental": "Procesamiento documental",
+  "obras-sociales": "Obras Sociales",
   "gestion-usuarios": "Gestión de Usuarios",
   "configuracion-sistema": "Configuración de sistema",
+  "configuracion-procesamiento-documental": "Configuración del flujo documental",
 }
 
 export function DashboardContent({ activeSection, onSectionChange }: DashboardContentProps) {
@@ -111,6 +119,10 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
     safeActiveSection.startsWith("auditorias") ||
     safeActiveSection.startsWith("rrhh") ||
     safeActiveSection === "gestion-usuarios" ||
+    safeActiveSection === "configuracion-procesamiento-documental" ||
+    safeActiveSection === "procesamiento-documental" ||
+    safeActiveSection === "obras-sociales" ||
+    safeActiveSection === "chequeo-datos" ||
     safeActiveSection.startsWith("mensajeria") ||
     safeActiveSection.startsWith("administracion")
   const isMensajeriaMasiva = safeActiveSection === "mensajeria-masiva"
@@ -165,10 +177,6 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
       return <BaseAfiliadosExportaciones />
     }
 
-    if (activeSection === "base-afiliados-configuracion") {
-      return <BaseAfiliadosConfiguracion />
-    }
-
     if (activeSection === "base-afiliados-lista") {
       return <BaseAfiliadosLista />
     }
@@ -189,6 +197,19 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
       return <FailedAffiliations />
     }
 
+    if (activeSection === "base-afiliados-nativa") {
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia' && role !== 'desarrollador') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia.</p>
+          </div>
+        )
+      }
+      return <BaseAfiliadosNativa />
+    }
+
     if (activeSection === "contactar-afiliados") {
       return <ContactAffiliates />
     }
@@ -205,6 +226,19 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
         )
       }
       return <ContactarAdministracion />
+    }
+
+    if (activeSection === "chequeo-datos") {
+      const role = user?.role?.toLowerCase()
+      if (role !== 'supervisor' && role !== 'gerencia' && role !== 'desarrollador' && role !== 'encargado') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">No tienes permisos para acceder a esta sección.</p>
+          </div>
+        )
+      }
+      return <ChequeoDatos />
     }
 
     if (activeSection === "contactar-afiliados-datos-dia") {
@@ -250,10 +284,6 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
 
     if (activeSection === "auditorias-pendiente") {
       return <AuditoriasPendiente />
-    }
-
-    if (activeSection === "auditorias-afip-padron") {
-      return <AuditoriasAfipPadron />
     }
 
     if (activeSection === "auditorias-reventa") {
@@ -333,6 +363,19 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
       return <GestionUsuarios />
     }
 
+    if (activeSection === "configuracion-procesamiento-documental") {
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia' && role !== 'desarrollador') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Gerencia.</p>
+          </div>
+        )
+      }
+      return <ConfiguracionProcesamientoDocumental />
+    }
+
     if (activeSection === "administracion-registro-ventas") {
       const role = user?.role?.toLowerCase()
       if (role !== 'gerencia' && role !== 'administrativo') {
@@ -346,6 +389,19 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
       return <RegistroVentas />
     }
 
+    if (activeSection === "administracion-chequeado") {
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia' && role !== 'desarrollador' && role !== 'administrativo' && role !== 'encargado') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Administrativos, Encargados y Gerencia.</p>
+          </div>
+        )
+      }
+      return <ChequeadoAdministrativo />
+    }
+
     if (activeSection === "administracion-evidencias") {
       const role = user?.role?.toLowerCase()
       if (role !== 'gerencia' && role !== 'administrativo') {
@@ -357,6 +413,32 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
         )
       }
       return <Evidencias />
+    }
+
+    if (activeSection === "procesamiento-documental") {
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia' && role !== 'desarrollador' && role !== 'administrativo') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Administración.</p>
+          </div>
+        )
+      }
+      return <ProcesamientoDocumental />
+    }
+
+    if (activeSection === "obras-sociales") {
+      const role = user?.role?.toLowerCase()
+      if (role !== 'gerencia' && role !== 'desarrollador' && role !== 'obra_social') {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">Esta sección es exclusiva para Obras Sociales.</p>
+          </div>
+        )
+      }
+      return <ObrasSociales />
     }
 
     if (safeActiveSection.startsWith("base-afiliados")) {

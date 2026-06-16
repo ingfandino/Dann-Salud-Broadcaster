@@ -47,7 +47,8 @@ import {
   Clock,
   FileCheck,
   Banknote,
-  Wallet
+  Wallet,
+  Database
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ThemeToggle } from "./theme-toggle"
@@ -70,6 +71,7 @@ const menuItems = [
     icon: Phone,
     submenu: [
       { id: "contactar-afiliados-administracion", label: "Administración de datos", icon: Settings2 },
+      { id: "chequeo-datos", label: "Chequeo de datos", icon: FileCheck },
       { id: "contactar-afiliados-datos-dia", label: "Datos del día", icon: ListOrdered },
       { id: "mensajeria-masiva", label: "Mensajería Masiva", icon: MessageSquare },
       { id: "reportes-globales", label: "Reportes de Mensajería", icon: BarChart3 },
@@ -80,14 +82,14 @@ const menuItems = [
     label: "Base de Afiliados",
     icon: Users,
     submenu: [
-      { id: "base-afiliados-estadistica",   label: "Estadísticas",            icon: ChartPie },
+      { id: "base-afiliados-estadistica",   label: "Estado de la Base",            icon: ChartPie },
       { id: "base-afiliados-lista",          label: "Lista de afiliados",      icon: Users },
       { id: "base-afiliados-exitosas",       label: "Afiliaciones exitosas",   icon: UserCheck },
       { id: "base-afiliados-fallidas",       label: "Afiliaciones fallidas",   icon: UserX },
+      { id: "base-afiliados-nativa",          label: "Base nativa",             icon: Database },
       { id: "base-afiliados-frescos",        label: "Datos frescos",           icon: Sparkles },
       { id: "base-afiliados-reutilizables",  label: "Datos reutilizables",     icon: Recycle },
       { id: "base-afiliados-cargar",         label: "Cargar archivo",          icon: Upload },
-      { id: "base-afiliados-configuracion",  label: "Configuración de envíos", icon: Settings2 },
     ],
   },
 
@@ -102,7 +104,6 @@ const menuItems = [
       { id: "auditorias-rechazada", label: "Rechazada", icon: XCircle },
       { id: "auditorias-crear-turno", label: "Crear turno", icon: CalendarPlus },
       { id: "auditorias-liquidacion", label: "Liquidación", icon: DollarSign },
-      { id: "auditorias-afip-padron", label: "AFIP y Padrón", icon: FileCheck },
       { id: "auditorias-reventa", label: "Disponibles para reventa", icon: Recycle },
     ],
   },
@@ -112,7 +113,9 @@ const menuItems = [
     icon: Building2,
     submenu: [
       { id: "administracion-registro-ventas", label: "Registro de ventas", icon: FileText },
+      { id: "administracion-chequeado", label: "Chequeado Administrativo", icon: Shield },
       { id: "administracion-evidencias", label: "Evidencias", icon: FileArchive },
+      { id: "procesamiento-documental", label: "Procesamiento documental", icon: FileCheck },
     ],
   },
   {
@@ -130,6 +133,7 @@ const menuItems = [
     ],
   },
   { id: "contabilidad", label: "Contabilidad", icon: Wallet },
+  { id: "obras-sociales", label: "Obras Sociales", icon: Building2 },
   {
     id: "configuracion-sistema",
     label: "Configuración de sistema",
@@ -138,6 +142,7 @@ const menuItems = [
       { id: "configuracion-privilegios", label: "Control de privilegios", icon: Shield },
       { id: "gestion-usuarios", label: "Gestión de Usuarios", icon: UserCog },
       { id: "palabras-prohibidas-mensajeria", label: "Palabras prohibidas para mensajería", icon: ShieldAlert },
+      { id: "configuracion-procesamiento-documental", label: "Configuración del flujo documental", icon: FileCheck },
     ],
   },
 ]
@@ -242,7 +247,6 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
       return menuItems.filter(item => {
         if (item.id === 'mensajeria-interna') return true
         if (item.id === 'auditorias') return true
-        if (item.id === 'herramientas-contacto') return true
         return false
       }).map(item => {
         if (item.id === 'auditorias' && item.submenu) {
@@ -285,8 +289,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
               sub.id === 'auditorias-liquidacion' ||
               sub.id === 'auditorias-falta-clave' ||
               sub.id === 'auditorias-rechazada' ||
-              sub.id === 'auditorias-pendiente' ||
-              sub.id === 'auditorias-afip-padron'
+              sub.id === 'auditorias-pendiente'
             )
           }
         }
@@ -323,7 +326,6 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
               sub.id === 'auditorias-falta-clave' ||
               sub.id === 'auditorias-rechazada' ||
               sub.id === 'auditorias-pendiente' ||
-              sub.id === 'auditorias-afip-padron' ||
               sub.id === 'auditorias-reventa'
             )
           }
@@ -332,8 +334,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
-              sub.id === 'base-afiliados-estadistica' ||
-              sub.id === 'base-afiliados-configuracion'
+              sub.id === 'base-afiliados-estadistica'
             )
           }
         }
@@ -342,6 +343,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
             ...item,
             submenu: item.submenu.filter(sub =>
               sub.id === 'contactar-afiliados-administracion' ||
+              sub.id === 'chequeo-datos' ||
               sub.id === 'contactar-afiliados-datos-dia' ||
               sub.id === 'mensajeria-masiva' ||
               sub.id === 'reportes-globales'
@@ -371,6 +373,11 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
         if (item.id === 'administracion') return true
         return false
       }).map(item => {
+        if (item.id === 'administracion' && item.submenu) {
+          return item
+        }
+        return item
+      }).map(item => {
         if (item.id === 'auditorias' && item.submenu) {
           return {
             ...item,
@@ -379,8 +386,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
               sub.id === 'auditorias-liquidacion' ||
               sub.id === 'auditorias-falta-clave' ||
               sub.id === 'auditorias-rechazada' ||
-              sub.id === 'auditorias-pendiente' ||
-              sub.id === 'auditorias-afip-padron'
+              sub.id === 'auditorias-pendiente'
             )
           }
         }
@@ -388,15 +394,17 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
       })
     }
 
+    if (role === 'obra_social') {
+      return menuItems.filter(item => item.id === 'obras-sociales')
+    }
+
     if (role === 'auditor') {
       const hasTeam = !!user?.numeroEquipo;
 
       return menuItems.filter(item => {
         if (!hasTeam) {
-          // Case 1.1: Only Seguimiento (hija de Auditorías)
-          if (item.id === 'auditorias') {
-            return true;
-          }
+          // Case 1.1: Seguimiento y liquidación
+          if (item.id === 'auditorias') return true;
           return false;
         } else {
           // Case 1.2: Reportes, Mensajería, Seguimiento, Crear turno, Herramientas de contacto
@@ -425,14 +433,17 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
             }
           }
         }
-        // ✅ Auditor con equipo ve "Datos del día", "Mensajería Masiva", "Reportes"
+        // Auditor con equipo ve Datos del día, Mensajería Masiva y Reportes.
         if (item.id === 'herramientas-contacto' && item.submenu) {
+          const hasTeamLocal = !!user?.numeroEquipo;
           return {
             ...item,
-            submenu: item.submenu.filter(sub => 
-              sub.id === 'contactar-afiliados-datos-dia' ||
-              sub.id === 'mensajeria-masiva' ||
-              sub.id === 'reportes-globales'
+            submenu: item.submenu.filter(sub =>
+              (hasTeamLocal && (
+                sub.id === 'contactar-afiliados-datos-dia' ||
+                sub.id === 'mensajeria-masiva' ||
+                sub.id === 'reportes-globales'
+              ))
             )
           }
         }
@@ -441,17 +452,32 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
     }
 
     if (role === 'rr.hh') {
-      return menuItems.filter(item => item.id === 'recursos-humanos' || item.id === 'mensajeria-interna')
-        .map(item => {
-          // RR.HH. no ve "Bajas y liquidaciones" (exclusivo de Gerencia)
-          if (item.id === 'recursos-humanos' && item.submenu) {
-            return {
-              ...item,
-              submenu: item.submenu.filter(sub => sub.id !== 'rrhh-bajas-liquidaciones')
-            }
+      // RR.HH: Hybrid role with Recursos Humanos + Auditorías access
+      return menuItems.filter(item => {
+        if (item.id === 'recursos-humanos') return true
+        if (item.id === 'mensajeria-interna') return true
+        if (item.id === 'auditorias') return true  // ✅ Added Auditorías access
+        return false
+      }).map(item => {
+        // RR.HH. no ve "Bajas y liquidaciones" (exclusivo de Gerencia)
+        if (item.id === 'recursos-humanos' && item.submenu) {
+          return {
+            ...item,
+            submenu: item.submenu.filter(sub => sub.id !== 'rrhh-bajas-liquidaciones')
           }
-          return item
-        })
+        }
+        // RR.HH ve Auditorías igual que Auditor
+        if (item.id === 'auditorias' && item.submenu) {
+          return {
+            ...item,
+            submenu: item.submenu.filter(sub =>
+              sub.id === 'auditorias-seguimiento' ||
+              sub.id === 'auditorias-liquidacion'
+            )
+          }
+        }
+        return item
+      })
     }
 
     // ✅ NUEVO: Rol Encargado - Supervisor de Supervisores
@@ -468,7 +494,19 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
         if (item.id === 'recursos-humanos') return true
         // Acceso a Contabilidad
         if (item.id === 'contabilidad') return true
+        // Acceso a Administración (chequeado administrativo)
+        if (item.id === 'administracion') return true
         return false
+      }).map(item => {
+        if (item.id === 'administracion' && item.submenu) {
+          return {
+            ...item,
+            submenu: item.submenu.filter(sub =>
+              sub.id === 'administracion-chequeado'
+            )
+          }
+        }
+        return item
       }).map(item => {
         // Auditorías: TODAS las interfaces hijas (sin filtrar)
         if (item.id === 'auditorias' && item.submenu) {
@@ -480,6 +518,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
             ...item,
             submenu: item.submenu.filter(sub =>
               sub.id === 'contactar-afiliados-administracion' ||
+              sub.id === 'chequeo-datos' ||
               sub.id === 'contactar-afiliados-datos-dia' ||
               sub.id === 'mensajeria-masiva' ||
               sub.id === 'reportes-globales'
@@ -491,8 +530,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
-              sub.id === 'base-afiliados-estadistica' ||
-              sub.id === 'base-afiliados-configuracion'
+              sub.id === 'base-afiliados-estadistica'
             )
           }
         }
@@ -533,7 +571,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
           }
         }
         if (item.id === 'auditorias' && item.submenu) {
-          // Recuperador: Seguimiento (lectura), Crear turno, Falta clave, Rechazada, Pendiente, AFIP y Padrón, Liquidación
+          // Recuperador: Seguimiento (lectura), Crear turno, Falta clave, Rechazada, Pendiente, Liquidación
           return {
             ...item,
             submenu: item.submenu.filter(sub =>
@@ -542,7 +580,6 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
               sub.id === 'auditorias-falta-clave' ||
               sub.id === 'auditorias-rechazada' ||
               sub.id === 'auditorias-pendiente' ||
-              sub.id === 'auditorias-afip-padron' ||
               sub.id === 'auditorias-liquidacion'
             )
           }
@@ -561,11 +598,12 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
 
   const getInitialExpandedMenu = () => {
     if (activeSection.startsWith("base-afiliados")) return "base-afiliados"
-    if (activeSection.startsWith("palabras-prohibidas") || activeSection === "gestion-usuarios" || activeSection === "configuracion-privilegios") return "configuracion-sistema"
+    if (activeSection.startsWith("palabras-prohibidas") || activeSection === "gestion-usuarios" || activeSection === "configuracion-privilegios" || activeSection === "configuracion-procesamiento-documental") return "configuracion-sistema"
     if (activeSection.startsWith("auditorias")) return "auditorias"
     if (activeSection.startsWith("rrhh")) return "recursos-humanos"
-    if (activeSection.startsWith("administracion")) return "administracion"
-    if (["contactar-afiliados-administracion", "contactar-afiliados-datos-dia", "mensajeria-masiva", "reportes-globales"].includes(activeSection)) return "herramientas-contacto"
+    if (activeSection.startsWith("administracion") || activeSection === "procesamiento-documental") return "administracion"
+    if (activeSection === "obras-sociales") return "obras-sociales"
+    if (["contactar-afiliados-administracion", "chequeo-datos", "contactar-afiliados-datos-dia", "mensajeria-masiva", "reportes-globales"].includes(activeSection)) return "herramientas-contacto"
     return null
   }
   const [expandedMenu, setExpandedMenu] = useState<string | null>(getInitialExpandedMenu())
