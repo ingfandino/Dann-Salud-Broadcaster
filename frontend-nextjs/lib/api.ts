@@ -130,6 +130,7 @@ export const api = {
         list: (params?: any) => apiClient.get('/liquidacion', { params }),
         listByTipo: (params?: any) => apiClient.get('/liquidacion/by-tipo', { params }),
         statsMonthly: (params?: any) => apiClient.get('/liquidacion/stats-monthly', { params }),
+        calculateSalary: (params?: any) => apiClient.get('/liquidacion/salary-calculation', { params }),
         export: (params?: any) => apiClient.post('/liquidacion/export', params, { responseType: 'blob' }),
         exportDirect: (params?: any) => apiClient.post('/liquidacion/export-direct', params, { responseType: 'blob' }),
     },
@@ -151,6 +152,7 @@ export const api = {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
         },
+        getIngreso: (userId: string) => apiClient.get(`/employees/user/${userId}/ingreso`),
     },
 
     /* Usuarios */
@@ -198,7 +200,11 @@ export const api = {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
         },
+        getImportJob: (jobId: string) => apiClient.get('/affiliates/import-jobs/' + jobId),
+        downloadImportRejected: (jobId: string) => apiClient.get('/affiliates/import-jobs/' + jobId + '/rejected-file', { responseType: 'blob' }),
+        downloadImportUpdated: (jobId: string) => apiClient.get('/affiliates/import-jobs/' + jobId + '/updated-file', { responseType: 'blob' }),
         export: (params?: any) => apiClient.post('/affiliates/export', params, { responseType: 'blob' }),
+        baseStatus: () => apiClient.get('/affiliates/base-status'),
         stats: () => apiClient.get('/affiliates/stats'),
         listExports: () => apiClient.get('/affiliates/exports'),
         downloadExport: (filename: string) => apiClient.get(`/affiliates/download-export/${filename}`, { responseType: 'blob' }),
@@ -206,6 +212,39 @@ export const api = {
         getExportConfig: () => apiClient.get('/affiliates/export-config'),
         getObrasSociales: () => apiClient.get('/affiliates/obras-sociales'),
         getStockByObraSocial: (obraSocial: string) => apiClient.get(`/affiliates/stock-by-obra-social?obraSocial=${encodeURIComponent(obraSocial)}`),
+        check: {
+            getConfig: () => apiClient.get('/affiliates/check/config'),
+            getObraSocialAvailability: (payload: { mode: 'check_new' | 'check_reusable'; search?: string; limit?: number; selectedCodes?: number[] }) =>
+                apiClient.post('/affiliates/check/obra-social-availability', payload),
+            preview: (payload: any) => apiClient.post('/affiliates/check/preview', payload),
+            createJob: (payload: any) => apiClient.post('/affiliates/check/jobs', payload),
+            listJobs: (params?: any, config?: any) => apiClient.get('/affiliates/check/jobs', { ...config, params }),
+            getJob: (jobId: string) => apiClient.get(`/affiliates/check/jobs/${jobId}`),
+            cancelJob: (jobId: string, data?: any) => apiClient.post(`/affiliates/check/jobs/${jobId}/cancel`, data || {}),
+            processJob: (jobId: string) => apiClient.post(`/affiliates/check/jobs/${jobId}/process`),
+            pauseJob: (jobId: string, data?: any) => apiClient.post(`/affiliates/check/jobs/${jobId}/pause`, data || {}),
+            resumeJob: (jobId: string) => apiClient.post(`/affiliates/check/jobs/${jobId}/resume`),
+            retryJob: (jobId: string, data?: any) => apiClient.post(`/affiliates/check/jobs/${jobId}/retry`, data || {}),
+            exportJob: (jobId: string) => apiClient.get(`/affiliates/check/jobs/${jobId}/export`, { responseType: "blob" }),
+            deleteJob: (jobId: string, data?: any) => apiClient.delete(`/affiliates/check/jobs/${jobId}`, { data: data || {} }),
+            externalFile: {
+                upload: (file: File) => {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    return apiClient.post('/affiliates/check/external-file', formData, {
+                        headers: { 'Content-Type': 'multipart/form-data' },
+                    });
+                },
+                getSummary: (importJobId: string) =>
+                    apiClient.get(`/affiliates/check/external-file/${importJobId}`),
+                downloadRejectedFile: (importJobId: string) =>
+                    apiClient.get(`/affiliates/check/external-file/${importJobId}/rejected-file`, { responseType: 'blob' }),
+                downloadUpdatedFile: (importJobId: string) =>
+                    apiClient.get(`/affiliates/check/external-file/${importJobId}/updated-file`, { responseType: 'blob' }),
+                createJob: (importJobId: string, payload: { requestedCount: number; supervisorId?: string }) =>
+                    apiClient.post(`/affiliates/check/external-file/${importJobId}/job`, payload),
+            },
+        },
         /* Gestión de Leads */
         getFreshData: (params?: any) => apiClient.get('/affiliates/fresh-data', { params }),
         getReusableData: (params?: any) => apiClient.get('/affiliates/reusable', { params }),
@@ -218,6 +257,33 @@ export const api = {
         getFailed: (params?: any) => apiClient.get('/affiliates/failed', { params }),
         getSupervisorStats: () => apiClient.get('/affiliates/supervisor-stats'),
         exportAll: () => apiClient.get('/affiliates/export-all', { responseType: 'blob' }),
+        exportCustom: (data: any) => apiClient.post('/affiliates/export', data, { responseType: 'blob' }),
+        distinctObrasSociales: () => apiClient.get('/affiliates/distinct-obras-sociales'),
+        /* Distribución de Leads — Wizard Programar Envío */
+        getDeliveryStock: (params: {
+            zones?: string[];
+            dateType?: string;
+            exactDate?: string;
+            year?: string;
+            month?: string;
+            obrasSociales?: string[];
+        }) => {
+            const p = new URLSearchParams();
+            if (params.zones?.length) params.zones.forEach(z => p.append('zones[]', z));
+            if (params.dateType) p.append('dateType', params.dateType);
+            if (params.exactDate) p.append('exactDate', params.exactDate);
+            if (params.year) p.append('year', params.year);
+            if (params.month) p.append('month', params.month);
+            if (params.obrasSociales?.length) params.obrasSociales.forEach(o => p.append('obrasSociales[]', o));
+            return apiClient.get(`/affiliates/delivery/stock?${p.toString()}`);
+        },
+        executeDelivery: (data: { blocks: any[] }) => apiClient.post('/affiliates/delivery/execute', data),
+        exportDelivery: (data: { zones: string[]; obrasSociales?: string[]; freshPct: number; limit: number }) =>
+            apiClient.post('/affiliates/delivery/export', data, { responseType: 'blob' }),
+        getDeliverySupervisors: () => apiClient.get('/affiliates/delivery/supervisors'),
+        getScheduledConfig: (supervisorId: string) => apiClient.get(`/affiliates/delivery/scheduled/${supervisorId}`),
+        saveScheduledConfig: (data: any) => apiClient.post('/affiliates/delivery/scheduled', data),
+        deactivateScheduledConfig: (supervisorId: string) => apiClient.delete(`/affiliates/delivery/scheduled/${supervisorId}`),
     },
 
 
@@ -376,16 +442,105 @@ export const api = {
         flushCache: () => apiClient.post('/privileges/cache/flush'),
     },
 
+    documentProcessing: {
+        getConfig: () => apiClient.get('/document-processing/config'),
+        updateConfig: (data: {
+            documentProcessingEnabled?: boolean;
+            documentProcessingInputsRequired?: boolean;
+            documentProcessingAutoTriggerEnabled?: boolean;
+        }) => apiClient.put('/document-processing/config', data),
+    },
+
     /* Aportes ARCA */
     affiliateContributions: {
         run: (data?: {
-            mode?: 'single' | 'selected' | 'filtered' | 'pending';
+            mode?: 'pending' | 'selected' | 'filtered' | 'byObraSocial';
             limit?: number;
-            cuil?: string;
             affiliateIds?: string[];
-            filters?: { obraSocial?: string; localidad?: string };
+            filters?: Record<string, any>;
+            groups?: { obraSocial: string; limit: number }[];
         }) => apiClient.post('/affiliate-contributions/run', data || {}),
         getStats: () => apiClient.get('/affiliate-contributions/stats'),
+        activeTask: () => apiClient.get('/affiliate-contributions/active-task'),
+    },
+
+    /* Base Nativa — Bot de adquisición de datos */
+    nativeBot: {
+        start: (data?: { maxIterations?: number }) => apiClient.post('/native-bot/start', data || {}),
+        stop:  () => apiClient.post('/native-bot/stop'),
+        pause: () => apiClient.post('/native-bot/pause'),
+        status: () => apiClient.get('/native-bot/status'),
+        activeTask: () => apiClient.get('/native-bot/active-task'),
+        listAffiliates: (params?: { page?: number; limit?: number; search?: string; obraSocial?: string; provincia?: string }) =>
+            apiClient.get('/native-bot/affiliates', { params }),
+        getStats: () => apiClient.get('/native-bot/affiliates/stats'),
+    },
+
+    /* DATEAS Bot Control */
+    dateasBot: {
+        start: (data?: { maxIterations?: number }) => apiClient.post('/dateas-bot/start', data || {}),
+        stop:  () => apiClient.post('/dateas-bot/stop'),
+        pause: () => apiClient.post('/dateas-bot/pause'),
+        resume: () => apiClient.post('/dateas-bot/resume'),
+        status: () => apiClient.get('/dateas-bot/status'),
+        activeTask: () => apiClient.get('/dateas-bot/active-task'),
+    },
+
+    obraSocialConfig: {
+        list: () => apiClient.get('/obra-social-config'),
+        get: (id: string) => apiClient.get(`/obra-social-config/${id}`),
+        create: (data: any) => apiClient.post('/obra-social-config', data),
+        update: (id: string, data: any) => apiClient.put(`/obra-social-config/${id}`, data),
+        listPortalEnabled: () => apiClient.get('/obra-social-config/portal-enabled'),
+    },
+
+    documentProcessingCases: {
+        list: () => apiClient.get('/document-processing/cases'),
+        get: (id: string) => apiClient.get(`/document-processing/cases/${id}`),
+        createFromAudit: (auditId: string) => apiClient.post(`/document-processing/cases/from-audit/${auditId}`),
+        updateInputs: (id: string, data: any) => apiClient.put(`/document-processing/cases/${id}/inputs`, data),
+        process: (id: string) => apiClient.post(`/document-processing/cases/${id}/process`),
+        approveForObraSocial: (id: string) => apiClient.post(`/document-processing/cases/${id}/approve-for-obra-social`),
+        uploadQr: (id: string, data: FormData) => apiClient.post(`/document-processing/cases/${id}/qr`, data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+        downloadQr: (id: string) => apiClient.get(`/document-processing/cases/${id}/final-qr`, { responseType: 'blob' }),
+    },
+
+    documentProcessingObraSocial: {
+        listCases: () => apiClient.get('/document-processing/obra-social/cases'),
+        getCase: (id: string) => apiClient.get(`/document-processing/obra-social/cases/${id}`),
+        review: (id: string, data: { action: string; reason?: string }) => apiClient.post(`/document-processing/obra-social/cases/${id}/review`, data),
+        downloadQr: (id: string) => apiClient.get(`/document-processing/obra-social/cases/${id}/final-qr`, { responseType: 'blob' }),
+    },
+
+    dataCheck: {
+        upload: (data: FormData) => apiClient.post('/data-check/upload', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+        createFromDatabase: (data: { obrasSociales: string[]; quantity: number }) => apiClient.post('/data-check/from-database', data),
+        getDatabaseStock: (obrasSociales?: string[]) => {
+            const p = new URLSearchParams();
+            if (obrasSociales?.length) obrasSociales.forEach(os => p.append('obrasSociales', os));
+            return apiClient.get(`/data-check/from-database/stock?${p.toString()}`);
+        },
+        listSessions: () => apiClient.get('/data-check/sessions'),
+        getSession: (id: string) => apiClient.get(`/data-check/sessions/${id}`),
+        startSession: (id: string) => apiClient.post(`/data-check/sessions/${id}/start`),
+        retrySession: (id: string) => apiClient.post(`/data-check/sessions/${id}/retry`),
+        downloadResult: (id: string) => apiClient.get(`/data-check/sessions/${id}/download`, { responseType: 'blob' }),
+        deleteSession: (id: string) => apiClient.delete(`/data-check/sessions/${id}`),
+    },
+
+    adminCheck: {
+        upload: (data: FormData) => apiClient.post('/admin-check/upload', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+        listSessions: () => apiClient.get('/admin-check/sessions'),
+        getSession: (id: string) => apiClient.get(`/admin-check/sessions/${id}`),
+        startSession: (id: string) => apiClient.post(`/admin-check/sessions/${id}/start`),
+        retrySession: (id: string) => apiClient.post(`/admin-check/sessions/${id}/retry`),
+        downloadResult: (id: string) => apiClient.get(`/admin-check/sessions/${id}/download`, { responseType: 'blob' }),
+        deleteSession: (id: string) => apiClient.delete(`/admin-check/sessions/${id}`),
+    },
+
+    /* Obras Sociales Anteriores — Catálogo AFIP T05 */
+    socialHealthList: {
+        list: (search?: string) => apiClient.get('/social-health-list', { params: search ? { search } : undefined }),
     },
 
     /* Cliente raw para requests personalizados */

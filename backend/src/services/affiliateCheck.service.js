@@ -10,6 +10,11 @@ const AffiliateAssignment = require("../models/AffiliateAssignment");
 const AffiliateOperationalState = require("../models/AffiliateOperationalState");
 const User = require("../models/User");
 const { initializeStagesForRow } = require("./affiliateCheckStage.service");
+const {
+    getInternalObraSocialAvailability,
+    normalizeSelection,
+    resolveDistribution
+} = require("./affiliateCheckObraSocial.service");
 
 const MODES = ["check_new", "check_reusable", "extract_base", "check_import"];
 const QUOTA_PATHS = {
@@ -150,6 +155,9 @@ function buildOwnershipAvailability(now) {
 function buildEligibilityQuery(mode, filters = {}, now = new Date()) {
     validateMode(mode);
     const query = { ...cleanFilters(filters), ...buildOwnershipAvailability(now) };
+    if (Array.isArray(filters.obraSocialNames) && filters.obraSocialNames.length > 0) {
+        query.obraSocial = { $in: filters.obraSocialNames };
+    }
 
     if (mode === "check_new") {
         Object.assign(query, {
@@ -157,13 +165,14 @@ function buildEligibilityQuery(mode, filters = {}, now = new Date()) {
             verificationStatus: "unchecked",
             usageStatus: "never_used",
             saleStatus: "none",
-            availableForSale: false
+            availableForSale: false,
+            currentCheckJobId: null
         });
     } else if (mode === "check_reusable") {
         Object.assign(query, {
             freshness: "reusable",
             verificationStatus: { $in: ["expired", "error", "no_data", "captcha"] },
-            usageStatus: { $nin: ["assigned", "blocked"] },
+            usageStatus: { $ne: "blocked" },
             saleStatus: { $ne: "qr_done" },
             currentCheckJobId: null
         });
@@ -367,7 +376,15 @@ async function resolveQuota({ user, mode, requestedCount, date = new Date() }) {
     };
 }
 
-async function previewAffiliateCheckSelection({ user, mode, requestedCount, filters, supervisorId }) {
+async function previewAffiliateCheckSelection({
+    user,
+    mode,
+    requestedCount,
+    filters,
+    supervisorId,
+    obraSocialSelection,
+    obraSocial
+}) {
     validateMode(mode);
     assertInternalCheckRole(user, mode);
     const config = await getActiveCheckConfig();
@@ -379,15 +396,29 @@ async function previewAffiliateCheckSelection({ user, mode, requestedCount, filt
         ownerId: supervisorTarget,
         requestedBy: user?._id
     });
+    const quota = await resolveQuota({ user, mode, requestedCount });
+    const normalizedRequested = normalizeRequestedCount(requestedCount);
+    const cleanedFilters = cleanFilters(filters);
+    const hasObraSocialContract = obraSocialSelection || obraSocial || cleanedFilters.obraSocial;
+    const selection = INTERNAL_MODES.includes(mode) && hasObraSocialContract
+        ? normalizeSelection(obraSocialSelection, obraSocial || cleanedFilters.obraSocial)
+        : null;
+    if (selection) delete cleanedFilters.obraSocial;
 
-    const quota = await resolveQuota({
-        user,
-        mode,
-        requestedCount
-    });
-    const query = buildEligibilityQuery(mode, filters);
+    const distributionResult = selection
+        ? await resolveDistribution({
+            mode,
+            requestedCount: quota.cappedCount,
+            selection,
+            buildEligibilityQuery: (resolvedMode, extraFilters, now) =>
+                buildEligibilityQuery(resolvedMode, { ...cleanedFilters, ...extraFilters }, now)
+        })
+        : null;
+    const query = buildEligibilityQuery(mode, cleanedFilters);
     const [selectableCount, sample] = await Promise.all([
-        AffiliateOperationalState.countDocuments(query),
+        distributionResult
+            ? Promise.resolve(distributionResult.availableCount)
+            : AffiliateOperationalState.countDocuments(query),
         AffiliateOperationalState.find(query)
             .sort({ uploadDate: 1, _id: 1 })
             .limit(SAMPLE_SIZE)
@@ -396,15 +427,54 @@ async function previewAffiliateCheckSelection({ user, mode, requestedCount, filt
     ]);
     return {
         mode,
-        requestedCount: normalizeRequestedCount(requestedCount),
+        requestedCount: normalizedRequested,
         dailyLimit: quota.dailyLimit,
         alreadyUsedToday: quota.alreadyUsedToday,
         remaining: quota.remaining,
         selectableCount,
+        availableCount: selectableCount,
         willSelectCount: Math.min(quota.cappedCount, selectableCount),
         canCreate: channelStatus.canCreate,
         blockedReason: channelStatus.blockedReason || null,
+        ...(selection ? {
+            obraSocialSelection: {
+                strategy: selection.strategy,
+                selected: distributionResult.requestedItems
+            },
+            distribution: distributionResult.distribution.map(item => ({
+                code: item.code,
+                name: item.name,
+                availableCount: item.availableCount,
+                plannedCount: item.plannedCount
+            })),
+            distributionIsEstimated: true
+        } : {}),
         sample
+    };
+}
+
+async function getAffiliateCheckObraSocialAvailability({
+    user,
+    mode,
+    search,
+    limit,
+    selectedCodes
+}) {
+    validateMode(mode);
+    assertInternalCheckRole(user, mode);
+    const config = await getActiveCheckConfig();
+    assertModeEnabled(config, mode);
+    const result = await getInternalObraSocialAvailability({
+        mode,
+        search,
+        limit,
+        selectedCodes,
+        buildEligibilityQuery
+    });
+    return {
+        mode,
+        totalOrganizations: result.totalOrganizations,
+        data: result.data
     };
 }
 
@@ -500,19 +570,32 @@ async function restoreState(state, snapshot, jobId = null) {
     );
 }
 
-async function reserveCheckRows({ job, count, filters }) {
-    const rows = [];
-    for (let index = 0; index < count; index += 1) {
-        const now = new Date();
+async function reserveSingleCheckRow({ job, filters }) {
+    const now = new Date();
+    const skippedStateIds = [];
+
+    while (true) {
+        const query = buildEligibilityQuery(job.mode, filters, now);
+        if (skippedStateIds.length > 0) query._id = { $nin: skippedStateIds };
+
         const previous = await AffiliateOperationalState.findOneAndUpdate(
-            buildEligibilityQuery(job.mode, filters, now),
-            checkReservationUpdate(now),
+            query,
+            checkReservationUpdate(now, job._id),
             { sort: { uploadDate: 1, _id: 1 }, new: false }
         ).lean();
-        if (!previous) break;
+        if (!previous) return null;
 
         const snapshot = stateSnapshot(previous);
         try {
+            const activeAssignment = await AffiliateAssignment.findOne({
+                affiliateId: previous.affiliateId,
+                status: "active"
+            }).select("_id").lean();
+            if (activeAssignment) {
+                await restoreState(previous, snapshot, job._id);
+                skippedStateIds.push(previous._id);
+                continue;
+            }
             const row = await AffiliateCheckRow.create({
                 jobId: job._id,
                 affiliateId: previous.affiliateId,
@@ -523,13 +606,65 @@ async function reserveCheckRows({ job, count, filters }) {
                 previousState: snapshot,
                 stages: initializeStagesForRow({}).stages
             });
-            rows.push(row);
+            return { row, obraSocial: previous.obraSocial };
         } catch (error) {
-            await restoreState(previous, snapshot);
+            await restoreState(previous, snapshot, job._id);
             throw error;
         }
     }
-    return rows;
+}
+
+async function reserveCheckRows({ job, count, filters, distribution = null }) {
+    const rows = [];
+    if (!distribution) {
+        for (let index = 0; index < count; index += 1) {
+            const reserved = await reserveSingleCheckRow({ job, filters });
+            if (!reserved) break;
+            rows.push(reserved.row);
+        }
+        return { rows, finalDistribution: [] };
+    }
+
+    const selectedByCode = new Map();
+    let activeGroups = distribution.filter(item => item.availableCount > 0 && item.storedNames.length > 0);
+    while (rows.length < count && activeGroups.length > 0) {
+        let progressed = false;
+        const allTargetsMet = activeGroups.every(group =>
+            (selectedByCode.get(group.code) || 0) >= group.plannedCount
+        );
+        for (const group of activeGroups) {
+            if (rows.length >= count) break;
+            const selected = selectedByCode.get(group.code) || 0;
+            if (!allTargetsMet && selected >= group.plannedCount) continue;
+            const reserved = await reserveSingleCheckRow({
+                job,
+                filters: { ...filters, obraSocialNames: group.storedNames }
+            });
+            if (!reserved) {
+                group.exhausted = true;
+                continue;
+            }
+            rows.push(reserved.row);
+            selectedByCode.set(group.code, selected + 1);
+            progressed = true;
+        }
+        activeGroups = activeGroups.filter(group => !group.exhausted);
+        if (!progressed && !allTargetsMet) {
+            for (const group of activeGroups) group.plannedCount = selectedByCode.get(group.code) || 0;
+            continue;
+        }
+        if (!progressed) break;
+    }
+
+    return {
+        rows,
+        finalDistribution: distribution.map(item => ({
+            code: item.code,
+            name: item.name,
+            availableCount: item.availableCount,
+            selectedCount: selectedByCode.get(item.code) || 0
+        }))
+    };
 }
 
 function buildImportedAffiliateReservationQuery(affiliateId, now) {
@@ -951,31 +1086,39 @@ async function createAffiliateCheckJob({
     mode,
     requestedCount,
     filters,
-    supervisorId = null
+    supervisorId = null,
+    obraSocialSelection,
+    obraSocial
 }) {
     validateMode(mode);
     assertInternalCheckRole(user, mode);
     const config = await getActiveCheckConfig();
     assertModeEnabled(config, mode);
     const cleanedFilters = cleanFilters(filters);
-    const quota = await resolveQuota({
-        user,
-        mode,
-        requestedCount
-    });
+    const hasObraSocialContract = obraSocialSelection || obraSocial || cleanedFilters.obraSocial;
+    const selection = INTERNAL_MODES.includes(mode) && hasObraSocialContract
+        ? normalizeSelection(obraSocialSelection, obraSocial || cleanedFilters.obraSocial)
+        : null;
+    if (selection) delete cleanedFilters.obraSocial;
+    const quota = await resolveQuota({ user, mode, requestedCount });
     const supervisorTarget = await resolveSupervisorTarget({ user, mode, supervisorId });
     const channelType = channelTypeForMode(mode);
     const channelOwner = channelType ? (supervisorTarget || user._id) : null;
 
-    await assertActiveChannelAvailable({
-        mode,
-        ownerId: channelOwner,
-        requestedBy: user._id
-    });
+    await assertActiveChannelAvailable({ mode, ownerId: channelOwner, requestedBy: user._id });
 
-    const selectableCount = await AffiliateOperationalState.countDocuments(
-        buildEligibilityQuery(mode, cleanedFilters)
-    );
+    const distributionResult = selection
+        ? await resolveDistribution({
+            mode,
+            requestedCount: quota.cappedCount,
+            selection,
+            buildEligibilityQuery: (resolvedMode, extraFilters, now) =>
+                buildEligibilityQuery(resolvedMode, { ...cleanedFilters, ...extraFilters }, now)
+        })
+        : null;
+    const selectableCount = distributionResult
+        ? distributionResult.availableCount
+        : await AffiliateOperationalState.countDocuments(buildEligibilityQuery(mode, cleanedFilters));
     const intendedCount = Math.min(quota.cappedCount, selectableCount);
 
     if (mode !== "extract_base" && intendedCount === 0) {
@@ -994,8 +1137,15 @@ async function createAffiliateCheckJob({
         ...(channelType ? { channelOwner, channelType } : {}),
         status: "pending",
         requestedCount: normalizedRequested,
-        eligibleCount: 0,
+        eligibleCount: selectableCount,
         filters: cleanedFilters,
+        ...(selection ? {
+            obraSocialSelection: {
+                strategy: selection.strategy,
+                requestedItems: distributionResult.requestedItems,
+                finalDistribution: []
+            }
+        } : {}),
         quota: {
             dailyLimit: quota.dailyLimit,
             alreadyUsedToday: quota.alreadyUsedToday,
@@ -1007,21 +1157,17 @@ async function createAffiliateCheckJob({
     });
 
     try {
-        if (mode === "extract_base") {
-            return assignExtractedBaseAffiliates({ jobId: job._id });
-        }
+        if (mode === "extract_base") return assignExtractedBaseAffiliates({ jobId: job._id });
 
-        const rows = await reserveCheckRows({
+        const reservation = await reserveCheckRows({
             job,
             count: intendedCount,
-            filters: cleanedFilters
+            filters: cleanedFilters,
+            distribution: distributionResult?.distribution || null
         });
-
+        const rows = reservation.rows;
         if (rows.length === 0) {
-            await releaseAffiliateCheckJobReservations({
-                jobId: job._id,
-                reason: "zero_rows_reserved"
-            }).catch(() => {});
+            await releaseAffiliateCheckJobReservations({ jobId: job._id, reason: "zero_rows_reserved" }).catch(() => {});
             job.status = "cancelled";
             job.cancellationReason = "zero_rows_reserved";
             job.quota.consumed = 0;
@@ -1037,6 +1183,7 @@ async function createAffiliateCheckJob({
         job.selectedCount = rows.length;
         job.quota.consumed = rows.length;
         job.status = "pending";
+        if (selection) job.obraSocialSelection.finalDistribution = reservation.finalDistribution;
         await job.save();
 
         const result = job.toObject();
@@ -1046,9 +1193,7 @@ async function createAffiliateCheckJob({
         }
         return result;
     } catch (error) {
-        if (error instanceof AffiliateCheckError && error.code === "NO_SELECTABLE_AFFILIATES") {
-            throw error;
-        }
+        if (error instanceof AffiliateCheckError && error.code === "NO_SELECTABLE_AFFILIATES") throw error;
         await releaseAffiliateCheckJobReservations({
             jobId: job._id,
             reason: "affiliate_check_job_creation_failed"
@@ -1096,9 +1241,7 @@ async function releaseAffiliateCheckJobReservations({ jobId, reason = "affiliate
                         lastUsedAt: row.previousState.lastUsedAt ?? null,
                         reusableAfter: row.previousState.reusableAfter ?? null
                     },
-                    ...(row.mode === "check_import"
-                        ? { $unset: { currentCheckJobId: "", currentCheckStartedAt: "" } }
-                        : {})
+                    ...({ $unset: { currentCheckJobId: "", currentCheckStartedAt: "" } })
                 }
             );
             releasedStates += stateUpdate.modifiedCount || 0;
@@ -1227,6 +1370,7 @@ module.exports = {
     createImportedAffiliateCheckJob,
     getActiveChannelStatus,
     getActiveCheckConfig,
+    getAffiliateCheckObraSocialAvailability,
     getImportedAffiliateCheckAvailability,
     getSupervisorDailyUsage,
     normalizeRole,

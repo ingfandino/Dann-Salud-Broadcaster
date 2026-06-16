@@ -12,6 +12,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const affiliateController = require("../controllers/affiliateController");
+const deliveryController = require("../controllers/deliveryController");
 const { requireAuth } = require("../middlewares/authMiddleware");
 const { getAvailableExports } = require("../services/affiliateExportService");
 
@@ -50,12 +51,41 @@ router.use(requireAuth);
 // 📤 Subir archivo de afiliados (solo Gerencia)
 router.post("/upload", affiliateController.requireGerencia, upload.single("file"), affiliateController.uploadAffiliates);
 
+// Estado y reporte seguro de importaciones asincrónicas
+router.get("/import-jobs/:jobId", affiliateController.requireGerencia, affiliateController.getAffiliateImportJob);
+router.get("/import-jobs/:jobId/rejected-file", affiliateController.requireGerencia, affiliateController.downloadAffiliateImportRejectedFile);
+router.get("/import-jobs/:jobId/updated-file", affiliateController.requireGerencia, affiliateController.downloadAffiliateImportUpdatedFile);
+
 // 📥 Descargar reporte de duplicados (solo Gerencia)
 router.get("/download-report/:filename", affiliateController.requireGerencia, affiliateController.downloadReport);
 
 // 🔍 Buscar/filtrar afiliados (solo Gerencia)
 router.get("/", affiliateController.searchAffiliates);
 router.get("/search", affiliateController.requireGerencia, affiliateController.searchAffiliates);
+
+// 📊 Estado de la base (Dashboard Phase 3)
+router.get("/base-status", affiliateController.requireSupervisorOrGerencia, affiliateController.getBaseStatus);
+
+// Chequeo de datos (Phase 4A: contratos, cuotas y trabajos; sin workers)
+router.get("/check/config", affiliateController.requireAffiliateCheckAccess, affiliateController.getAffiliateCheckConfig);
+router.put("/check/config", affiliateController.requireAffiliateCheckConfigWrite, affiliateController.updateAffiliateCheckConfig);
+router.post("/check/preview", affiliateController.requireAffiliateCheckAccess, affiliateController.previewAffiliateCheck);
+router.post("/check/obra-social-availability", affiliateController.requireAffiliateCheckAccess, affiliateController.getAffiliateCheckObraSocialAvailability);
+router.post("/check/jobs", affiliateController.requireAffiliateCheckAccess, affiliateController.createAffiliateCheckJob);
+router.post("/check/jobs/:jobId/cancel", affiliateController.requireAffiliateCheckAccess, affiliateController.cancelAffiliateCheckJob);
+router.post("/check/jobs/:jobId/pause", affiliateController.requireAffiliateCheckAccess, affiliateController.pauseAffiliateCheckJob);
+router.post("/check/jobs/:jobId/resume", affiliateController.requireAffiliateCheckAccess, affiliateController.resumeAffiliateCheckJob);
+router.post("/check/jobs/:jobId/retry", affiliateController.requireAffiliateCheckAccess, affiliateController.retryAffiliateCheckJob);
+router.get("/check/jobs/:jobId/export", affiliateController.requireAffiliateCheckAccess, affiliateController.exportAffiliateCheckJob);
+router.delete("/check/jobs/:jobId", affiliateController.requireAffiliateCheckAccess, affiliateController.softDeleteAffiliateCheckJob);
+router.post("/check/jobs/:jobId/process", affiliateController.requireAffiliateCheckProcessAccess, affiliateController.processAffiliateCheckJob);
+router.get("/check/jobs/:jobId", affiliateController.requireAffiliateCheckAccess, affiliateController.getAffiliateCheckJob);
+router.get("/check/jobs", affiliateController.requireAffiliateCheckAccess, affiliateController.listAffiliateCheckJobs);
+router.post("/check/external-file", affiliateController.requireAffiliateCheckAccess, upload.single("file"), affiliateController.uploadExternalAffiliateCheckFile);
+router.get("/check/external-file/:importJobId", affiliateController.requireAffiliateCheckAccess, affiliateController.getExternalAffiliateCheckImport);
+router.get("/check/external-file/:importJobId/rejected-file", affiliateController.requireAffiliateCheckAccess, affiliateController.downloadExternalAffiliateCheckRejectedFile);
+router.get("/check/external-file/:importJobId/updated-file", affiliateController.requireAffiliateCheckAccess, affiliateController.downloadExternalAffiliateCheckUpdatedFile);
+router.post("/check/external-file/:importJobId/job", affiliateController.requireAffiliateCheckAccess, affiliateController.createExternalAffiliateCheckJob);
 
 // 📊 Obtener estadísticas (solo Gerencia)
 router.get("/stats", affiliateController.requireSupervisorOrGerencia, affiliateController.getStats);
@@ -121,7 +151,13 @@ router.get("/download-export/:filename", async (req, res) => {
     }
 });
 
-// 🗑️ Eliminar afiliado (solo Gerencia)
+// � Exportación personalizada (full o filtrada) — solo usuario autorizado
+router.post("/export", affiliateController.exportCustom);
+
+// 📋 Obras sociales distintas para filtro de exportación
+router.get("/distinct-obras-sociales", affiliateController.requireSupervisorOrGerencia, affiliateController.getDistinctObrasSociales);
+
+// �🗑️ Eliminar afiliado (solo Gerencia)
 router.delete("/:id", affiliateController.requireGerencia, affiliateController.deleteAffiliate);
 
 // 🆕 RUTAS GESTIÓN DE LEADS
@@ -158,5 +194,28 @@ router.post("/cleanup-fresh", affiliateController.requireGerencia, affiliateCont
 
 // 📥 Exportar TODA la base de afiliados (solo usuario específico)
 router.get("/export-all", affiliateController.exportAllAffiliates);
+
+// ─── DISTRIBUCIÓN DE LEADS (Wizard Programar Envío) ─────────────────────────
+
+// 📊 Stock disponible por obra social con filtros de zona, fecha y ARCA
+router.get("/delivery/stock", affiliateController.requireGerencia, deliveryController.getDeliveryStock);
+
+// 🚀 Ejecutar bloques de envío inmediato
+router.post("/delivery/execute", affiliateController.requireGerencia, deliveryController.executeDeliveryBlocks);
+
+// 👥 Supervisores disponibles para el modal
+router.get("/delivery/supervisors", affiliateController.requireGerencia, deliveryController.getSupervisors);
+
+// 📅 Obtener config programada de un supervisor
+router.get("/delivery/scheduled/:supervisorId", affiliateController.requireGerencia, deliveryController.getScheduledConfig);
+
+// 💾 Guardar config programada de un supervisor
+router.post("/delivery/scheduled", affiliateController.requireGerencia, deliveryController.saveScheduledConfig);
+
+// 🚫 Desactivar config programada de un supervisor
+router.delete("/delivery/scheduled/:supervisorId", affiliateController.requireGerencia, deliveryController.deactivateScheduledConfig);
+
+// 📤 Exportar leads usando el mismo motor que Programar Envío (fresco/reutilizable, zonas, OS)
+router.post("/delivery/export", affiliateController.requireGerencia, deliveryController.exportDelivery);
 
 module.exports = router;

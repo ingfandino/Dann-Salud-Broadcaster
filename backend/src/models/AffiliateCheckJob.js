@@ -68,6 +68,19 @@ const affiliateCheckJobSchema = new mongoose.Schema(
             dataSource: { type: String, trim: true },
             batchId: { type: String, trim: true }
         },
+        obraSocialSelection: {
+            strategy: { type: String, enum: ["automatic", "manual"], default: undefined },
+            requestedItems: [{
+                code: { type: Number, required: true },
+                name: { type: String, required: true, trim: true }
+            }],
+            finalDistribution: [{
+                code: { type: Number, required: true },
+                name: { type: String, required: true, trim: true },
+                availableCount: { type: Number, default: 0, min: 0 },
+                selectedCount: { type: Number, default: 0, min: 0 }
+            }]
+        },
         quota: {
             dailyLimit: { type: Number, min: 0 },
             alreadyUsedToday: { type: Number, min: 0 },
