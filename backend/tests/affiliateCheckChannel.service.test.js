@@ -4,6 +4,7 @@ jest.setTimeout(30000);
 require("./setup");
 
 const mongoose = require("mongoose");
+const AffiliateAssignment = require("../src/models/AffiliateAssignment");
 const AffiliateCheckConfig = require("../src/models/AffiliateCheckConfig");
 const AffiliateCheckJob = require("../src/models/AffiliateCheckJob");
 const AffiliateImportJob = require("../src/models/AffiliateImportJob");
@@ -49,6 +50,17 @@ async function createInternalState(mode) {
     });
 }
 
+async function createExtractState(overrides = {}) {
+    return createState({
+        verificationStatus: "checked",
+        canSell: true,
+        availableForSale: true,
+        saleStatus: "none",
+        usageStatus: "available",
+        ...overrides
+    });
+}
+
 async function createImport(owner, count = 2) {
     const importJob = await AffiliateImportJob.create({
         originalFilename: "concurrent.xlsx",
@@ -80,6 +92,10 @@ function expectOneConflict(results, code) {
     expect(rejected[0].reason).toMatchObject({ code, statusCode: 409 });
 }
 
+function expectAllFulfilled(results) {
+    expect(results.every(result => result.status === "fulfilled")).toBe(true);
+}
+
 describe("affiliate check atomic channels", () => {
     beforeAll(async () => {
         await AffiliateCheckJob.init();
@@ -104,18 +120,19 @@ describe("affiliate check atomic channels", () => {
             createAffiliateCheckJob({ user: owner, mode: "check_new", requestedCount: 1 }),
             createAffiliateCheckJob({ user: owner, mode: "check_new", requestedCount: 1 })
         ]);
-        expectOneConflict(results, "ACTIVE_INTERNAL_JOB");
-        expect(await AffiliateCheckJob.countDocuments({ channelOwner: owner._id, channelType: "internal" })).toBe(1);
+        expectOneConflict(results, "ACTIVE_CHECK_NEW_JOB");
+        expect(await AffiliateCheckJob.countDocuments({ channelOwner: owner._id, mode: "check_new" })).toBe(1);
     });
 
-    test("simultaneous check_new and check_reusable share the internal channel", async () => {
+    test("simultaneous check_new and check_reusable use independent mode channels", async () => {
         const owner = user();
         await Promise.all([createInternalState("check_new"), createInternalState("check_reusable")]);
         const results = await Promise.allSettled([
             createAffiliateCheckJob({ user: owner, mode: "check_new", requestedCount: 1 }),
             createAffiliateCheckJob({ user: owner, mode: "check_reusable", requestedCount: 1 })
         ]);
-        expectOneConflict(results, "ACTIVE_INTERNAL_JOB");
+        expectAllFulfilled(results);
+        expect(await AffiliateCheckJob.countDocuments({ channelOwner: owner._id, mode: { $in: ["check_new", "check_reusable"] } })).toBe(2);
     });
 
     test("two simultaneous external jobs collide atomically", async () => {
@@ -125,8 +142,8 @@ describe("affiliate check atomic channels", () => {
             createImportedAffiliateCheckJob({ user: owner, importJobId: importJob._id, requestedCount: 1 }),
             createImportedAffiliateCheckJob({ user: owner, importJobId: importJob._id, requestedCount: 1 })
         ]);
-        expectOneConflict(results, "ACTIVE_EXTERNAL_JOB");
-        expect(await AffiliateCheckJob.countDocuments({ channelOwner: owner._id, channelType: "external" })).toBe(1);
+        expectOneConflict(results, "ACTIVE_CHECK_IMPORT_JOB");
+        expect(await AffiliateCheckJob.countDocuments({ channelOwner: owner._id, mode: "check_import" })).toBe(1);
     });
 
     test("simultaneous internal and external jobs use independent channels", async () => {
@@ -155,7 +172,7 @@ describe("affiliate check atomic channels", () => {
             });
             await createInternalState("check_new");
             await expect(createAffiliateCheckJob({ user: owner, mode: "check_new", requestedCount: 1 }))
-                .rejects.toMatchObject({ code: "ACTIVE_INTERNAL_JOB" });
+                .rejects.toMatchObject({ code: "ACTIVE_CHECK_NEW_JOB" });
         }
     );
 
@@ -239,4 +256,41 @@ describe("affiliate check atomic channels", () => {
                 .rejects.toMatchObject({ code: "INTERNAL_CHECK_ROLE_FORBIDDEN", statusCode: 403 });
         }
     );
+
+    test("check_new, check_reusable, check_import, and extract_base can coexist for one supervisor", async () => {
+        const owner = user();
+        await Promise.all([createInternalState("check_new"), createInternalState("check_reusable"), createExtractState()]);
+        const importJob = await createImport(owner, 1);
+
+        const results = await Promise.allSettled([
+            createAffiliateCheckJob({ user: owner, mode: "check_new", requestedCount: 1 }),
+            createAffiliateCheckJob({ user: owner, mode: "check_reusable", requestedCount: 1 }),
+            createImportedAffiliateCheckJob({ user: owner, importJobId: importJob._id, requestedCount: 1 }),
+            createAffiliateCheckJob({ user: owner, mode: "extract_base", requestedCount: 1 })
+        ]);
+
+        expectAllFulfilled(results);
+        expect(await AffiliateCheckJob.countDocuments({ channelOwner: owner._id, mode: { $in: ["check_new", "check_reusable", "check_import"] } })).toBe(3);
+        expect(await AffiliateAssignment.countDocuments({ supervisorId: owner._id, source: "extract_base", status: "active" })).toBe(1);
+    });
+
+    test("extract_base quota exceeded is blocked without using channel guard", async () => {
+        await AffiliateCheckConfig.updateOne({ active: true }, { $set: { "dailyQuota.extractBase": 0 } });
+        const owner = user();
+        await createExtractState();
+        await expect(createAffiliateCheckJob({ user: owner, mode: "extract_base", requestedCount: 1 }))
+            .rejects.toMatchObject({ code: "DAILY_QUOTA_EXHAUSTED", statusCode: 429 });
+    });
+
+    test("concurrent extraction of one affiliate creates only one active assignment", async () => {
+        const owner = user();
+        await createExtractState();
+        const results = await Promise.allSettled([
+            createAffiliateCheckJob({ user: owner, mode: "extract_base", requestedCount: 1 }),
+            createAffiliateCheckJob({ user: owner, mode: "extract_base", requestedCount: 1 })
+        ]);
+        expect(results.filter(result => result.status === "fulfilled")).toHaveLength(2);
+        expect(await AffiliateAssignment.countDocuments({ supervisorId: owner._id, source: "extract_base", status: "active" })).toBe(1);
+    });
+
 });

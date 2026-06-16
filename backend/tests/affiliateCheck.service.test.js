@@ -22,7 +22,7 @@ const User = require("../src/models/User");
 const {
     AffiliateCheckError,
     assertActiveChannelAvailable,
-    assertInternalCheckRole,
+    assertAffiliateCheckRole,
     cancelAffiliateCheckJob,
     computeRetainedQuota,
     createAffiliateCheckJob,
@@ -1090,20 +1090,19 @@ describe("affiliateCheck.service", () => {
         expect(job.selectedCount).toBe(1);
     });
 
-    test("admin bypasses check_import quota if role exists", async () => {
+    test("admin cannot use check_import even if role exists", async () => {
         const user = userStub("admin");
         await AffiliateCheckConfig.updateOne(
             { active: true },
-            { $set: { "features.checkImportEnabled": true, "dailyQuota.checkImport": 0 } }
+            { $set: { "features.checkImportEnabled": true, "dailyQuota.checkImport": 10 } }
         );
         const importJob = await createExternalImport({ uploadedBy: user._id });
         const state = await createState({ saleStatus: "none" });
         await createImportRow(importJob._id, state.affiliateId);
 
-        const job = await createImportedAffiliateCheckJob({
+        await expect(createImportedAffiliateCheckJob({
             user, importJobId: importJob._id, requestedCount: 1
-        });
-        expect(job.selectedCount).toBe(1);
+        })).rejects.toMatchObject({ code: "INTERNAL_CHECK_ROLE_FORBIDDEN", statusCode: 403 });
     });
 
     test("supervisor is blocked when check_import quota exhausted", async () => {
@@ -1195,7 +1194,7 @@ describe("affiliateCheck.service", () => {
 
         await expect(createAffiliateCheckJob({
             user, mode: "check_new", requestedCount: 1
-        })).rejects.toMatchObject({ code: "ACTIVE_INTERNAL_JOB", statusCode: 409 });
+        })).rejects.toMatchObject({ code: "ACTIVE_CHECK_NEW_JOB", statusCode: 409 });
     });
 
     test("active channel guard allows creation after cancellation", async () => {
@@ -1259,22 +1258,22 @@ describe("affiliateCheck.service", () => {
             user, mode: "check_new", requestedCount: 1
         });
         expect(preview.canCreate).toBe(false);
-        expect(preview.blockedReason).toBe("active_internal_job");
+        expect(preview.blockedReason).toBe("active_check_new_job");
     });
 
-    test("assertInternalCheckRole blocks asesor from internal check", () => {
-        expect(() => assertInternalCheckRole(userStub("asesor"), "check_new"))
+    test("assertAffiliateCheckRole blocks asesor from internal check", () => {
+        expect(() => assertAffiliateCheckRole(userStub("asesor"), "check_new"))
             .toThrow(AffiliateCheckError);
     });
 
-    test("assertInternalCheckRole allows supervisor for internal check", () => {
-        expect(() => assertInternalCheckRole(userStub("supervisor"), "check_new"))
+    test("assertAffiliateCheckRole allows supervisor for internal check", () => {
+        expect(() => assertAffiliateCheckRole(userStub("supervisor"), "check_new"))
             .not.toThrow();
     });
 
-    test("assertInternalCheckRole skips for extract_base", () => {
-        expect(() => assertInternalCheckRole(userStub("asesor"), "extract_base"))
-            .not.toThrow();
+    test("assertAffiliateCheckRole blocks asesor from extract_base", () => {
+        expect(() => assertAffiliateCheckRole(userStub("asesor"), "extract_base"))
+            .toThrow(AffiliateCheckError);
     });
 
     test("cancel retains quota for rows that started processing", async () => {

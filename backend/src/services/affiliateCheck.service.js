@@ -62,28 +62,36 @@ function channelTypeForMode(mode) {
     return null;
 }
 
-function channelConflictError(channelType) {
-    const internal = channelType === "internal";
+function modeConflictMessage(mode) {
+    const messages = {
+        check_new: "Ya tienes un chequeo de datos nuevos activo.",
+        check_reusable: "Ya tienes un chequeo de datos reutilizables activo.",
+        check_import: "Ya tienes un chequeo mediante archivo activo."
+    };
+    return messages[mode] || "Ya tienes un chequeo activo para este modo.";
+}
+
+function channelConflictError(mode) {
     return new AffiliateCheckError(
-        internal
-            ? "Ya tienes un trabajo interno activo. Debes finalizarlo o cancelarlo antes de crear otro."
-            : "Ya tienes un chequeo de archivo externo activo. Debes finalizarlo antes de crear otro.",
+        modeConflictMessage(mode),
         409,
-        internal ? "ACTIVE_INTERNAL_JOB" : "ACTIVE_EXTERNAL_JOB"
+        `ACTIVE_${String(mode || "CHECK").toUpperCase()}_JOB`
     );
 }
 
 function isChannelDuplicateKey(error) {
     if (error?.code !== 11000) return false;
-    if (error?.keyPattern?.channelOwner && error?.keyPattern?.channelType) return true;
-    return String(error?.message || "").includes("uniq_active_affiliate_check_channel");
+    if (error?.keyPattern?.channelOwner && (error?.keyPattern?.mode || error?.keyPattern?.channelType)) return true;
+    const message = String(error?.message || "");
+    return message.includes("uniq_active_affiliate_check_channel")
+        || message.includes("uniq_active_affiliate_check_owner_mode");
 }
 
 async function createChannelProtectedJob(data) {
     try {
         return await AffiliateCheckJob.create(data);
     } catch (error) {
-        if (isChannelDuplicateKey(error)) throw channelConflictError(data.channelType);
+        if (isChannelDuplicateKey(error)) throw channelConflictError(data.mode);
         throw error;
     }
 }
@@ -230,12 +238,13 @@ function assertModeEnabled(config, mode) {
     }
 }
 
-function assertInternalCheckRole(user, mode) {
-    if (!INTERNAL_MODES.includes(mode)) return;
+function assertAffiliateCheckRole(user, mode) {
     const role = normalizeRole(user);
     if (!INTERNAL_CHECK_ROLES.includes(role)) {
         throw new AffiliateCheckError(
-            "El rol actual no puede ejecutar chequeos internos de afiliados",
+            INTERNAL_MODES.includes(mode)
+                ? "El rol actual no puede ejecutar chequeos internos de afiliados"
+                : "El rol actual no puede usar Chequeo de datos",
             403,
             "INTERNAL_CHECK_ROLE_FORBIDDEN"
         );
@@ -244,45 +253,40 @@ function assertInternalCheckRole(user, mode) {
 
 async function assertActiveChannelAvailable({ mode, ownerId, requestedBy }) {
     if (mode === "extract_base") return;
-    const isInternal = INTERNAL_MODES.includes(mode);
-    const channelModes = isInternal ? INTERNAL_MODES : EXTERNAL_MODES;
     const effectiveOwner = ownerId || requestedBy;
     if (!effectiveOwner) return;
 
     const activeJob = await AffiliateCheckJob.findOne({
-        mode: { $in: channelModes },
+        mode,
         status: { $in: ACTIVE_CHANNEL_STATUSES },
         isDeleted: { $ne: true },
         $or: [
-            { channelOwner: effectiveOwner, channelType: isInternal ? "internal" : "external" },
+            { channelOwner: effectiveOwner },
             { "ownership.supervisorId": effectiveOwner },
             { requestedBy: effectiveOwner, "ownership.supervisorId": null }
         ]
     }).select("_id mode status").lean();
 
     if (activeJob) {
-        const channelLabel = isInternal ? "interno" : "externo";
         throw new AffiliateCheckError(
-            `Ya existe un trabajo de chequeo ${channelLabel} activo para este supervisor. Esperá a que finalice o cancelalo antes de crear uno nuevo.`,
+            modeConflictMessage(mode),
             409,
-            isInternal ? "ACTIVE_INTERNAL_JOB" : "ACTIVE_EXTERNAL_JOB"
+            `ACTIVE_${String(mode).toUpperCase()}_JOB`
         );
     }
 }
 
 async function getActiveChannelStatus({ mode, ownerId, requestedBy }) {
     if (mode === "extract_base") return { canCreate: true, blockedReason: null };
-    const isInternal = INTERNAL_MODES.includes(mode);
-    const channelModes = isInternal ? INTERNAL_MODES : EXTERNAL_MODES;
     const effectiveOwner = ownerId || requestedBy;
     if (!effectiveOwner) return { canCreate: true, blockedReason: null };
 
     const activeJob = await AffiliateCheckJob.findOne({
-        mode: { $in: channelModes },
+        mode,
         status: { $in: ACTIVE_CHANNEL_STATUSES },
         isDeleted: { $ne: true },
         $or: [
-            { channelOwner: effectiveOwner, channelType: isInternal ? "internal" : "external" },
+            { channelOwner: effectiveOwner },
             { "ownership.supervisorId": effectiveOwner },
             { requestedBy: effectiveOwner, "ownership.supervisorId": null }
         ]
@@ -291,7 +295,7 @@ async function getActiveChannelStatus({ mode, ownerId, requestedBy }) {
     if (activeJob) {
         return {
             canCreate: false,
-            blockedReason: isInternal ? "active_internal_job" : "active_external_job",
+            blockedReason: `active_${mode}_job`,
             activeJobId: activeJob._id,
             activeJobMode: activeJob.mode,
             activeJobStatus: activeJob.status
@@ -386,7 +390,7 @@ async function previewAffiliateCheckSelection({
     obraSocial
 }) {
     validateMode(mode);
-    assertInternalCheckRole(user, mode);
+    assertAffiliateCheckRole(user, mode);
     const config = await getActiveCheckConfig();
     assertModeEnabled(config, mode);
 
@@ -461,7 +465,7 @@ async function getAffiliateCheckObraSocialAvailability({
     selectedCodes
 }) {
     validateMode(mode);
-    assertInternalCheckRole(user, mode);
+    assertAffiliateCheckRole(user, mode);
     const config = await getActiveCheckConfig();
     assertModeEnabled(config, mode);
     const result = await getInternalObraSocialAvailability({
@@ -844,6 +848,7 @@ async function createImportedAffiliateCheckJob({
     requestedCount,
     supervisorId = null
 }) {
+    assertAffiliateCheckRole(user, "check_import");
     if (!mongoose.isValidObjectId(importJobId)) {
         throw new AffiliateCheckError("ID de importación inválido");
     }
@@ -1091,7 +1096,7 @@ async function createAffiliateCheckJob({
     obraSocial
 }) {
     validateMode(mode);
-    assertInternalCheckRole(user, mode);
+    assertAffiliateCheckRole(user, mode);
     const config = await getActiveCheckConfig();
     assertModeEnabled(config, mode);
     const cleanedFilters = cleanFilters(filters);
@@ -1361,7 +1366,7 @@ module.exports = {
     MANAGER_ROLES,
     MODES,
     assertActiveChannelAvailable,
-    assertInternalCheckRole,
+    assertAffiliateCheckRole,
     assignExtractedBaseAffiliates,
     buildEligibilityQuery,
     cancelAffiliateCheckJob,

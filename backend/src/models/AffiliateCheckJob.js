@@ -144,13 +144,13 @@ affiliateCheckJobSchema.index({ requestedBy: 1, isDeleted: 1, createdAt: -1 });
 affiliateCheckJobSchema.index({ mode: 1, status: 1, createdAt: -1 });
 affiliateCheckJobSchema.index({ "ownership.supervisorId": 1, "ownership.expiresAt": 1 });
 affiliateCheckJobSchema.index(
-    { channelOwner: 1, channelType: 1 },
+    { channelOwner: 1, mode: 1 },
     {
-        name: "uniq_active_affiliate_check_channel",
+        name: "uniq_active_affiliate_check_owner_mode",
         unique: true,
         partialFilterExpression: {
             channelOwner: { $type: "objectId" },
-            channelType: { $in: ["internal", "external"] },
+            mode: { $in: ["check_new", "check_reusable", "check_import"] },
             status: { $in: ["pending", "processing", "pausing", "paused", "retrying", "stuck"] },
             isDeleted: false
         }

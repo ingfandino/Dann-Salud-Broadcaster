@@ -40,6 +40,7 @@ const {
     previewAffiliateCheckSelection
 } = require("../services/affiliateCheck.service");
 const { processAffiliateCheckJob } = require("../services/affiliateCheckProcessor.service");
+const { getAffiliateCheckDashboardSummary } = require("../services/affiliateCheckDashboard.service");
 const {
     AffiliateCheckOperationError,
     buildJobScope,
@@ -84,7 +85,7 @@ exports.requireSupervisorOrGerencia = (req, res, next) => {
     next();
 };
 
-const AFFILIATE_CHECK_ROLES = [...AFFILIATE_CHECK_MANAGER_ROLES, "supervisor"];
+const AFFILIATE_CHECK_ROLES = ["desarrollador", "gerencia", "encargado", "supervisor"];
 
 exports.requireAffiliateCheckAccess = (req, res, next) => {
     const role = String(req.user?.role || "").toLowerCase();
@@ -96,7 +97,7 @@ exports.requireAffiliateCheckAccess = (req, res, next) => {
 
 exports.requireAffiliateCheckConfigWrite = (req, res, next) => {
     const role = String(req.user?.role || "").toLowerCase();
-    if (!AFFILIATE_CHECK_MANAGER_ROLES.includes(role)) {
+    if (!["desarrollador", "gerencia", "encargado"].includes(role)) {
         return res.status(403).json({ success: false, message: "No tiene permisos para modificar la configuración" });
     }
     next();
@@ -208,6 +209,19 @@ exports.getAffiliateCheckObraSocialAvailability = async (req, res) => {
         return res.json({ success: true, ...result });
     } catch (error) {
         return handleAffiliateCheckError(res, error, "obra social availability");
+    }
+};
+
+exports.getAffiliateCheckDashboardSummary = async (req, res) => {
+    try {
+        const result = await getAffiliateCheckDashboardSummary({
+            user: req.user,
+            supervisorId: req.query?.supervisorId,
+            date: req.query?.date
+        });
+        return res.json(result);
+    } catch (error) {
+        return handleAffiliateCheckError(res, error, "dashboard summary");
     }
 };
 

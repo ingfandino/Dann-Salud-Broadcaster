@@ -6,7 +6,11 @@
   "scripts": {
     "test": "cross-env NODE_ENV=test jest --runInBand",
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "seed:obra-social-config": "node src/scripts/seedObraSocialConfig.js",
+    "audit:cansell-qr": "node src/scripts/auditCanSellQrHechoConsistency.js",
+    "migrate:affiliate-check-mode-index": "node src/scripts/migrateAffiliateCheckModeConcurrencyIndex.js",
+    "postinstall": "npx playwright install chromium"
   },
   "repository": {
     "type": "git",
@@ -50,7 +54,9 @@
     "whatsapp-web.js": "^1.34.1",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "ddddocr": "1.6.1",
+    "flask": "3.0.3"
   },
   "devDependencies": {
     "cross-env": "^10.0.0",

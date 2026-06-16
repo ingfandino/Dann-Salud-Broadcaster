@@ -582,6 +582,9 @@ interface AffiliateCheckJob {
     processedCount?: number
     eligibleCount?: number
     assignedCount?: number
+    assignedToStockCount?: number
+    generalStockCount?: number
+    assignedRowsCount?: number
     rejectedCount?: number
     failedCount?: number
     createdAt?: string
@@ -602,6 +605,23 @@ interface AffiliateCheckJob {
         lastProgressAt?: string | null
     }
     permissions?: { canPause?: boolean; canResume?: boolean; canRetry?: boolean; canExport?: boolean; canDelete?: boolean }
+}
+
+interface AffiliateCheckDashboardSummary {
+    quota?: {
+        extract?: { used?: number; limit?: number; remaining?: number }
+        checkNew?: { used?: number; limit?: number; remaining?: number }
+        checkReusable?: { used?: number; limit?: number; remaining?: number }
+    }
+    summary?: {
+        checksPerformedToday?: number
+        jobsCreatedToday?: number
+        activeAssignments?: number
+        eligibleRowsToday?: number
+        assignedToStockToday?: number
+        generalStockToday?: number
+        errorsToday?: number
+    }
 }
 
 interface ModeCardConfig {
@@ -704,6 +724,7 @@ export function ChequeoDatos() {
 
     const [config, setConfig] = useState<AffiliateCheckConfig | null>(null)
     const [baseStatus, setBaseStatus] = useState<BaseStatus | null>(null)
+    const [dashboardSummary, setDashboardSummary] = useState<AffiliateCheckDashboardSummary | null>(null)
     const [jobs, setJobs] = useState<AffiliateCheckJob[]>([])
     const [selectedJobsDate, setSelectedJobsDate] = useState(() => argentinaTodayInputValue())
     const [jobsLoading, setJobsLoading] = useState(false)
@@ -777,19 +798,21 @@ export function ChequeoDatos() {
         setError(null)
 
         try {
-            const [configRes, statusRes] = await Promise.all([
+            const [configRes, statusRes, summaryRes] = await Promise.all([
                 api.affiliates.check.getConfig(),
                 api.affiliates.baseStatus(),
+                api.affiliates.check.getDashboardSummary({ date: selectedJobsDate }),
             ])
 
             setConfig(configRes.data?.config || null)
             setBaseStatus(statusRes.data || null)
+            setDashboardSummary(summaryRes.data || null)
         } catch (err: any) {
             setError(err.response?.data?.message || err.response?.data?.error || "No se pudo cargar Chequeo de Datos")
         } finally {
             setLoading(false)
         }
-    }, [canAccess])
+    }, [canAccess, selectedJobsDate])
 
     const loadJobs = useCallback(async (showLoading = false) => {
         if (!canAccess) return
@@ -870,14 +893,8 @@ export function ChequeoDatos() {
     }, [canAccess, loadJobs])
 
     const totals = baseStatus?.totals || {}
-    const pendingJobsCount = useMemo(
-        () => jobs.filter(job => ["pending", "processing"].includes(job.status)).length,
-        [jobs],
-    )
-    const dailyQuotaTotal = useMemo(() => {
-        if (!config?.dailyQuota) return null
-        return (config.dailyQuota.checkNew || 0) + (config.dailyQuota.checkReusable || 0) + (config.dailyQuota.extractBase || 0)
-    }, [config])
+    const quotaSummary = dashboardSummary?.quota || {}
+    const dailySummary = dashboardSummary?.summary || {}
 
     const modeCards: ModeCardConfig[] = [
         {
@@ -1034,7 +1051,7 @@ export function ChequeoDatos() {
             const res = await api.affiliates.check.preview(payload)
             setPreviewResult(res.data)
             if (res.data?.canCreate === false) {
-                setModalError("Ya existe un trabajo activo en este canal. Esperá a que finalice o cancelalo antes de crear uno nuevo.")
+                setModalError("Ya existe un trabajo activo para este modo. Esperá a que finalice o cancelalo antes de crear otro igual.")
             }
         } catch (err: any) {
             setModalError(err.response?.data?.message || err.response?.data?.error || "Error en la previsualización")
@@ -1058,7 +1075,7 @@ export function ChequeoDatos() {
             return
         }
         if (previewResult?.canCreate === false) {
-            setModalError("Ya existe un trabajo activo en este canal. No se puede crear otro hasta que finalice.")
+            setModalError("Ya existe un trabajo activo para este modo. No se puede crear otro igual hasta que finalice.")
             return
         }
         setCreateLoading(true)
@@ -1187,9 +1204,9 @@ export function ChequeoDatos() {
                         <button type="button" disabled className="text-xs font-semibold text-blue-500 disabled:opacity-50">Ver detalle de cupos</button>
                     </div>
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                        <CupoProgressBar label="Chequear nuevos" color="emerald" quota={config?.dailyQuota?.checkNew} loading={loading} />
-                        <CupoProgressBar label="Chequear reutilizables" color="violet" quota={config?.dailyQuota?.checkReusable} loading={loading} />
-                        <CupoProgressBar label="Extraer de base" color="blue" quota={config?.dailyQuota?.extractBase} loading={loading} />
+                        <CupoProgressBar label="Chequear nuevos" color="emerald" quota={quotaSummary.checkNew?.limit ?? config?.dailyQuota?.checkNew} used={quotaSummary.checkNew?.used} remaining={quotaSummary.checkNew?.remaining} loading={loading} />
+                        <CupoProgressBar label="Chequear reutilizables" color="violet" quota={quotaSummary.checkReusable?.limit ?? config?.dailyQuota?.checkReusable} used={quotaSummary.checkReusable?.used} remaining={quotaSummary.checkReusable?.remaining} loading={loading} />
+                        <CupoProgressBar label="Extraer de base" color="blue" quota={quotaSummary.extract?.limit ?? config?.dailyQuota?.extractBase} used={quotaSummary.extract?.used} remaining={quotaSummary.extract?.remaining} loading={loading} />
                     </div>
                 </div>
 
@@ -1215,9 +1232,9 @@ export function ChequeoDatos() {
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                         <MiniStat label="Datos disponibles totales" value={formatCheckNumber(totals.availableForSale)} loading={loading} icon={<Database className="h-4 w-4" />} color="emerald" />
-                        <MiniStat label="Asignaciones activas" value="—" loading={loading} icon={<Users className="h-4 w-4" />} color="blue" />
+                        <MiniStat label="Asignaciones activas" value={formatCheckNumber(dailySummary.activeAssignments)} loading={loading} icon={<Users className="h-4 w-4" />} color="blue" />
                         <MiniStat label="Vencimientos próximos" value={formatCheckNumber(totals.expired)} loading={loading} icon={<Clock className="h-4 w-4" />} color="violet" />
-                        <MiniStat label="Chequeos realizados hoy" value={formatCheckNumber(pendingJobsCount)} loading={loading} icon={<CheckCircle2 className="h-4 w-4" />} color="orange" />
+                        <MiniStat label="Chequeos realizados hoy" value={formatCheckNumber(dailySummary.checksPerformedToday)} loading={loading} icon={<CheckCircle2 className="h-4 w-4" />} color="orange" />
                     </div>
                 </div>
             </section>
@@ -1532,7 +1549,7 @@ export function ChequeoDatos() {
     )
 }
 
-function CupoProgressBar({ label, color, quota, loading }: { label: string; color: "emerald" | "violet" | "blue"; quota?: number; loading: boolean }) {
+function CupoProgressBar({ label, color, quota, used, remaining, loading }: { label: string; color: "emerald" | "violet" | "blue"; quota?: number; used?: number; remaining?: number; loading: boolean }) {
     const colorMap = {
         emerald: { text: "text-emerald-600", bar: "bg-emerald-500" },
         violet: { text: "text-violet-600", bar: "bg-violet-500" },
@@ -1540,18 +1557,21 @@ function CupoProgressBar({ label, color, quota, loading }: { label: string; colo
     }
     const c = colorMap[color]
     const q = quota ?? 0
+    const usedValue = Math.max(0, Number(used || 0))
+    const remainingValue = remaining ?? Math.max(0, q - usedValue)
+    const percent = q > 0 ? Math.min(100, Math.round((usedValue / q) * 100)) : 0
 
     return (
         <div className="min-w-0">
             <p className="truncate text-xs font-medium text-slate-600">{label}</p>
             <div className="mt-3 flex items-end gap-1">
-                <span className="text-xl font-bold text-slate-950">{loading ? "—" : "0"}</span>
+                <span className="text-xl font-bold text-slate-950">{loading ? "—" : formatCheckNumber(usedValue)}</span>
                 <span className="pb-0.5 text-xs text-slate-400">/ {loading ? "—" : formatCheckNumber(q)}</span>
             </div>
             <div className="mt-3 h-2 rounded-full bg-slate-100">
-                <div className={cn("h-2 rounded-full transition-all duration-500", c.bar)} style={{ width: "0%" }} />
+                <div className={cn("h-2 rounded-full transition-all duration-500", c.bar)} style={{ width: `${percent}%` }} />
             </div>
-            <p className={cn("mt-2 text-xs font-medium", c.text)}>Restantes: {loading ? "—" : formatCheckNumber(q)}</p>
+            <p className={cn("mt-2 text-xs font-medium", c.text)}>Restantes: {loading ? "—" : formatCheckNumber(remainingValue)}</p>
         </div>
     )
 }
@@ -2227,8 +2247,8 @@ function RecentCheckJobsTable({
             </div>
             <div className="hidden md:block">
                 <table className="w-full table-fixed text-left text-sm">
-                    <colgroup><col className="w-[13%]" /><col className="w-[14%]" /><col className="w-[35%]" /><col className="w-[7%]" /><col className="w-[8%]" /><col className="w-[13%]" /><col className="w-[10%]" /></colgroup>
-                    <thead className="border-b border-slate-100 text-xs font-semibold text-slate-500"><tr><th className="px-3 py-3">Fecha</th><th className="px-3 py-3">Tipo</th><th className="px-3 py-3">Progreso</th><th className="px-2 py-3 text-right">Aptos</th><th className="px-2 py-3 text-right">Asignados</th><th className="px-2 py-3">Estado</th><th className="px-2 py-3 text-right">Acciones</th></tr></thead>
+                    <colgroup><col className="w-[13%]" /><col className="w-[14%]" /><col className="w-[35%]" /><col className="w-[7%]" /><col className="w-[10%]" /><col className="w-[11%]" /><col className="w-[10%]" /></colgroup>
+                    <thead className="border-b border-slate-100 text-xs font-semibold text-slate-500"><tr><th className="px-3 py-3">Fecha</th><th className="px-3 py-3">Tipo</th><th className="px-3 py-3">Progreso</th><th className="px-2 py-3 text-right">Aptos</th><th className="px-2 py-3 text-right">Asignados al stock</th><th className="px-2 py-3">Estado</th><th className="px-2 py-3 text-right">Acciones</th></tr></thead>
                     <tbody className="divide-y divide-slate-100">
                         {loading && jobs.length === 0 ? <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-500">Cargando trabajos recientes...</td></tr> : empty ? <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-500">{emptyMessage}</td></tr> : jobs.map(job => {
                             const busy = actingJobId === job._id || cancellingJobId === job._id
@@ -2237,7 +2257,7 @@ function RecentCheckJobsTable({
                                 <td className="break-words px-3 py-3 text-xs font-semibold leading-5 text-slate-800">{checkModeLabel(job.mode)}</td>
                                 <td className="px-3 py-3"><JobProgressDetails job={job} /></td>
                                 <td className="px-2 py-3 text-right font-medium text-slate-700">{formatCheckNumber(job.eligibleCount)}</td>
-                                <td className="px-2 py-3 text-right font-medium text-slate-700">{formatCheckNumber(job.assignedCount)}</td>
+                                <td className="px-2 py-3 text-right font-medium text-slate-700">{formatCheckNumber(job.assignedToStockCount ?? job.assignedCount)}</td>
                                 <td className="px-2 py-3"><span className={cn("inline-flex max-w-full whitespace-normal break-words rounded-full border px-2 py-1 text-[10px] font-bold uppercase leading-4", checkStatusClasses(job.status))}>{currentPhase(job)}</span>{job.pendingTooLong && <p className="mt-1 text-[10px] leading-4 text-amber-700">En espera por más tiempo del previsto</p>}</td>
                                 <td className="px-2 py-3 text-right"><JobActions job={job} busy={busy} canCancel={canCancelJob(job)} onCancel={() => onCancel(job)} onAction={action => onAction(job, action)} /></td>
                             </tr>
@@ -2251,7 +2271,7 @@ function RecentCheckJobsTable({
                     return <article key={job._id} className="space-y-3 p-4">
                         <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs text-slate-500">{formatCheckDate(job.createdAt)}</p><p className="mt-0.5 font-semibold text-slate-900">{checkModeLabel(job.mode)}</p></div><span className={cn("max-w-[45%] whitespace-normal rounded-full border px-2 py-1 text-center text-[10px] font-bold uppercase leading-4", checkStatusClasses(job.status))}>{currentPhase(job)}</span></div>
                         <JobProgressDetails job={job} />
-                        <div className="flex items-center justify-between gap-3 text-xs text-slate-600"><span>Aptos: <strong>{formatCheckNumber(job.eligibleCount)}</strong> · Asignados: <strong>{formatCheckNumber(job.assignedCount)}</strong></span><JobActions job={job} busy={busy} canCancel={canCancelJob(job)} onCancel={() => onCancel(job)} onAction={action => onAction(job, action)} /></div>
+                        <div className="flex items-center justify-between gap-3 text-xs text-slate-600"><span>Aptos: <strong>{formatCheckNumber(job.eligibleCount)}</strong> · Stock: <strong>{formatCheckNumber(job.assignedToStockCount ?? job.assignedCount)}</strong></span><JobActions job={job} busy={busy} canCancel={canCancelJob(job)} onCancel={() => onCancel(job)} onAction={action => onAction(job, action)} /></div>
                     </article>
                 })}
             </div>
