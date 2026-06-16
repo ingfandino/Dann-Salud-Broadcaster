@@ -922,15 +922,44 @@ describe("affiliateCheck.service", () => {
         }
     });
 
-    test("affiliate check access middleware blocks unsupported roles", () => {
-        const res = responseStub();
-        const next = jest.fn();
-        affiliateController.requireAffiliateCheckAccess({
-            user: { role: "asesor" }
-        }, res, next);
+    test("affiliate check access middleware enforces the internal role matrix", () => {
+        const allowedRoles = ["supervisor", "gerencia", "encargado", "desarrollador"];
+        const deniedRoles = ["asesor", "independiente", "auditor", "admin", "capacitador", "administrativo"];
 
-        expect(res.statusCode).toBe(403);
-        expect(next).not.toHaveBeenCalled();
+        for (const role of allowedRoles) {
+            const res = responseStub();
+            const next = jest.fn();
+            affiliateController.requireAffiliateCheckAccess({ user: { role } }, res, next);
+            expect(res.statusCode).toBe(200);
+            expect(next).toHaveBeenCalledTimes(1);
+        }
+
+        for (const role of deniedRoles) {
+            const res = responseStub();
+            const next = jest.fn();
+            affiliateController.requireAffiliateCheckAccess({ user: { role } }, res, next);
+            expect(res.statusCode).toBe(403);
+            expect(next).not.toHaveBeenCalled();
+        }
+    });
+
+    test("affiliate check dashboard summary route is registered before dynamic job routes", () => {
+        const affiliateRoutes = require("../src/routes/affiliates");
+        const routePaths = affiliateRoutes.stack
+            .filter(layer => layer.route)
+            .map(layer => layer.route.path);
+
+        const dashboardIndex = routePaths.indexOf("/check/dashboard-summary");
+        const dynamicJobIndex = routePaths.indexOf("/check/jobs/:jobId");
+        const dashboardRoute = affiliateRoutes.stack.find(layer =>
+            layer.route?.path === "/check/dashboard-summary"
+            && layer.route?.methods?.get
+        );
+
+        expect(dashboardIndex).toBeGreaterThanOrEqual(0);
+        expect(dynamicJobIndex).toBeGreaterThanOrEqual(0);
+        expect(dashboardIndex).toBeLessThan(dynamicJobIndex);
+        expect(dashboardRoute).toBeTruthy();
     });
 
     test("external upload is a wrapper around the shared asynchronous import pipeline", async () => {

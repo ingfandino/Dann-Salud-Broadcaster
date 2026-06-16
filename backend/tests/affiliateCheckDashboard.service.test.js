@@ -105,6 +105,7 @@ describe("affiliate check dashboard and result counters", () => {
     test("summary uses durable assignments for extraction and validates Gerencia target supervisor", async () => {
         const supervisor = await User.create({ username: "sup4", nombre: "Supervisor 4", email: "sup4@example.com", password: "password123", role: "supervisor", active: true });
         const gerencia = await User.create({ username: "ger1", nombre: "Gerencia", email: "ger1@example.com", password: "password123", role: "gerencia", active: true });
+        const encargado = await User.create({ username: "enc1", nombre: "Encargado", email: "enc1@example.com", password: "password123", role: "encargado", active: true });
         const affiliateId = oid();
         await AffiliateAssignment.create({
             affiliateId,
@@ -147,6 +148,16 @@ describe("affiliate check dashboard and result counters", () => {
         expect(result.quota.extract.used).toBe(2);
         expect(result.summary.jobsCreatedToday).toBe(0);
         expect(result.summary.activeAssignments).toBe(1);
+
+        const encargadoResult = await getAffiliateCheckDashboardSummary({
+            user: { _id: encargado._id, role: "encargado" },
+            supervisorId: supervisor._id,
+            date: "2026-06-16",
+            now: new Date("2026-06-16T15:00:00.000Z")
+        });
+
+        expect(encargadoResult.supervisorId).toBe(String(supervisor._id));
+        expect(encargadoResult.success).toBe(true);
     });
 
     test("assigned-to-stock is based on active assignments and never exceeds eligible rows", async () => {

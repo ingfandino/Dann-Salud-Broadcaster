@@ -11,7 +11,7 @@ const { AffiliateCheckError, getActiveCheckConfig } = require("./affiliateCheck.
 const ARGENTINA_TIME_ZONE = "America/Argentina/Buenos_Aires";
 const TERMINAL_ROW_STATUSES = ["eligible", "assigned", "rejected", "failed", "cancelled"];
 const SUPERVISOR_ROLES = ["supervisor", "supervisor_reventa"];
-const TARGET_VIEW_ROLES = ["gerencia", "desarrollador"];
+const TARGET_VIEW_ROLES = ["gerencia", "desarrollador", "encargado"];
 
 function normalizeRole(user) {
     return String(user?.role || "").trim().toLowerCase();

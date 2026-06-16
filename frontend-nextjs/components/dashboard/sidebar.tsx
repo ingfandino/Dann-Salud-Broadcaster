@@ -247,6 +247,7 @@ export function Sidebar({ activeSection, onSectionChange, isMobileOpen, onClose,
       return menuItems.filter(item => {
         if (item.id === 'mensajeria-interna') return true
         if (item.id === 'auditorias') return true
+        if (item.id === 'herramientas-contacto') return true
         return false
       }).map(item => {
         if (item.id === 'auditorias' && item.submenu) {

@@ -69,6 +69,7 @@ router.get("/base-status", affiliateController.requireSupervisorOrGerencia, affi
 // Chequeo de datos (Phase 4A: contratos, cuotas y trabajos; sin workers)
 router.get("/check/config", affiliateController.requireAffiliateCheckAccess, affiliateController.getAffiliateCheckConfig);
 router.put("/check/config", affiliateController.requireAffiliateCheckConfigWrite, affiliateController.updateAffiliateCheckConfig);
+router.get("/check/dashboard-summary", affiliateController.requireAffiliateCheckAccess, affiliateController.getAffiliateCheckDashboardSummary);
 router.post("/check/preview", affiliateController.requireAffiliateCheckAccess, affiliateController.previewAffiliateCheck);
 router.post("/check/obra-social-availability", affiliateController.requireAffiliateCheckAccess, affiliateController.getAffiliateCheckObraSocialAvailability);
 router.post("/check/jobs", affiliateController.requireAffiliateCheckAccess, affiliateController.createAffiliateCheckJob);
