@@ -22,6 +22,7 @@ const ExcelJS = require("exceljs");
 const logger = require("../utils/logger");
 const { processJob } = require("../services/sendMessageService");
 const { emitJobProgress, emitJobsUpdate } = require("../config/socket");
+const { canAccessSendJob, canControlSendJob } = require("../utils/sendJobAccess");
 
 /** Crea un nuevo trabajo de envío masivo */
 exports.startJob = async (req, res) => {
@@ -37,6 +38,20 @@ exports.startJob = async (req, res) => {
         // ✅ CORRECCIÓN: Deduplicar contactos por teléfono antes de crear el job
         const Contact = require('../models/Contact');
         const contactDocs = await Contact.find({ _id: { $in: contacts } }).lean();
+
+        if (contactDocs.length !== contacts.length) {
+            return res.status(400).json({ error: "La campaña contiene contactos inexistentes" });
+        }
+
+        const role = String(req.user?.role || "").toLowerCase();
+        if (role === "independiente") {
+            const hasForeignContact = contactDocs.some(contact =>
+                String(contact.createdBy || "") !== String(createdBy)
+            );
+            if (hasForeignContact) {
+                return res.status(403).json({ error: "No puedes usar contactos de otro usuario" });
+            }
+        }
 
         const normalizePhone = (raw) => {
             let digits = String(raw || "").replace(/\D/g, "");
@@ -201,11 +216,7 @@ exports.pauseJob = async (req, res) => {
         const job = await SendJob.findById(req.params.id);
         if (!job) return res.status(404).json({ error: "Job no encontrado" });
 
-        const role = String(req.user?.role || '').toLowerCase();
-        const isPrivileged = ["admin", "supervisor", "gerencia"].includes(role);
-        const isOwner = job.createdBy && job.createdBy.equals(req.user._id);
-        const canControl = ["asesor", "auditor"].includes(role) && isOwner;
-        if (!isPrivileged && !canControl) {
+        if (!canControlSendJob(req.user, job)) {
             return res.status(403).json({ error: "No tienes permisos para pausar este job" });
         }
 
@@ -247,11 +258,7 @@ exports.resumeJob = async (req, res) => {
         const job = await SendJob.findById(req.params.id);
         if (!job) return res.status(404).json({ error: "Job no encontrado" });
 
-        const role = String(req.user?.role || '').toLowerCase();
-        const isPrivileged = ["admin", "supervisor", "gerencia"].includes(role);
-        const isOwner = job.createdBy && job.createdBy.equals(req.user._id);
-        const canControl = ["asesor", "auditor"].includes(role) && isOwner;
-        if (!isPrivileged && !canControl) {
+        if (!canControlSendJob(req.user, job)) {
             return res.status(403).json({ error: "No tienes permisos para reanudar este job" });
         }
 
@@ -303,11 +310,7 @@ exports.cancelJob = async (req, res) => {
         const job = await SendJob.findById(req.params.id);
         if (!job) return res.status(404).json({ error: "Job no encontrado" });
 
-        const role = String(req.user?.role || '').toLowerCase();
-        const isPrivileged = ["admin", "supervisor", "gerencia"].includes(role);
-        const isOwner = job.createdBy && job.createdBy.equals(req.user._id);
-        const canControl = ["asesor", "auditor"].includes(role) && isOwner;
-        if (!isPrivileged && !canControl) {
+        if (!canControlSendJob(req.user, job)) {
             return res.status(403).json({ error: "No tienes permisos para cancelar este job" });
         }
 
@@ -346,21 +349,7 @@ exports.getJob = async (req, res) => {
             .populate("contacts", "nombre telefono")
             .populate("createdBy", "_id role numeroEquipo");
         if (!job) return res.status(404).json({ error: "Job no encontrado" });
-        const role = String(req.user?.role || '').toLowerCase();
-        const userId = req.user?._id?.toString();
-        const userEquipo = req.user?.numeroEquipo || null;
-        const allowAll = ["admin", "gerencia", "encargado"].includes(role);
-        let allowed = allowAll;
-        if (!allowed) {
-            if (role === "supervisor") {
-                allowed = (job.createdBy?.numeroEquipo && job.createdBy.numeroEquipo === userEquipo);
-            } else if (role === "asesor") {
-                allowed = job.createdBy && job.createdBy._id && job.createdBy._id.toString() === userId;
-            } else {
-                allowed = false;
-            }
-        }
-        if (!allowed) return res.status(403).json({ error: "No autorizado" });
+        if (!canAccessSendJob(req.user, job)) return res.status(403).json({ error: "No autorizado" });
 
         const total = job.stats?.total || job.contacts?.length || 0;
         const processed = (job.stats?.sent || 0) + (job.stats?.failed || 0);
@@ -462,8 +451,11 @@ exports.listJobs = async (req, res) => {
 exports.exportJobResultsExcel = async (req, res) => {
     try {
         const { id } = req.params;
-        const job = await SendJob.findById(id).populate("contacts");
+        const job = await SendJob.findById(id)
+            .populate("contacts")
+            .populate("createdBy", "_id role numeroEquipo");
         if (!job) return res.status(404).json({ error: "Job no encontrado" });
+        if (!canAccessSendJob(req.user, job)) return res.status(403).json({ error: "No autorizado" });
 
         const messages = await Message.find({ job: id }).populate("contact");
 
@@ -519,26 +511,9 @@ exports.exportAutoResponseReport = async (req, res) => {
         const Contact = require("../models/Contact");
 
         // Obtener job para verificar permisos
-        const job = await SendJob.findById(id);
+        const job = await SendJob.findById(id).populate("createdBy", "_id role numeroEquipo");
         if (!job) return res.status(404).json({ error: "Job no encontrado" });
-
-        // Verificar permisos (similar a exportJobResultsExcel)
-        const userRole = req.user?.role?.toLowerCase();
-        const userId = req.user?._id;
-
-        if (!["admin", "gerencia", "encargado"].includes(userRole)) {
-            if (userRole === "supervisor") {
-                const jobCreatorEquipo = job.createdBy?.numeroEquipo;
-                const userEquipo = req.user?.numeroEquipo;
-                if (jobCreatorEquipo !== userEquipo) {
-                    return res.status(403).json({ error: "No autorizado" });
-                }
-            } else if (userRole === "asesor") {
-                if (String(job.createdBy) !== String(userId)) {
-                    return res.status(403).json({ error: "No autorizado" });
-                }
-            }
-        }
+        if (!canAccessSendJob(req.user, job)) return res.status(403).json({ error: "No autorizado" });
 
         // Obtener logs de auto-respuestas para este job
         const logs = await AutoResponseLog.find({ job: id })

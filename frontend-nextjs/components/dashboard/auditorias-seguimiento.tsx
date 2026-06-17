@@ -19,60 +19,11 @@ import {
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
+import { useSocialHealthList } from "@/hooks/useSocialHealthList"
+import { SearchableSocialHealthSelect } from "./searchable-social-health-select"
 import * as XLSX from "xlsx"
 import { AuditEditModal } from "./audit-edit-modal"
 import { connectSocket, getSocket } from "@/lib/socket"
-
-/* Constantes: Obras sociales argentinas */
-const ARGENTINE_OBRAS_SOCIALES = [
-  "OSDE",
-  "OSDEPYM",
-  "IOMA",
-  "OSSEG",
-  "OSDE 210",
-  "OSFATUN",
-  "OSDE GBA",
-  "OSECAC (126205)",
-  "OSPRERA",
-  "OMINT",
-  "OSSEGUR",
-  "OSPR",
-  "OSUTHGRA (108803)",
-  "OSBLYCA",
-  "UOM",
-  "OSPM",
-  "OSPECON (105408)",
-  "Elevar (114307)",
-  "OSCHOCA (105804)",
-  "OSPEP (113908)",
-  "OSPROTURA",
-  "OSPSIP (119708)",
-  "OSEIV (122401)",
-  "OSPIF (108100)",
-  "OSIPA (114208)",
-  "OSPESESGYPE (107206)",
-  "OSTCARA (126007)",
-  "OSPIT (121002)",
-  "OSMP (111209)",
-  "OSPECA (103709)",
-  "OSPIQYP (118705)",
-  "OSBLYCA (102904)",
-  "VIASANO (2501)",
-  "OSPCYD (103402)",
-  "OSUOMRA (112103)",
-  "OSAMOC (3405)",
-  "OSPAGA (101000)",
-  "OSPF (107404)",
-  "OSPIP (116006)",
-  "OSPIC",
-  "OSG (109202)",
-  "OSPERYH (106500)",
-  "OSPCRA (104009)",
-  "OSPMA (700108)",
-  "HOMINIS (901501)",
-  "OSCTCP (121606)",
-  "OSMA (112509)"
-]
 
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
 
@@ -406,6 +357,7 @@ const getRowBackgroundByStatus = (status: string, theme: string) => {
 export function AuditoriasSeguimiento() {
   const { theme } = useTheme()
   const { user } = useAuth()
+  const { options: obraSocialAnteriorOptions, loading: obrasLoading } = useSocialHealthList()
 
   /* Estado principal */
   const [audits, setAudits] = useState<Audit[]>([])
@@ -1046,19 +998,15 @@ export function AuditoriasSeguimiento() {
                 : "bg-white border-gray-200 text-gray-800 placeholder-gray-400",
             )}
           />
-          <select
+          <SearchableSocialHealthSelect
             value={filters.obraAnterior}
-            onChange={(e) => handleFilterChange("obraAnterior", e.target.value)}
-            className={cn(
-              "px-3 py-2 rounded-lg border text-sm",
-              theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800",
-            )}
-          >
-            <option value="">Obra social anterior</option>
-            {ARGENTINE_OBRAS_SOCIALES.map((o) => (
-              <option key={o} value={o}>{o}</option>
-            ))}
-          </select>
+            onChange={(value) => handleFilterChange("obraAnterior", value)}
+            options={obraSocialAnteriorOptions}
+            disabled={obrasLoading}
+            placeholder="Obra social anterior"
+            theme={theme}
+            className="min-w-[180px]"
+          />
           <select
             value={filters.obraVendida}
             onChange={(e) => handleFilterChange("obraVendida", e.target.value)}

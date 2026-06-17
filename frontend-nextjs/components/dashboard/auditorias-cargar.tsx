@@ -18,55 +18,9 @@ import {
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
+import { useSocialHealthList } from "@/hooks/useSocialHealthList"
+import { SearchableSocialHealthSelect } from "./searchable-social-health-select"
 import * as XLSX from "xlsx"
-
-/* Constantes: Obras sociales argentinas */
-const ARGENTINE_OBRAS_SOCIALES = [
-    "OSDE",
-    "OSDEPYM",
-    "IOMA",
-    "OSSEG",
-    "OSDE 210",
-    "OSFATUN",
-    "OSDE GBA",
-    "OSECAC (126205)",
-    "OSPRERA",
-    "OMINT",
-    "OSSEGUR",
-    "OSPR",
-    "OSUTHGRA (108803)",
-    "OSBLYCA",
-    "UOM",
-    "OSPM",
-    "OSPECON (105408)",
-    "Elevar (114307)",
-    "OSCHOCA (105804)",
-    "OSPEP (113908)",
-    "OSPROTURA",
-    "OSPSIP (119708)",
-    "OSEIV (122401)",
-    "OSPIF (108100)",
-    "OSIPA (114208)",
-    "OSPESESGYPE (107206)",
-    "OSTCARA (126007)",
-    "OSPIT (121002)",
-    "OSMP (111209)",
-    "OSPECA (103709)",
-    "OSPIQYP (118705)",
-    "OSBLYCA (102904)",
-    "VIASANO (2501)",
-    "OSPCYD (103402)",
-    "OSUOMRA (112103)",
-    "OSAMOC (3405)",
-    "OSPAGA (101000)",
-    "OSPF (107404)",
-    "OSPIP (116006)",
-    "OSPIC",
-    "OSG (109202)",
-    "OSPERYH (106500)",
-    "OSPCRA (104009)",
-    "OSPMA (700108)"
-]
 
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
 
@@ -82,6 +36,7 @@ interface User {
 export function AuditoriasCargar() {
     const { theme } = useTheme()
     const { user } = useAuth()
+    const { options: obraSocialAnteriorOptions, loading: obrasLoading } = useSocialHealthList()
 
     // Form State
     const [form, setForm] = useState({
@@ -459,19 +414,14 @@ export function AuditoriasCargar() {
 
                         <div>
                             <label className="block text-sm font-medium mb-1">Obra Social Anterior</label>
-                            <select
+                            <SearchableSocialHealthSelect
                                 value={form.obraSocialAnterior}
-                                onChange={(e) => setForm({ ...form, obraSocialAnterior: e.target.value })}
-                                className={cn(
-                                    "w-full px-3 py-2 rounded-lg border text-sm",
-                                    theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200"
-                                )}
-                            >
-                                <option value="">Seleccionar...</option>
-                                {ARGENTINE_OBRAS_SOCIALES.map(os => (
-                                    <option key={os} value={os}>{os}</option>
-                                ))}
-                            </select>
+                                onChange={(value) => setForm({ ...form, obraSocialAnterior: value })}
+                                options={obraSocialAnteriorOptions}
+                                disabled={obrasLoading}
+                                placeholder="Seleccionar..."
+                                theme={theme}
+                            />
                         </div>
 
                         <div>

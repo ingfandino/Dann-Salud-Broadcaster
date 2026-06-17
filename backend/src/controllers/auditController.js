@@ -24,6 +24,7 @@ const {
 } = require("../config/socket");
 const { Parser } = require('json2csv');
 const logger = require("../utils/logger");
+const { maskAuditPhoneIfNeeded } = require("../utils/auditPhoneVisibility");
 const {
     notifyAuditDeleted,
     notifyAuditCreated,
@@ -674,6 +675,17 @@ exports.getAuditsByDate = async (req, res) => {
                           };
                 }
             }
+        }
+
+        const userRole = (req.user?.role || "").toLowerCase();
+        const currentUserId = req.user?._id?.toString();
+
+        if (userRole === "supervisor" && currentUserId && audits.length > 0) {
+            audits = audits.map(audit => {
+                const auditSupervisorId = audit.supervisorSnapshot?._id?.toString();
+                const existingCanViewPhone = !!auditSupervisorId && auditSupervisorId === currentUserId;
+                return maskAuditPhoneIfNeeded(audit, req.user, existingCanViewPhone);
+            });
         }
 
         res.json(audits);

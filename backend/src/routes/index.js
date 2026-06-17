@@ -42,6 +42,7 @@ const evidenciaRoutes = require("./evidencias");
 const expenseRoutes = require("./expenses");
 const privilegeRoutes = require("./privilegeRoutes");
 const affiliateContributionRoutes = require("./affiliateContributions");
+const socialHealthListRoutes = require("./socialHealthListRoutes");
 
 // 📌 Rutas públicas
 router.use("/auth", authRoutes);
@@ -101,5 +102,6 @@ router.use("/evidencias", evidenciaRoutes);
 router.use("/expenses", expenseRoutes);
 router.use("/privileges", privilegeRoutes);
 router.use("/affiliate-contributions", affiliateContributionRoutes);
+router.use("/social-health-list", socialHealthListRoutes);
 
 module.exports = router;

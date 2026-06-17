@@ -35,17 +35,17 @@ logger.info("➡️ [sendJobRoutes] Llamando a sendJobController.startJob()");
 );
 
 // Controles
-router.post("/:id/pause", requireAuth, permit("asesor", "auditor", "supervisor", "administrativo", "gerencia", "recuperador", "encargado"), async (req, res) => {
+router.post("/:id/pause", requireAuth, permit("asesor", "auditor", "supervisor", "administrativo", "gerencia", "recuperador", "encargado", "independiente"), async (req, res) => {
 logger.info(`🚦 [sendJobRoutes] POST /send-jobs/${req.params.id}/pause`);
     await sendJobController.pauseJob(req, res);
 });
-router.post("/:id/resume", requireAuth, permit("asesor", "auditor", "supervisor", "administrativo", "gerencia", "recuperador", "encargado"), async (req, res) => {
+router.post("/:id/resume", requireAuth, permit("asesor", "auditor", "supervisor", "administrativo", "gerencia", "recuperador", "encargado", "independiente"), async (req, res) => {
     logger.info(`🚦 [sendJobRoutes] POST /send-jobs/${req.params.id}/resume`);
     await sendJobController.resumeJob(req, res);
 });
 
 // 🗑️ Cancelar/eliminar job
-router.delete("/:id/cancel", requireAuth, permit("asesor", "auditor", "supervisor", "administrativo", "gerencia", "recuperador", "encargado"), async (req, res) => {
+router.delete("/:id/cancel", requireAuth, permit("asesor", "auditor", "supervisor", "administrativo", "gerencia", "recuperador", "encargado", "independiente"), async (req, res) => {
     logger.info(`🚦 [sendJobRoutes] DELETE /send-jobs/${req.params.id}/cancel`);
     await sendJobController.cancelJob(req, res);
 });

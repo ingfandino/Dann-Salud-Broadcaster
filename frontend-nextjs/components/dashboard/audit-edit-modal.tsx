@@ -15,6 +15,8 @@ import { X, Save, Clock, User, CheckCircle2, AlertCircle, Calendar as CalendarIc
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
+import { useSocialHealthList } from "@/hooks/useSocialHealthList"
+import { SearchableSocialHealthSelect } from "./searchable-social-health-select"
 import { CelebrationAnimation } from "./celebration-animation"
 
 /* Estados que disparan la animación de celebración */
@@ -126,56 +128,6 @@ const STATUS_OPTIONS = [
     "El afiliado cambió la clave"
 ]
 
-const ARGENTINE_OBRAS_SOCIALES = [
-    "OSDE",
-    "OSDEPYM",
-    "IOMA",
-    "OSSEG",
-    "OSDE 210",
-    "OSFATUN",
-    "OSDE GBA",
-    "OSECAC (126205)",
-    "OSPRERA",
-    "OMINT",
-    "OSSEGUR",
-    "OSPR",
-    "OSUTHGRA (108803)",
-    "OSBLYCA",
-    "UOM",
-    "OSPM",
-    "OSPECON (105408)",
-    "Elevar (114307)",
-    "OSCHOCA (105804)",
-    "OSPEP (113908)",
-    "OSPROTURA",
-    "OSPSIP (119708)",
-    "OSEIV (122401)",
-    "OSPIF (108100)",
-    "OSIPA (114208)",
-    "OSPESESGYPE (107206)",
-    "OSTCARA (126007)",
-    "OSPIT (121002)",
-    "OSMP (111209)",
-    "OSPECA (103709)",
-    "OSPIQYP (118705)",
-    "OSBLYCA (102904)",
-    "VIASANO (2501)",
-    "OSPCYD (103402)",
-    "OSUOMRA (112103)",
-    "OSAMOC (3405)",
-    "OSPAGA (101000)",
-    "OSPF (107404)",
-    "OSPIP (116006)",
-    "OSPIC",
-    "OSG (109202)",
-    "OSPERYH (106500)",
-    "OSPCRA (104009)",
-    "OSPMA (700108)",
-    "HOMINIS (901501)",
-    "OSCTCP (121606)",
-    "OSMA (112509)"
-]
-
 const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
 const TIPO_VENTA = ["Alta", "Cambio"]
 
@@ -188,6 +140,7 @@ const checkRole = (userRole: string | undefined, allowedRoles: string[]) => {
 export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode = false }: AuditEditModalProps) {
     const { theme } = useTheme()
     const { user } = useAuth()
+    const { options: obraSocialAnteriorOptions, loading: obrasLoading, getOptionsWithFallback } = useSocialHealthList()
 
     const getLocalDateTime = (utcDateString: string) => {
         if (!utcDateString) return { fecha: "", hora: "" }
@@ -229,9 +182,11 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
         // Auditores e Independientes ven todos los teléfonos (no están asignados a equipos específicos)
         if (userRole === 'auditor' || userRole === 'independiente') return true;
 
-        // Para supervisores: verificar si es SU venta (comparar ID)
+        // Para supervisores: verificar asignación directa como supervisor o asesor de la venta
         if (userRole === 'supervisor') {
-            return audit.supervisorSnapshot?._id === user?._id;
+            const isAssignedSupervisor = !!audit.supervisorSnapshot?._id && !!user?._id && String(audit.supervisorSnapshot._id) === String(user._id);
+            const isAssignedAdvisor = !!audit.asesor?._id && !!user?._id && String(audit.asesor._id) === String(user._id);
+            return isAssignedSupervisor || isAssignedAdvisor;
         }
 
         // Para asesores y otros roles: verificar si pertenece al mismo equipo
@@ -239,7 +194,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
         const userTeam = user?.numeroEquipo;
 
         return auditTeam && userTeam && String(auditTeam) === String(userTeam);
-    }, [isGerencia, isAdmin, userRole, audit.supervisorSnapshot, user]);
+    }, [isGerencia, isAdmin, userRole, audit.supervisorSnapshot, audit.asesor, user]);
 
     // Valor a mostrar en el campo teléfono (enmascarado si no pertenece al supervisor)
     const displayPhone = belongsToUserSupervisor ? audit.telefono : '•••••••••••';
@@ -846,21 +801,14 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
                                             Obra Social Anterior
                                         </label>
-                                        <select
-                                            name="obraSocialAnterior"
+                                        <SearchableSocialHealthSelect
                                             value={form.obraSocialAnterior}
-                                            onChange={handleChange}
-                                            
-                                            className={cn(
-                                                "w-full px-3 py-2 rounded-lg border text-sm",
-                                                                                                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
-                                            )}
-                                        >
-                                            <option value="">-- Seleccionar --</option>
-                                            {ARGENTINE_OBRAS_SOCIALES.map(o => (
-                                                <option key={o} value={o}>{o}</option>
-                                            ))}
-                                        </select>
+                                            onChange={(value) => setForm(prev => ({ ...prev, obraSocialAnterior: value }))}
+                                            options={getOptionsWithFallback(form.obraSocialAnterior)}
+                                            disabled={obrasLoading}
+                                            placeholder="-- Seleccionar --"
+                                            theme={theme}
+                                        />
                                     </div>
                                     <div>
                                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>

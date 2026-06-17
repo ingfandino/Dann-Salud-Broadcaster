@@ -162,6 +162,16 @@ export function DashboardContent({ activeSection, onSectionChange }: DashboardCo
     }
 
     if (isMensajeriaMasiva) {
+      const role = user?.role?.toLowerCase()
+      const allowedRoles = ['asesor', 'auditor', 'supervisor', 'administrativo', 'gerencia', 'recuperador', 'encargado', 'independiente', 'desarrollador']
+      if (!allowedRoles.includes(role || '')) {
+        return (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+            <p className="text-red-500 text-lg font-semibold">⛔ Acceso Denegado</p>
+            <p className="text-gray-500 mt-2">No tienes permisos para acceder a esta sección.</p>
+          </div>
+        )
+      }
       return <MensajeriaMasiva />
     }
 
