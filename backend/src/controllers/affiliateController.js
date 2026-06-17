@@ -39,7 +39,6 @@ const {
     getImportedAffiliateCheckAvailability,
     previewAffiliateCheckSelection
 } = require("../services/affiliateCheck.service");
-const { processAffiliateCheckJob } = require("../services/affiliateCheckProcessor.service");
 const { getAffiliateCheckDashboardSummary } = require("../services/affiliateCheckDashboard.service");
 const {
     AffiliateCheckOperationError,
@@ -282,15 +281,15 @@ exports.cancelAffiliateCheckJob = async (req, res) => {
 };
 
 exports.processAffiliateCheckJob = async (req, res) => {
-    try {
-        if (!mongoose.isValidObjectId(req.params.jobId)) {
-            return res.status(400).json({ success: false, message: "ID de trabajo inválido" });
-        }
-        const job = await processAffiliateCheckJob(req.params.jobId);
-        return res.json({ success: true, job });
-    } catch (error) {
-        return handleAffiliateCheckError(res, error, "process job");
+    if (!mongoose.isValidObjectId(req.params.jobId)) {
+        return res.status(400).json({ success: false, message: "ID de trabajo inválido" });
     }
+    logger.warn(`[AFFILIATE-CHECK] Manual monolithic processing rejected jobId=${req.params.jobId} userId=${req.user?._id || "unknown"}`);
+    return res.status(409).json({
+        success: false,
+        code: "STAGED_PROCESSING_REQUIRED",
+        message: "El procesamiento manual ya no está disponible. El trabajo será procesado por los workers por etapas."
+    });
 };
 
 function canSeeAllAffiliateCheckJobs(req) {

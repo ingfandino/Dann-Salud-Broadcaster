@@ -2,12 +2,17 @@
 
 const mongoose = require("mongoose");
 const Affiliate = require("../models/Affiliate");
+const AffiliateAssignment = require("../models/AffiliateAssignment");
+const AffiliateCheckConfig = require("../models/AffiliateCheckConfig");
 const AffiliateContribution = require("../models/AffiliateContribution");
 const AffiliateOperationalState = require("../models/AffiliateOperationalState");
 const Audit = require("../models/Audit");
 const { normalizeCuil, isValidNormalizedCuil } = require("../utils/cuilUtils");
+const logger = require("../utils/logger").getLogger("affiliate-check");
 
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_OWNERSHIP_DAYS = 30;
+const DEFAULT_VERIFICATION_EXPIRY_DAYS = 30;
 const CALCULATION_VERSION = "phase2_v1";
 const ALLOWED_DATA_SOURCES = new Set(["fresh", "reusable", "extra"]);
 const REJECTED_AUDIT_STATUSES = new Set(["rechazada"]);
@@ -19,8 +24,16 @@ const FAILED_AUDIT_STATUSES = new Set([
     "remuneración no válida"
 ]);
 
-function addThirtyDays(date) {
-    return date ? new Date(new Date(date).getTime() + THIRTY_DAYS_MS) : null;
+function addDays(date, days) {
+    return date ? new Date(new Date(date).getTime() + Number(days || 0) * DAY_MS) : null;
+}
+
+async function loadOperationalStateConfig() {
+    const config = await AffiliateCheckConfig.findOne({ active: true }).lean();
+    return {
+        ownershipDays: Number(config?.ownershipDays || DEFAULT_OWNERSHIP_DAYS),
+        verificationExpiryDays: Number(config?.verificationExpiryDays || DEFAULT_VERIFICATION_EXPIRY_DAYS)
+    };
 }
 
 function normalizedStatus(value) {
@@ -76,7 +89,7 @@ function calculateFreshness(affiliate) {
     return affiliate.isUsed === true || affiliate.ultimoUso ? "reusable" : "fresh";
 }
 
-function calculateUsage(affiliate) {
+function calculateUsage(affiliate, config) {
     let usageStatus = "never_used";
     if (affiliate.active === false) usageStatus = "blocked";
     else if (affiliate.leadStatus === "Reutilizable") usageStatus = "reusable";
@@ -92,11 +105,11 @@ function calculateUsage(affiliate) {
     return {
         usageStatus,
         lastUsedAt,
-        reusableAfter: addThirtyDays(lastUsedAt)
+        reusableAfter: addDays(lastUsedAt, config.verificationExpiryDays)
     };
 }
 
-function calculateVerification(contribution, now) {
+function calculateVerification(contribution, now, config) {
     if (!contribution) {
         return {
             verificationStatus: "unchecked",
@@ -108,7 +121,7 @@ function calculateVerification(contribution, now) {
 
     const sourceStatus = contribution.verification?.status;
     const lastCheckedAt = contribution.verification?.checkedAt || null;
-    const verificationExpiresAt = addThirtyDays(lastCheckedAt);
+    const verificationExpiresAt = addDays(lastCheckedAt, config.verificationExpiryDays);
     const statusMap = {
         pending: "unchecked",
         success: "checked",
@@ -127,6 +140,41 @@ function calculateVerification(contribution, now) {
         lastCheckedAt,
         verificationExpiresAt,
         canSell: contribution.canSell ?? null
+    };
+}
+
+function selectActiveAssignment(assignments = [], affiliateId) {
+    if (assignments.length === 0) return null;
+    const sorted = [...assignments].sort((left, right) => {
+        const leftAssignedAt = new Date(left.assignedAt || left.createdAt || 0).getTime();
+        const rightAssignedAt = new Date(right.assignedAt || right.createdAt || 0).getTime();
+        if (rightAssignedAt !== leftAssignedAt) return rightAssignedAt - leftAssignedAt;
+        return String(right._id).localeCompare(String(left._id));
+    });
+    if (sorted.length > 1) {
+        logger.warn(`[AFFILIATE-OPSTATE] Multiple active assignments for affiliateId=${affiliateId}; using assignmentId=${sorted[0]._id}`);
+    }
+    return sorted[0];
+}
+
+function calculateOwnership({ affiliate, assignment, config }) {
+    if (assignment) {
+        return {
+            supervisorId: assignment.supervisorId || null,
+            teamId: assignment.teamId || null,
+            assignedAt: assignment.assignedAt || assignment.createdAt || null,
+            expiresAt: assignment.expiresAt || null,
+            source: assignment.source || "manual"
+        };
+    }
+
+    const ownershipAssignedAt = affiliate.exportedAt || affiliate.assignedAt || null;
+    return {
+        supervisorId: affiliate.exportedTo || null,
+        teamId: null,
+        assignedAt: ownershipAssignedAt,
+        expiresAt: addDays(ownershipAssignedAt, config.ownershipDays),
+        source: affiliate.exportedTo || ownershipAssignedAt ? "legacy" : null
     };
 }
 
@@ -161,29 +209,31 @@ function buildOperationalStateForAffiliate({
     affiliate,
     contribution = null,
     audits = [],
-    now = new Date()
+    activeAssignment = null,
+    now = new Date(),
+    config = {
+        ownershipDays: DEFAULT_OWNERSHIP_DAYS,
+        verificationExpiryDays: DEFAULT_VERIFICATION_EXPIRY_DAYS
+    }
 }) {
     const cuilNormalized = normalizeCuil(affiliate?.cuil);
     if (!affiliate?._id || !isValidNormalizedCuil(cuilNormalized)) return null;
 
     const freshness = calculateFreshness(affiliate);
-    const usage = calculateUsage(affiliate);
-    const verification = calculateVerification(contribution, now);
+    const usage = calculateUsage(affiliate, config);
+    const verification = calculateVerification(contribution, now, config);
     const sale = selectAuditState(audits);
-    const ownershipAssignedAt = affiliate.exportedAt || affiliate.assignedAt || null;
-    const ownership = {
-        supervisorId: affiliate.exportedTo || null,
-        teamId: null,
-        assignedAt: ownershipAssignedAt,
-        expiresAt: addThirtyDays(ownershipAssignedAt),
-        source: affiliate.exportedTo || ownershipAssignedAt ? "legacy" : null
-    };
+    const ownership = calculateOwnership({ affiliate, assignment: activeAssignment, config });
+    const effectiveUsageStatus = ownership.supervisorId
+        && (!ownership.expiresAt || ownership.expiresAt > now)
+        ? "assigned"
+        : usage.usageStatus;
     const availability = determineAvailability({
         affiliate,
         verificationStatus: verification.verificationStatus,
         canSell: verification.canSell,
         saleStatus: sale.saleStatus,
-        usageStatus: usage.usageStatus,
+        usageStatus: effectiveUsageStatus,
         ownership,
         now
     });
@@ -194,7 +244,7 @@ function buildOperationalStateForAffiliate({
         cuilNormalized,
         freshness,
         verificationStatus: verification.verificationStatus,
-        usageStatus: usage.usageStatus,
+        usageStatus: effectiveUsageStatus,
         saleStatus: sale.saleStatus,
         canSell: verification.canSell,
         availableForSale: availability.availableForSale,
@@ -279,11 +329,29 @@ async function rebuildOperationalStateForAffiliateIds(
     ));
     const rawCuilVariants = cuils.flatMap(buildCuilStorageVariants);
 
-    const [contributions, audits, existingStates] = await Promise.all([
+    const config = await loadOperationalStateConfig();
+    const [contributions, assignments, audits, existingStates] = await Promise.all([
         AffiliateContribution.find(
             { affiliateId: { $in: validIds } },
             { affiliateId: 1, canSell: 1, verification: 1 }
         ).lean(),
+        AffiliateAssignment.find(
+            {
+                affiliateId: { $in: validIds },
+                status: "active",
+                $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }]
+            },
+            {
+                affiliateId: 1,
+                supervisorId: 1,
+                teamId: 1,
+                source: 1,
+                sourceJobId: 1,
+                assignedAt: 1,
+                expiresAt: 1,
+                createdAt: 1
+            }
+        ).sort({ assignedAt: -1, createdAt: -1, _id: -1 }).lean(),
         cuils.length
             ? Audit.find(
                 {
@@ -310,6 +378,12 @@ async function rebuildOperationalStateForAffiliateIds(
     const contributionByAffiliate = new Map(
         contributions.map(item => [String(item.affiliateId), item])
     );
+    const assignmentsByAffiliate = new Map();
+    for (const assignment of assignments) {
+        const key = String(assignment.affiliateId);
+        if (!assignmentsByAffiliate.has(key)) assignmentsByAffiliate.set(key, []);
+        assignmentsByAffiliate.get(key).push(assignment);
+    }
     const auditsByCuil = groupAuditsByCuil(audits);
     const existingIds = new Set(existingStates.map(item => String(item.affiliateId)));
     const states = validAffiliates.map(affiliate => {
@@ -318,7 +392,9 @@ async function rebuildOperationalStateForAffiliateIds(
             affiliate,
             contribution: contributionByAffiliate.get(String(affiliate._id)) || null,
             audits: auditsByCuil.get(cuil) || [],
-            now
+            activeAssignment: selectActiveAssignment(assignmentsByAffiliate.get(String(affiliate._id)) || [], affiliate._id),
+            now,
+            config
         });
     }).filter(Boolean);
 

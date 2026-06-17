@@ -86,7 +86,15 @@ describe("affiliate check dashboard and result counters", () => {
         });
         const affiliateId = oid();
         await AffiliateCheckRow.create({ jobId: job._id, affiliateId, cuilNormalized: "201", mode: "check_new", status: "assigned", canSell: true, assignedToSupervisor: supervisor._id });
-        await AffiliateAssignment.create({ affiliateId, supervisorId: supervisor._id, assignedBy: supervisor._id, source: "check_job", sourceJobId: job._id, expiresAt: new Date("2026-06-20T03:00:00.000Z") });
+        await AffiliateAssignment.create({
+            affiliateId,
+            supervisorId: supervisor._id,
+            assignedBy: supervisor._id,
+            source: "check_job",
+            sourceJobId: job._id,
+            assignedAt: new Date("2026-06-16T13:00:00.000Z"),
+            expiresAt: new Date("2026-06-20T03:00:00.000Z")
+        });
 
         const result = await getAffiliateCheckDashboardSummary({
             user: { _id: supervisor._id, role: "supervisor" },
@@ -99,6 +107,80 @@ describe("affiliate check dashboard and result counters", () => {
         expect(result.summary.activeAssignments).toBe(1);
         expect(result.summary.eligibleRowsToday).toBe(1);
         expect(result.summary.assignedToStockToday).toBe(1);
+    });
+
+    test("daily summary does not count check-job assignments outside the Argentina day", async () => {
+        const supervisor = await User.create({ username: "sup-outside", nombre: "Supervisor Outside", email: "sup-outside@example.com", password: "password123", role: "supervisor", active: true });
+        const job = await AffiliateCheckJob.create({
+            requestedBy: supervisor._id,
+            requestedByRole: "supervisor",
+            mode: "check_new",
+            status: "completed",
+            channelOwner: supervisor._id,
+            channelType: "internal",
+            requestedCount: 1,
+            selectedCount: 1,
+            ownership: { supervisorId: supervisor._id },
+            createdAt: new Date("2026-06-16T14:00:00.000Z")
+        });
+        const affiliateId = oid();
+        await AffiliateCheckRow.create({ jobId: job._id, affiliateId, cuilNormalized: "202", mode: "check_new", status: "assigned", canSell: true, assignedToSupervisor: supervisor._id });
+        await AffiliateAssignment.create({
+            affiliateId,
+            supervisorId: supervisor._id,
+            assignedBy: supervisor._id,
+            source: "check_job",
+            sourceJobId: job._id,
+            assignedAt: new Date("2026-06-17T03:00:00.000Z"),
+            expiresAt: new Date("2026-06-20T03:00:00.000Z")
+        });
+
+        const result = await getAffiliateCheckDashboardSummary({
+            user: { _id: supervisor._id, role: "supervisor" },
+            date: "2026-06-16",
+            now: new Date("2026-06-16T15:00:00.000Z")
+        });
+
+        expect(result.summary.activeAssignments).toBe(1);
+        expect(result.summary.assignedToStockToday).toBe(0);
+    });
+
+    test("daily summary does not count legacy check-job assignments missing assignedAt", async () => {
+        const supervisor = await User.create({ username: "sup-missing", nombre: "Supervisor Missing", email: "sup-missing@example.com", password: "password123", role: "supervisor", active: true });
+        const job = await AffiliateCheckJob.create({
+            requestedBy: supervisor._id,
+            requestedByRole: "supervisor",
+            mode: "check_new",
+            status: "completed",
+            channelOwner: supervisor._id,
+            channelType: "internal",
+            requestedCount: 1,
+            selectedCount: 1,
+            ownership: { supervisorId: supervisor._id },
+            createdAt: new Date("2026-06-16T14:00:00.000Z")
+        });
+        const affiliateId = oid();
+        await AffiliateCheckRow.create({ jobId: job._id, affiliateId, cuilNormalized: "203", mode: "check_new", status: "assigned", canSell: true, assignedToSupervisor: supervisor._id });
+        await AffiliateAssignment.collection.insertOne({
+            affiliateId,
+            supervisorId: supervisor._id,
+            assignedBy: supervisor._id,
+            source: "check_job",
+            sourceJobId: job._id,
+            status: "active",
+            expiresAt: new Date("2026-06-20T03:00:00.000Z"),
+            createdAt: new Date("2026-06-16T13:00:00.000Z"),
+            updatedAt: new Date("2026-06-16T13:00:00.000Z")
+        });
+
+        const result = await getAffiliateCheckDashboardSummary({
+            user: { _id: supervisor._id, role: "supervisor" },
+            date: "2026-06-16",
+            now: new Date("2026-06-16T15:00:00.000Z")
+        });
+
+        expect(result.summary.activeAssignments).toBe(1);
+        expect(result.summary.assignedToStockToday).toBe(0);
     });
 
 

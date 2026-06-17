@@ -291,6 +291,8 @@ async function claimAffiliateCheckJob(jobId) {
     throw error;
 }
 
+// Legacy monolithic processor retained for historical tests and emergency analysis.
+// The HTTP route is disabled while staged ARCA/DATEAS/Padron/finalizer workers are active.
 async function processAffiliateCheckJob(jobId) {
     let job = await claimAffiliateCheckJob(jobId);
 
