@@ -8,25 +8,233 @@
 
 "use client"
 
-import type React from "react"
-
-import { useState, useRef } from "react"
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent } from "react"
+import * as XLSX from "xlsx"
+import {
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  CloudUpload,
+  Download,
+  FileCheck2,
+  FileDown,
+  FileSpreadsheet,
+  FileText,
+  ListChecks,
+  RefreshCw,
+  ShieldCheck,
+  Upload,
+  XCircle,
+} from "lucide-react"
 import { useTheme } from "./theme-provider"
 import { cn } from "@/lib/utils"
-import { api, API_URL } from "@/lib/api"
+import { api } from "@/lib/api"
 import { toast } from "sonner"
 
+type ImportStats = {
+  importJobId?: string
+  status?: string
+  fileName?: string
+  originalFileName?: string
+  totalRows?: number
+  processedRows?: number
+  createdCount?: number
+  updatedCount?: number
+  rejectedCount?: number
+  rejectedFileAvailable?: boolean
+  rejectedFileUrl?: string | null
+  updatedFileAvailable?: boolean
+  updatedFileUrl?: string | null
+  duplicatesReportUrl?: string | null
+  updatedReportUrl?: string | null
+  errorMessage?: string
+  createdAt?: string
+  updatedAt?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+type UploadResult = {
+  success: boolean
+  message: string
+  stats?: ImportStats
+}
+
+type RecentImport = {
+  id: string
+  archivo: string
+  fecha: string
+  estado: string
+  nuevos: number
+  actualizados: number
+  rechazados: number
+  rejectedFileAvailable?: boolean
+  rejectedFileUrl?: string | null
+  updatedFileAvailable?: boolean
+  updatedFileUrl?: string | null
+}
+
+const terminalStatuses = ["completed", "completed_with_errors", "failed"]
+const processingStatuses = ["pending", "processing"]
+const templateColumns = [
+  "Nombre",
+  "CUIL",
+  "Obra Social",
+  "Localidad",
+  "Teléfono_1",
+  "Teléfono_2",
+  "Teléfono_3",
+  "Edad",
+  "Código de obra social",
+]
+const templateInstructions = [
+  "- Nombre, CUIL, Obra Social, Localidad y Teléfono_1 son obligatorios.",
+  "- CUIL puede cargarse con o sin guiones.",
+  "- Teléfono_2 y Teléfono_3 son opcionales.",
+  "- No modificar los encabezados de la plantilla.",
+  "- Los campos adicionales podrán usarse para enriquecer el registro.",
+]
+
+function safeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0
+}
+
+function formatNumber(value: unknown) {
+  return safeNumber(value).toLocaleString("es-AR")
+}
+
+function formatFileSize(size: number) {
+  if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(2)} MB`
+  return `${(size / 1024).toFixed(2)} KB`
+}
+
+function formatDate(value?: string) {
+  if (!value) return "Fecha no disponible"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "Fecha no disponible"
+  return new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)
+}
+
+function getImportTitle(status?: string) {
+  if (status === "completed_with_errors") return "Importación completada con observaciones"
+  if (status === "completed") return "Importación completada"
+  if (status === "failed") return "Error al procesar archivo"
+  return "Procesando archivo..."
+}
+
+function getStatusLabel(status?: string) {
+  if (status === "completed_with_errors") return "Con observaciones"
+  if (status === "completed") return "Completado"
+  if (status === "failed") return "Fallido"
+  if (status === "processing") return "Procesando"
+  if (status === "pending") return "Pendiente"
+  return status || "Sin estado"
+}
 
 export function BaseAfiliadosCargar() {
   const { theme } = useTheme()
   const [isDragging, setIsDragging] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<{ success: boolean; message: string; stats?: any } | null>(null)
+  const [result, setResult] = useState<UploadResult | null>(null)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [recentImports, setRecentImports] = useState<RecentImport[]>([])
+  const [recentLoading, setRecentLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const loadRecentImports = useCallback(async () => {
+    try {
+      setRecentLoading(true)
+      const response = await api.affiliates.baseStatus()
+      const imports = Array.isArray(response.data?.recentImports) ? response.data.recentImports : []
+      setRecentImports(imports)
+    } catch {
+      setRecentImports([])
+    } finally {
+      setRecentLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadRecentImports()
+  }, [loadRecentImports])
+
+  useEffect(() => {
+    if (!activeJobId) return
+
+    let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const pollJob = async () => {
+      try {
+        const response = await api.affiliates.getImportJob(activeJobId)
+        if (cancelled) return
+
+        const job = response.data.job
+        const terminal = terminalStatuses.includes(job.status)
+
+        if (job.status === "failed") {
+          setResult({
+            success: false,
+            message: job.errorMessage || "Error al procesar archivo",
+            stats: { ...job, importJobId: activeJobId }
+          })
+          setLoading(false)
+          setActiveJobId(null)
+          loadRecentImports()
+          toast.error(job.errorMessage || "Error al procesar archivo")
+          return
+        }
+
+        const statusMessage = terminal
+          ? `Archivo procesado: ${job.createdCount} afiliados cargados, ${job.updatedCount} actualizados y ${job.rejectedCount} rechazados.`
+          : "Procesando archivo..."
+
+        setResult({
+          success: true,
+          message: statusMessage,
+          stats: {
+            ...job,
+            importJobId: activeJobId,
+            duplicatesReportUrl: job.rejectedFileUrl,
+            updatedReportUrl: job.updatedFileUrl
+          }
+        })
+
+        if (terminal) {
+          setLoading(false)
+          setActiveJobId(null)
+          loadRecentImports()
+          toast.success("Importación de afiliados finalizada")
+          return
+        }
+
+        timeoutId = setTimeout(pollJob, 2000)
+      } catch (error: any) {
+        if (cancelled) return
+        const message = error.response?.data?.message || error.message || "No se pudo consultar el estado de la importación"
+        setResult({ success: false, message })
+        setLoading(false)
+        setActiveJobId(null)
+        toast.error(message)
+      }
+    }
+
+    pollJob()
+
+    return () => {
+      cancelled = true
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [activeJobId, loadRecentImports])
+
+  const handleDragOver = (e: DragEvent) => {
     e.preventDefault()
     setIsDragging(true)
   }
@@ -35,16 +243,19 @@ export function BaseAfiliadosCargar() {
     setIsDragging(false)
   }
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
     const droppedFile = e.dataTransfer.files[0]
     if (droppedFile && (droppedFile.name.endsWith(".xlsx") || droppedFile.name.endsWith(".xls"))) {
       setFile(droppedFile)
+      setResult(null) // Clear previous results
+    } else if (droppedFile) {
+      toast.error("Seleccioná un archivo Excel válido (.xlsx o .xls)")
     }
   }
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
     if (selectedFile) {
       setFile(selectedFile)
@@ -52,263 +263,549 @@ export function BaseAfiliadosCargar() {
     }
   }
 
-  const handleProcess = async (e: React.MouseEvent) => {
-    e.stopPropagation() // Prevent parent drop zone click
-    if (!file) return
+  const handleProcess = async (e: MouseEvent) => {
+    e.stopPropagation()
+    if (!file || loading) return
 
     try {
       setLoading(true)
       setResult(null)
       const response = await api.affiliates.upload(file)
+      const importJobId = response.data.importJobId
 
-      console.log("🔍 [Upload Debug] Response data:", response.data)
-
-      const processed = response.data.imported || response.data.processed || 0
-      const duplicates = response.data.duplicates || 0
-      const duplicatesReport = response.data.duplicatesReport
-
-      console.log("🔍 [Upload Debug] Extracted report URL:", duplicatesReport)
-
-      const newResult = {
-        success: true,
-        message: `Archivo procesado: ${processed} afiliados cargados${duplicates > 0 ? `, ${duplicates} rechazados` : ''}.`,
-        stats: {
-          ...response.data,
-          duplicatesReportUrl: duplicatesReport
-        }
+      if (!response.data.async || !importJobId) {
+        throw new Error("El servidor no devolvió un trabajo de importación válido")
       }
 
-      console.log("🔍 [Upload Debug] Setting result state:", newResult)
-      setResult(newResult)
-
-      toast.success(`${processed} afiliados cargados exitosamente`)
-      // Clear file after successful upload
-      setFile(null)
-    } catch (error: any) {
-      console.error("Error procesando archivo:", error)
-      const errorMsg = error.response?.data?.message || error.message || "Error al procesar el archivo"
       setResult({
-        success: false,
-        message: errorMsg
+        success: true,
+        message: "Procesando archivo...",
+        stats: {
+          importJobId,
+          status: response.data.status,
+          totalRows: 0,
+          processedRows: 0,
+          createdCount: 0,
+          updatedCount: 0,
+          rejectedCount: 0
+        }
       })
-      toast.error(errorMsg)
-    } finally {
+      setActiveJobId(importJobId)
+      setFile(null)
+      loadRecentImports()
+      toast.success("Archivo recibido. La importación continuará en segundo plano.")
+    } catch (error: any) {
+      const errorMsg = error.response?.data?.message || error.message || "Error al crear la importación"
+      setResult({ success: false, message: errorMsg })
       setLoading(false)
+      toast.error(errorMsg)
     }
   }
 
+  const downloadRejectedReport = async (jobId?: string) => {
+    if (!jobId) return
+    try {
+      const response = await api.affiliates.downloadImportRejected(jobId)
+
+      // Create blob link to download
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement("a")
+      link.href = url
+
+      // Extract filename from URL or use default
+      const filename = "rechazados_" + jobId + ".xlsx"
+      link.setAttribute("download", filename)
+
+      document.body.appendChild(link)
+      link.click()
+
+      // Clean up
+      link.parentNode?.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast.error("Error al descargar rechazados")
+    }
+  }
+
+  const downloadUpdatedReport = async (jobId?: string) => {
+    if (!jobId) return
+    try {
+      const response = await api.affiliates.downloadImportUpdated(jobId)
+
+      // Create blob link to download
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement("a")
+      link.href = url
+
+      // Extract filename from URL or use default
+      const filename = "actualizados_" + jobId + ".xlsx"
+      link.setAttribute("download", filename)
+
+      document.body.appendChild(link)
+      link.click()
+
+      // Clean up
+      link.parentNode?.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast.error("Error al descargar actualizados")
+    }
+  }
+
+  const handleDownloadTemplate = () => {
+    try {
+      const workbook = XLSX.utils.book_new()
+      const templateSheet = XLSX.utils.aoa_to_sheet([templateColumns])
+      templateSheet["!cols"] = templateColumns.map((column) => ({ wch: Math.max(column.length + 4, 16) }))
+      const instructionsSheet = XLSX.utils.aoa_to_sheet(templateInstructions.map((instruction) => [instruction]))
+      instructionsSheet["!cols"] = [{ wch: 90 }]
+
+      XLSX.utils.book_append_sheet(workbook, templateSheet, "Plantilla")
+      XLSX.utils.book_append_sheet(workbook, instructionsSheet, "Instrucciones")
+      XLSX.writeFile(workbook, "plantilla_carga_afiliados.xlsx")
+      toast.success("Plantilla descargada")
+    } catch {
+      toast.error("No se pudo descargar la plantilla")
+    }
+  }
+
+  const stats = result?.stats
+  const status = stats?.status
+  const isProcessing = !!status && processingStatuses.includes(status)
+  const isCompleted = !!status && ["completed", "completed_with_errors"].includes(status)
+  const isFailed = status === "failed" || (result && !result.success)
+  const totalRows = safeNumber(stats?.totalRows)
+  const processedRows = safeNumber(stats?.processedRows)
+  const progress = totalRows > 0 ? Math.min(100, Math.round((processedRows / totalRows) * 100)) : isProcessing ? 8 : 0
+  const currentImportForTable = useMemo<RecentImport | null>(() => {
+    if (!stats?.importJobId) return null
+    return {
+      id: stats.importJobId,
+      archivo: stats.originalFileName || stats.fileName || "Importación actual",
+      fecha: stats.finishedAt || stats.updatedAt || stats.startedAt || stats.createdAt || "",
+      estado: stats.status || "processing",
+      nuevos: safeNumber(stats.createdCount),
+      actualizados: safeNumber(stats.updatedCount),
+      rechazados: safeNumber(stats.rejectedCount),
+      rejectedFileAvailable: stats.rejectedFileAvailable || Boolean(stats.rejectedFileUrl || stats.duplicatesReportUrl),
+      rejectedFileUrl: stats.rejectedFileUrl || stats.duplicatesReportUrl || null,
+      updatedFileAvailable: stats.updatedFileAvailable || Boolean(stats.updatedFileUrl || stats.updatedReportUrl),
+      updatedFileUrl: stats.updatedFileUrl || stats.updatedReportUrl || null,
+    }
+  }, [stats])
+
+  const importsToShow = useMemo(() => {
+    const filtered = currentImportForTable
+      ? recentImports.filter((item) => item.id !== currentImportForTable.id)
+      : recentImports
+    return currentImportForTable ? [currentImportForTable, ...filtered] : filtered
+  }, [currentImportForTable, recentImports])
+
+  const canDownloadCurrentRejected = Boolean(
+    stats?.rejectedFileAvailable || stats?.rejectedFileUrl || stats?.duplicatesReportUrl
+  )
+  const canDownloadCurrentUpdated = Boolean(
+    stats?.updatedFileAvailable || stats?.updatedFileUrl || stats?.updatedReportUrl
+  )
+
+  const requirementCards = [
+    {
+      title: "Formato permitido",
+      value: ".xlsx / .xls",
+      description: "Excel 2007 o superior",
+      icon: FileSpreadsheet,
+      accent: "text-emerald-600",
+      bg: "bg-emerald-50",
+    },
+    {
+      title: "Columnas mínimas",
+      value: "5 obligatorias",
+      description: "Nombre, CUIL, Obra Social, Localidad, Teléfono_1",
+      icon: ListChecks,
+      accent: "text-violet-600",
+      bg: "bg-violet-50",
+    },
+    {
+      title: "Tolerancia de headers",
+      value: "Sí",
+      description: "Acepta variantes",
+      icon: FileText,
+      accent: "text-orange-600",
+      bg: "bg-orange-50",
+    },
+    {
+      title: "Validaciones",
+      value: "Automáticas",
+      description: "Antes de importar",
+      icon: ShieldCheck,
+      accent: "text-blue-600",
+      bg: "bg-blue-50",
+    },
+  ]
 
   return (
-    <div className="animate-fade-in-up space-y-4">
+    <div className={cn(
+      "animate-fade-in-up rounded-[28px] p-4 lg:p-6 space-y-5",
+      theme === "dark" ? "bg-slate-950/30" : "bg-gradient-to-br from-emerald-50/70 via-cyan-50/40 to-white"
+    )}>
       {/* Encabezado con instrucciones */}
       <div
         className={cn(
-          "rounded-2xl border p-4 lg:p-6 backdrop-blur-sm",
+          "rounded-3xl border p-5 lg:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4 backdrop-blur-sm",
           theme === "dark"
-            ? "bg-gradient-to-br from-white/5 to-white/[0.02] border-white/10"
-            : "bg-gradient-to-br from-white to-[#FAF7F2]/80 border-purple-200/30 shadow-lg shadow-purple-100/30",
+            ? "bg-white/5 border-white/10"
+            : "bg-white/90 border-emerald-100 shadow-sm shadow-emerald-100/60",
         )}
       >
-        <h2
+        <div className="flex items-start gap-4">
+          <div className={cn(
+            "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0",
+            theme === "dark" ? "bg-emerald-500/15 text-emerald-300" : "bg-emerald-50 text-emerald-600"
+          )}>
+            <Upload className="w-6 h-6" />
+          </div>
+          <div>
+            <h2 className={cn("text-2xl font-bold tracking-tight", theme === "dark" ? "text-white" : "text-slate-900")}>
+              Cargar archivo de afiliados
+            </h2>
+            <p className={cn("text-sm mt-1 max-w-3xl leading-relaxed", theme === "dark" ? "text-slate-300" : "text-slate-600")}>
+              Importá nuevos datos o actualizá registros existentes de la base. El sistema validará teléfonos, CUIL, duplicados y datos enriquecibles.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleDownloadTemplate}
           className={cn(
-            "text-lg lg:text-xl font-semibold flex items-center gap-2 mb-4",
-            theme === "dark" ? "text-white" : "text-gray-700",
+            "inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition-colors",
+            theme === "dark" ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-emerald-100 bg-white text-emerald-700 shadow-sm hover:bg-emerald-50"
           )}
+          title="Descargar plantilla de carga"
         >
-          <Upload className={cn("w-5 h-5", theme === "dark" ? "text-purple-400" : "text-purple-500")} />
-          Cargar Archivo de Afiliados
-        </h2>
+          <Download className="w-4 h-4" />
+          Descargar plantilla
+        </button>
+      </div>
 
-        {/* Requisitos del archivo */}
-        <div
-          className={cn(
-            "rounded-xl p-4 space-y-2",
-            theme === "dark" ? "bg-blue-500/10 border border-blue-500/20" : "bg-blue-50 border border-blue-200",
-          )}
-        >
-          <h3
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {requirementCards.map((card) => (
+          <div
+            key={card.title}
             className={cn(
-              "font-semibold text-sm flex items-center gap-2",
-              theme === "dark" ? "text-blue-300" : "text-blue-700",
+              "rounded-2xl border p-4 flex items-center gap-4 shadow-sm",
+              theme === "dark" ? "bg-white/5 border-white/10" : "bg-white border-emerald-100/70"
             )}
           >
-            <AlertCircle className="w-4 h-4" />
-            Requisitos del archivo:
-          </h3>
-          <ul className={cn("text-sm space-y-1 ml-6", theme === "dark" ? "text-blue-200" : "text-blue-600")}>
-            <li>
-              <strong>Formato:</strong>{" "}
-              <span className={cn(theme === "dark" ? "text-cyan-400" : "text-cyan-600")}>.xlsx</span> o{" "}
-              <span className={cn(theme === "dark" ? "text-cyan-400" : "text-cyan-600")}>.xls</span>
-            </li>
-            <li>
-              <strong>Campos obligatorios:</strong>{" "}
-              <span className={cn(theme === "dark" ? "text-purple-400" : "text-purple-600")}>
-                Nombre, CUIL, Obra Social, Localidad, Teléfono_1
-              </span>
-            </li>
-            <li>
-              <strong>Campos opcionales:</strong>{" "}
-              <span className={cn(theme === "dark" ? "text-gray-400" : "text-gray-600")}>
-                Teléfono_2, Teléfono_3, Edad, Código de obra social
-              </span>
-            </li>
-            <li>
-              <strong>Tolerancia de headers:</strong>{" "}
-              <span className={cn(theme === "dark" ? "text-gray-400" : "text-gray-600")}>
-                Acepta variantes (ej: "nombre", "Name", "NOMBRE")
-              </span>
-            </li>
-          </ul>
-        </div>
+            <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center shrink-0", card.bg, card.accent)}>
+              <card.icon className="w-6 h-6" />
+            </div>
+            <div className="min-w-0">
+              <p className={cn("text-xs font-medium", theme === "dark" ? "text-slate-400" : "text-slate-500")}>{card.title}</p>
+              <p className={cn("text-sm font-bold mt-1", theme === "dark" ? "text-white" : "text-slate-900")}>{card.value}</p>
+              <p className={cn("text-xs mt-1 truncate", theme === "dark" ? "text-slate-400" : "text-slate-500")}>{card.description}</p>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Zona de arrastrar y soltar */}
       <div
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
         className={cn(
-          "rounded-2xl border-2 border-dashed p-8 lg:p-12 text-center cursor-pointer transition-all duration-300",
-          isDragging
-            ? theme === "dark"
-              ? "border-purple-500 bg-purple-500/10"
-              : "border-purple-400 bg-purple-50"
-            : theme === "dark"
-              ? "border-white/20 bg-white/5 hover:border-purple-500/50 hover:bg-purple-500/5"
-              : "border-gray-300 bg-white hover:border-purple-300 hover:bg-purple-50/50",
+          "rounded-3xl border p-4 shadow-sm",
+          theme === "dark" ? "bg-white/5 border-white/10" : "bg-white border-emerald-100/70"
         )}
       >
-        <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleFileSelect} className="hidden" />
+        <div
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className={cn(
+            "rounded-2xl border-2 border-dashed px-6 py-10 lg:py-14 text-center cursor-pointer transition-all duration-300",
+            isDragging
+              ? theme === "dark"
+                ? "border-emerald-400 bg-emerald-500/10"
+                : "border-emerald-400 bg-emerald-50"
+              : theme === "dark"
+                ? "border-white/15 hover:border-emerald-400/70 hover:bg-emerald-500/5"
+                : "border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40",
+          )}
+        >
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleFileSelect} className="hidden" />
 
-        {file ? (
-          <div className="space-y-3">
-            <div
-              className={cn(
-                "w-16 h-16 mx-auto rounded-xl flex items-center justify-center",
-                theme === "dark" ? "bg-green-500/20" : "bg-green-100",
-              )}
-            >
-              <CheckCircle className={cn("w-8 h-8", theme === "dark" ? "text-green-400" : "text-green-500")} />
+          {file ? (
+            <div className="space-y-4">
+              <div className="relative mx-auto w-20 h-20">
+                <div className="absolute inset-0 rounded-full bg-emerald-100 animate-pulse" />
+                <div className="relative w-20 h-20 rounded-full bg-white border border-emerald-100 flex items-center justify-center shadow-sm">
+                  <FileCheck2 className="w-9 h-9 text-emerald-600" />
+                </div>
+              </div>
+              <div>
+                <p className={cn("text-lg font-bold", theme === "dark" ? "text-white" : "text-slate-900")}>{file.name}</p>
+                <p className={cn("text-sm mt-1", theme === "dark" ? "text-slate-400" : "text-slate-500")}>
+                  Archivo seleccionado · {formatFileSize(file.size)}
+                </p>
+              </div>
+              <button
+                onClick={handleProcess}
+                disabled={loading}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg shadow-emerald-200/60 transition-all hover:scale-[1.02] disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {loading ? "Creando importación..." : "Iniciar importación"}
+              </button>
             </div>
-            <div>
-              <p className={cn("font-semibold", theme === "dark" ? "text-white" : "text-gray-700")}>{file.name}</p>
-              <p className={cn("text-sm", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
-                {(file.size / 1024).toFixed(2)} KB
-              </p>
+          ) : (
+            <div className="space-y-4">
+              <div className="relative mx-auto w-20 h-20">
+                <div className="absolute inset-0 rounded-full bg-emerald-100/80" />
+                <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-emerald-50 to-cyan-50 border border-emerald-100 flex items-center justify-center shadow-sm">
+                  <CloudUpload className="w-10 h-10 text-emerald-600" />
+                </div>
+              </div>
+              <div>
+                <p className={cn("text-lg font-bold", theme === "dark" ? "text-white" : "text-slate-900")}>
+                  Arrastrá tu archivo Excel aquí
+                </p>
+                <p className={cn("text-sm mt-1", theme === "dark" ? "text-slate-400" : "text-slate-500")}>
+                  o hacé clic para seleccionarlo
+                </p>
+                <p className={cn("text-xs mt-3", theme === "dark" ? "text-slate-500" : "text-slate-400")}>
+                  Tamaño máximo: 50 MB
+                </p>
+              </div>
             </div>
-            <button
-              onClick={handleProcess}
-              disabled={loading}
-              className={cn(
-                "px-6 py-2 rounded-lg font-medium text-sm transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed",
-                theme === "dark"
-                  ? "bg-gradient-to-r from-green-600 to-green-500 text-white"
-                  : "bg-gradient-to-r from-green-500 to-green-400 text-white",
-              )}
-            >
-              {loading ? "Procesando..." : "Procesar Archivo"}
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div
-              className={cn(
-                "w-16 h-16 mx-auto rounded-xl flex items-center justify-center",
-                theme === "dark" ? "bg-white/10" : "bg-gray-100",
-              )}
-            >
-              <FileSpreadsheet className={cn("w-8 h-8", theme === "dark" ? "text-purple-400" : "text-purple-500")} />
-            </div>
-            <div>
-              <p className={cn("font-semibold", theme === "dark" ? "text-white" : "text-gray-700")}>
-                Click aquí para seleccionar archivo
-              </p>
-              <p className={cn("text-sm", theme === "dark" ? "text-gray-400" : "text-gray-500")}>
-                O arrastra y suelta tu archivo .xlsx
-              </p>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Mensaje de resultado - persiste después del procesamiento */}
-      {result && (
-        <div className="mt-4">
-          <div
-            className={cn(
-              "p-4 rounded-xl text-sm border shadow-sm transition-all duration-300 animate-in fade-in slide-in-from-top-2",
-              result.success
-                ? theme === "dark"
-                  ? "bg-green-500/10 text-green-300 border-green-500/20"
-                  : "bg-green-50 text-green-700 border-green-200"
-                : theme === "dark"
-                  ? "bg-red-500/10 text-red-300 border-red-500/20"
-                  : "bg-red-50 text-red-700 border-red-200"
-            )}
-          >
-            <div className="flex items-start gap-3">
-              <div className={cn(
-                "p-2 rounded-full shrink-0",
-                result.success
-                  ? theme === "dark" ? "bg-green-500/20" : "bg-green-100"
-                  : theme === "dark" ? "bg-red-500/20" : "bg-red-100"
-              )}>
-                {result.success ? (
-                  <CheckCircle className={cn("w-5 h-5", theme === "dark" ? "text-green-400" : "text-green-600")} />
-                ) : (
-                  <AlertCircle className={cn("w-5 h-5", theme === "dark" ? "text-red-400" : "text-red-600")} />
-                )}
+      {(isProcessing || isCompleted || isFailed) && result && (
+        <div className="space-y-4">
+          {isProcessing && (
+            <div
+              className={cn(
+                "w-full rounded-3xl border p-5 shadow-sm",
+                theme === "dark" ? "bg-white/5 border-white/10" : "bg-white border-emerald-100/70"
+              )}
+            >
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-2xl bg-cyan-50 text-cyan-600 flex items-center justify-center">
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                </div>
+                <div>
+                  <h3 className={cn("font-bold", theme === "dark" ? "text-white" : "text-slate-900")}>Procesando archivo...</h3>
+                  <p className={cn("text-xs", theme === "dark" ? "text-slate-400" : "text-slate-500")}>Validando filas y actualizando la base.</p>
+                </div>
               </div>
-              <div className="flex-1 space-y-3">
-                <p className="font-medium pt-1">{result.message}</p>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className={theme === "dark" ? "text-slate-300" : "text-slate-600"}>Progreso de importación</span>
+                  <span className={cn("font-bold", theme === "dark" ? "text-cyan-300" : "text-cyan-700")}>{progress}%</span>
+                </div>
+                <div className={cn("h-3 rounded-full overflow-hidden", theme === "dark" ? "bg-white/10" : "bg-slate-100")}>
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-cyan-500 transition-all duration-500"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-5">
+                {[
+                  { label: "Filas procesadas", value: totalRows > 0 ? `${formatNumber(processedRows)} / ${formatNumber(totalRows)}` : formatNumber(processedRows), icon: ListChecks, color: "text-cyan-600", bg: "bg-cyan-50" },
+                  { label: "Nuevos", value: formatNumber(stats?.createdCount), icon: FileCheck2, color: "text-emerald-600", bg: "bg-emerald-50" },
+                  { label: "Actualizados", value: formatNumber(stats?.updatedCount), icon: RefreshCw, color: "text-blue-600", bg: "bg-blue-50" },
+                  { label: "Rechazados", value: formatNumber(stats?.rejectedCount), icon: AlertCircle, color: "text-red-600", bg: "bg-red-50" },
+                ].map((item) => (
+                  <div key={item.label} className={cn("rounded-2xl border p-4", theme === "dark" ? "border-white/10 bg-white/[0.03]" : "border-slate-100 bg-white")}>
+                    <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center mb-3", item.bg, item.color)}>
+                      <item.icon className="w-4 h-4" />
+                    </div>
+                    <p className={cn("text-base font-bold", theme === "dark" ? "text-white" : "text-slate-900")}>{item.value}</p>
+                    <p className={cn("text-xs mt-1", theme === "dark" ? "text-slate-400" : "text-slate-500")}>{item.label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-                {/* Botón descargar reporte de rechazados */}
-                {result.stats?.duplicatesReportUrl && (
+          {(isCompleted || isFailed) && (
+            <div
+              className={cn(
+                "w-full rounded-3xl border p-5 shadow-sm",
+                isFailed
+                  ? theme === "dark" ? "bg-red-500/10 border-red-500/20" : "bg-white border-red-100"
+                  : theme === "dark" ? "bg-white/5 border-white/10" : "bg-white border-emerald-100/70"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "w-11 h-11 rounded-2xl flex items-center justify-center shrink-0",
+                  isFailed ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"
+                )}>
+                  {isFailed ? <XCircle className="w-6 h-6" /> : <CheckCircle className="w-6 h-6" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className={cn("font-bold", theme === "dark" ? "text-white" : "text-slate-900")}>{getImportTitle(status)}</h3>
+                  <p className={cn("text-xs mt-1", theme === "dark" ? "text-slate-400" : "text-slate-500")}>
+                    {isFailed ? result.message : `Finalizada el ${formatDate(stats?.finishedAt || stats?.updatedAt || stats?.createdAt)}`}
+                  </p>
+                </div>
+              </div>
+
+              {!isFailed && (
+                <div className="grid grid-cols-3 gap-3 mt-5">
+                  <div>
+                    <p className="text-2xl font-bold text-emerald-600">{formatNumber(stats?.createdCount)}</p>
+                    <p className={cn("text-xs", theme === "dark" ? "text-slate-400" : "text-slate-500")}>Nuevos</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-blue-600">{formatNumber(stats?.updatedCount)}</p>
+                    <p className={cn("text-xs", theme === "dark" ? "text-slate-400" : "text-slate-500")}>Actualizados</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-red-600">{formatNumber(stats?.rejectedCount)}</p>
+                    <p className={cn("text-xs", theme === "dark" ? "text-slate-400" : "text-slate-500")}>Rechazados</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-3 mt-5">
+                {canDownloadCurrentRejected && (
                   <button
-                    onClick={async () => {
-                      try {
-                        const response = await api.client.get(result.stats.duplicatesReportUrl, {
-                          responseType: 'blob'
-                        })
-
-                        // Create blob link to download
-                        const url = window.URL.createObjectURL(new Blob([response.data]))
-                        const link = document.createElement('a')
-                        link.href = url
-
-                        // Extract filename from URL or use default
-                        const filename = result.stats.duplicatesReportUrl.split('/').pop() || 'reporte_rechazos.xlsx'
-                        link.setAttribute('download', filename)
-
-                        document.body.appendChild(link)
-                        link.click()
-
-                        // Clean up
-                        link.parentNode?.removeChild(link)
-                        window.URL.revokeObjectURL(url)
-                      } catch (error) {
-                        console.error("Error downloading report:", error)
-                        toast.error("Error al descargar el reporte")
-                      }
-                    }}
-                    className={cn(
-                      "inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer",
-                      theme === "dark"
-                        ? "bg-yellow-500/10 text-yellow-300 border border-yellow-500/20 hover:bg-yellow-500/20"
-                        : "bg-yellow-50 text-yellow-700 border border-yellow-200 hover:bg-yellow-100"
-                    )}
+                    onClick={() => downloadRejectedReport(stats.importJobId)}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-red-100 bg-white text-red-600 hover:bg-red-50 transition-colors"
                   >
-                    <FileSpreadsheet className="w-4 h-4" />
-                    Descargar Reporte de Rechazos
+                    <FileDown className="w-4 h-4" />
+                    Descargar rechazados
+                  </button>
+                )}
+                {canDownloadCurrentUpdated && (
+                  <button
+                    onClick={() => downloadUpdatedReport(stats.importJobId)}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border border-blue-100 bg-white text-blue-600 hover:bg-blue-50 transition-colors"
+                  >
+                    <FileDown className="w-4 h-4" />
+                    Descargar actualizados
                   </button>
                 )}
               </div>
             </div>
-          </div>
+          )}
+
         </div>
       )}
+
+      <div className={cn(
+        "rounded-3xl border p-5 shadow-sm overflow-hidden",
+        theme === "dark" ? "bg-white/5 border-white/10" : "bg-white border-emerald-100/70"
+      )}>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 className={cn("font-bold", theme === "dark" ? "text-white" : "text-slate-900")}>Importaciones recientes</h3>
+            <p className={cn("text-xs mt-1", theme === "dark" ? "text-slate-400" : "text-slate-500")}>
+              Últimos archivos procesados disponibles para consulta.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={loadRecentImports}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
+              theme === "dark" ? "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10" : "border-emerald-100 bg-white text-emerald-700 hover:bg-emerald-50"
+            )}
+          >
+            <RefreshCw className={cn("w-4 h-4", recentLoading && "animate-spin")} />
+            Actualizar
+          </button>
+        </div>
+
+        {importsToShow.length === 0 ? (
+          <div className={cn(
+            "rounded-2xl border border-dashed p-8 text-center",
+            theme === "dark" ? "border-white/10 text-slate-400" : "border-slate-200 text-slate-500"
+          )}>
+            Todavía no hay importaciones recientes para mostrar.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[780px] text-sm">
+              <thead>
+                <tr className={cn("border-b", theme === "dark" ? "border-white/10 text-slate-400" : "border-slate-100 text-slate-500")}>
+                  <th className="text-left font-semibold py-3 px-2">Archivo</th>
+                  <th className="text-left font-semibold py-3 px-2">Fecha</th>
+                  <th className="text-left font-semibold py-3 px-2">Estado</th>
+                  <th className="text-right font-semibold py-3 px-2">Nuevos</th>
+                  <th className="text-right font-semibold py-3 px-2">Actualizados</th>
+                  <th className="text-right font-semibold py-3 px-2">Rechazados</th>
+                  <th className="text-right font-semibold py-3 px-2">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importsToShow.map((item) => {
+                  const canDownloadRejected = !!item.id && Boolean(item.rejectedFileAvailable || item.rejectedFileUrl)
+                  const canDownloadUpdated = !!item.id && Boolean(item.updatedFileAvailable || item.updatedFileUrl)
+                  return (
+                    <tr key={item.id} className={cn("border-b last:border-b-0", theme === "dark" ? "border-white/5" : "border-slate-100")}>
+                      <td className={cn("py-3 px-2 font-medium", theme === "dark" ? "text-slate-200" : "text-slate-700")}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span className="truncate max-w-[260px]">{item.archivo || "Archivo de afiliados"}</span>
+                        </div>
+                      </td>
+                      <td className={cn("py-3 px-2", theme === "dark" ? "text-slate-400" : "text-slate-500")}>{formatDate(item.fecha)}</td>
+                      <td className="py-3 px-2">
+                        <span className={cn(
+                          "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
+                          item.estado === "failed"
+                            ? "bg-red-50 text-red-700"
+                            : item.estado === "processing" || item.estado === "pending"
+                              ? "bg-cyan-50 text-cyan-700"
+                              : "bg-emerald-50 text-emerald-700"
+                        )}>
+                          {item.estado === "processing" || item.estado === "pending" ? <Clock className="w-3 h-3 mr-1" /> : null}
+                          {getStatusLabel(item.estado)}
+                        </span>
+                      </td>
+                      <td className={cn("py-3 px-2 text-right", theme === "dark" ? "text-slate-300" : "text-slate-700")}>{formatNumber(item.nuevos)}</td>
+                      <td className={cn("py-3 px-2 text-right", theme === "dark" ? "text-slate-300" : "text-slate-700")}>{formatNumber(item.actualizados)}</td>
+                      <td className="py-3 px-2 text-right font-semibold text-red-600">{formatNumber(item.rechazados)}</td>
+                      <td className="py-3 px-2">
+                        <div className="flex items-center justify-end gap-2">
+                          {canDownloadRejected && (
+                            <button
+                              type="button"
+                              onClick={() => downloadRejectedReport(item.id)}
+                              className="w-8 h-8 rounded-lg border border-red-100 text-red-600 hover:bg-red-50 inline-flex items-center justify-center transition-colors"
+                              title="Descargar rechazados"
+                            >
+                              <FileDown className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canDownloadUpdated && (
+                            <button
+                              type="button"
+                              onClick={() => downloadUpdatedReport(item.id)}
+                              className="w-8 h-8 rounded-lg border border-blue-100 text-blue-600 hover:bg-blue-50 inline-flex items-center justify-center transition-colors"
+                              title="Descargar actualizados"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                          )}
+                          {!canDownloadRejected && !canDownloadUpdated && (
+                            <span className={cn("text-xs", theme === "dark" ? "text-slate-500" : "text-slate-400")}>Sin reportes</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

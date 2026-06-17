@@ -922,6 +922,147 @@ describe("affiliateCheck.service", () => {
         }
     });
 
+
+    test("external import summary exposes report URLs only for existing authorized files", async () => {
+        const previousRoot = process.env.AFFILIATE_IMPORT_REPORT_DIR;
+        const reportRoot = path.join(__dirname, "../tmp/report-storage-summary");
+        fs.mkdirSync(reportRoot, { recursive: true });
+        const rejectedPath = path.join(reportRoot, "rejected.xlsx");
+        fs.writeFileSync(rejectedPath, "report");
+        process.env.AFFILIATE_IMPORT_REPORT_DIR = reportRoot;
+
+        try {
+            const manager = userStub("gerencia");
+            const importJob = await createExternalImport({ uploadedBy: manager._id });
+            await AffiliateImportJob.updateOne(
+                { _id: importJob._id },
+                { $set: { rejectedFilePath: rejectedPath, updatedFilePath: null } }
+            );
+
+            const response = responseStub();
+            await affiliateController.getExternalAffiliateCheckImport({
+                user: manager,
+                params: { importJobId: String(importJob._id) }
+            }, response);
+
+            expect(response.statusCode).toBe(200);
+            expect(response.body.job.rejectedFileAvailable).toBe(true);
+            expect(response.body.job.rejectedFileUrl).toBe("/affiliates/check/external-file/" + importJob._id + "/rejected-file");
+            expect(response.body.job.updatedFileAvailable).toBe(false);
+            expect(response.body.job.updatedFileUrl).toBeNull();
+        } finally {
+            if (previousRoot === undefined) delete process.env.AFFILIATE_IMPORT_REPORT_DIR;
+            else process.env.AFFILIATE_IMPORT_REPORT_DIR = previousRoot;
+            fs.rmSync(reportRoot, { recursive: true, force: true });
+        }
+    });
+
+
+    test("normal import job exposes file URLs only when stored reports exist", async () => {
+        const previousRoot = process.env.AFFILIATE_IMPORT_REPORT_DIR;
+        const reportRoot = path.join(__dirname, "../tmp/report-storage-normal-summary");
+        fs.mkdirSync(reportRoot, { recursive: true });
+        const rejectedPath = path.join(reportRoot, "rejected.xlsx");
+        fs.writeFileSync(rejectedPath, "report");
+        process.env.AFFILIATE_IMPORT_REPORT_DIR = reportRoot;
+
+        try {
+            const manager = userStub("gerencia");
+            const importJob = await AffiliateImportJob.create({
+                originalFilename: "normal.xlsx",
+                storedFilename: "normal.xlsx",
+                uploadedBy: manager._id,
+                status: "completed_with_errors",
+                totalRows: 2,
+                processedRows: 2,
+                createdCount: 1,
+                updatedCount: 1,
+                rejectedCount: 1,
+                rejectedFilePath: rejectedPath,
+                updatedFilePath: null
+            });
+
+            const response = responseStub();
+            await affiliateController.getAffiliateImportJob({
+                user: manager,
+                params: { jobId: String(importJob._id) }
+            }, response);
+
+            expect(response.statusCode).toBe(200);
+            expect(response.body.job.rejectedFileAvailable).toBe(true);
+            expect(response.body.job.rejectedFileUrl).toBe("/affiliates/import-jobs/" + importJob._id + "/rejected-file");
+            expect(response.body.job.updatedFileAvailable).toBe(false);
+            expect(response.body.job.updatedFileUrl).toBeNull();
+        } finally {
+            if (previousRoot === undefined) delete process.env.AFFILIATE_IMPORT_REPORT_DIR;
+            else process.env.AFFILIATE_IMPORT_REPORT_DIR = previousRoot;
+            fs.rmSync(reportRoot, { recursive: true, force: true });
+        }
+    });
+
+
+    test("normal and external report downloads share canonical path resolution", async () => {
+        const previousRoot = process.env.AFFILIATE_IMPORT_REPORT_DIR;
+        const reportRoot = path.join(__dirname, "../tmp/report-storage-download");
+        fs.mkdirSync(reportRoot, { recursive: true });
+        const reportPath = path.join(reportRoot, "report.xlsx");
+        fs.writeFileSync(reportPath, "report");
+        process.env.AFFILIATE_IMPORT_REPORT_DIR = reportRoot;
+
+        try {
+            const manager = userStub("gerencia");
+            const normalJob = await AffiliateImportJob.create({
+                originalFilename: "normal.xlsx",
+                storedFilename: "normal.xlsx",
+                uploadedBy: manager._id,
+                status: "completed_with_errors",
+                rejectedFilePath: reportPath
+            });
+            const externalJob = await createExternalImport({ uploadedBy: manager._id });
+            await AffiliateImportJob.updateOne(
+                { _id: externalJob._id },
+                { $set: { rejectedFilePath: reportPath } }
+            );
+
+            for (const [handler, params] of [
+                [affiliateController.downloadAffiliateImportRejectedFile, { jobId: String(normalJob._id) }],
+                [affiliateController.downloadExternalAffiliateCheckRejectedFile, { importJobId: String(externalJob._id) }]
+            ]) {
+                const res = responseStub();
+                res.download = jest.fn();
+                await handler({ user: manager, params }, res);
+                expect(res.statusCode).toBe(200);
+                expect(res.download).toHaveBeenCalledWith(reportPath, "report.xlsx");
+            }
+
+            const siblingPath = `${reportRoot}-old/report.xlsx`;
+            await AffiliateImportJob.updateOne(
+                { _id: normalJob._id },
+                { $set: { rejectedFilePath: siblingPath } }
+            );
+            await AffiliateImportJob.updateOne(
+                { _id: externalJob._id },
+                { $set: { rejectedFilePath: siblingPath } }
+            );
+
+            for (const [handler, params] of [
+                [affiliateController.downloadAffiliateImportRejectedFile, { jobId: String(normalJob._id) }],
+                [affiliateController.downloadExternalAffiliateCheckRejectedFile, { importJobId: String(externalJob._id) }]
+            ]) {
+                const res = responseStub();
+                res.download = jest.fn();
+                await handler({ user: manager, params }, res);
+                expect(res.statusCode).toBe(403);
+                expect(res.download).not.toHaveBeenCalled();
+            }
+        } finally {
+            if (previousRoot === undefined) delete process.env.AFFILIATE_IMPORT_REPORT_DIR;
+            else process.env.AFFILIATE_IMPORT_REPORT_DIR = previousRoot;
+            fs.rmSync(reportRoot, { recursive: true, force: true });
+        }
+    });
+
+
     test("affiliate check access middleware enforces the internal role matrix", () => {
         const allowedRoles = ["supervisor", "gerencia", "encargado", "desarrollador"];
         const deniedRoles = ["asesor", "independiente", "auditor", "admin", "capacitador", "administrativo"];

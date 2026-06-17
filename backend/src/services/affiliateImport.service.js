@@ -20,9 +20,13 @@ const {
     rotateCanonicalPhones,
     extractAdditionalFields
 } = require("../utils/excelHelpers");
+const {
+    getAffiliateImportReportRoot,
+    buildAffiliateImportReportPath,
+    affiliateImportReportExists
+} = require("../utils/affiliateImportReportStorage");
 
 const IMPORT_UPLOAD_DIR = path.join(__dirname, "../../uploads/affiliates");
-const IMPORT_REPORT_DIR = path.join(__dirname, "../../uploads/affiliate-reports");
 const STALE_PROCESSING_MS = 2 * 60 * 60 * 1000;
 const IMPORT_BATCH_SIZE = Number(process.env.AFFILIATE_IMPORT_BATCH_SIZE || 1000);
 const REPORT_BATCH_SIZE = Number(process.env.AFFILIATE_IMPORT_REPORT_BATCH_SIZE || 1000);
@@ -847,11 +851,8 @@ async function generateDuplicatesReport(duplicates, originalFileName, summary) {
     XLSX.utils.book_append_sheet(workbook, rejectedSheet, "Rechazados");
     XLSX.utils.book_append_sheet(workbook, summarySheet, "Resumen");
 
-    const reportsDir = IMPORT_REPORT_DIR;
-    await fs.mkdir(reportsDir, { recursive: true });
-
     const reportFileName = `rejected_${Date.now()}_${path.parse(originalFileName).name}.xlsx`;
-    const reportPath = path.join(reportsDir, reportFileName);
+    const reportPath = await buildAffiliateImportReportPath(reportFileName);
     XLSX.writeFile(workbook, reportPath);
     logger.info(`Reporte de rechazos generado: ${reportFileName}`);
 
@@ -871,11 +872,8 @@ async function generateUpdatedReport(updatedRecords, originalFileName) {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Actualizados");
 
-    const reportsDir = IMPORT_REPORT_DIR;
-    await fs.mkdir(reportsDir, { recursive: true });
-
     const reportFileName = `updated_${Date.now()}_${path.parse(originalFileName).name}.xlsx`;
-    const reportPath = path.join(reportsDir, reportFileName);
+    const reportPath = await buildAffiliateImportReportPath(reportFileName);
 
     XLSX.writeFile(wb, reportPath);
     logger.info(`📋 Reporte de actualizados generado: ${reportFileName}`);
@@ -897,16 +895,6 @@ function buildImportSummary(job, result, totalRows) {
     };
 }
 
-async function pathExists(filePath) {
-    if (!filePath) return false;
-    try {
-        await fs.access(filePath);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
 function rejectedReportRowFromImportRow(row, originalFileName) {
     const normalized = row.normalized || {};
     return {
@@ -923,9 +911,8 @@ function rejectedReportRowFromImportRow(row, originalFileName) {
 }
 
 async function generateRejectedReportFromImportRows(jobId, originalFileName, summary) {
-    await fs.mkdir(IMPORT_REPORT_DIR, { recursive: true });
     const reportFileName = `rejected_${Date.now()}_${path.parse(originalFileName).name}.xlsx`;
-    const reportPath = path.join(IMPORT_REPORT_DIR, reportFileName);
+    const reportPath = await buildAffiliateImportReportPath(reportFileName);
     const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ filename: reportPath });
     const rejectedSheet = workbook.addWorksheet("Rechazados");
     rejectedSheet.columns = [
@@ -992,7 +979,7 @@ async function ensureRejectedReportForJob(job, summary, { dryRun = false } = {})
     if ((job.rejectedCount || 0) === 0) {
         return { path: existingPath || null, required: false, generated: false };
     }
-    if (await pathExists(existingPath)) {
+    if (await affiliateImportReportExists(existingPath)) {
         return { path: existingPath, required: true, generated: false };
     }
 
@@ -1293,7 +1280,7 @@ function kickAffiliateImportProcessor() {
 
 module.exports = {
     IMPORT_UPLOAD_DIR,
-    IMPORT_REPORT_DIR,
+    IMPORT_REPORT_DIR: getAffiliateImportReportRoot(),
     processAffiliatesData,
     processAffiliateImportJob,
     claimAndProcessNextJob,

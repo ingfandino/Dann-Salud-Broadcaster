@@ -19,7 +19,7 @@
 const mongoose = require("mongoose");
 const Affiliate = require("../models/Affiliate");
 const AffiliateImportJob = require("../models/AffiliateImportJob");
-const { IMPORT_REPORT_DIR, kickAffiliateImportProcessor } = require("../services/affiliateImport.service");
+const { kickAffiliateImportProcessor } = require("../services/affiliateImport.service");
 const { getLocalitiesByZone, normalize, ALL_KNOWN_LOCALITIES } = require("../constants/localityZones");
 const Audit = require("../models/Audit");
 const AffiliateExportConfig = require("../models/AffiliateExportConfig");
@@ -59,6 +59,12 @@ const logger = require("../utils/logger");
 const XLSX = require("xlsx");
 const path = require("path");
 const fs = require("fs").promises;
+const {
+    resolveAffiliateImportReportPath,
+    affiliateImportReportExists,
+    logLegacyAffiliateImportReportAccess,
+    buildAffiliateImportReportPath
+} = require("../utils/affiliateImportReportStorage");
 
 /** Middleware: Solo usuarios de rol Gerencia o Encargado */
 exports.requireGerencia = (req, res, next) => {
@@ -443,6 +449,36 @@ function serializeRejectionSummary(summary) {
     return summary;
 }
 
+async function buildAffiliateImportReportAvailability(job, field, url) {
+    const storedPath = job?.[field];
+    const available = Boolean(storedPath) && await affiliateImportReportExists(storedPath);
+    return {
+        available,
+        url: available ? url : null
+    };
+}
+
+async function downloadAffiliateImportReport(res, job, field, missingMessage, notFoundMessage, context) {
+    const storedPath = job?.[field];
+    if (!storedPath) {
+        return res.status(404).json({ success: false, message: missingMessage });
+    }
+
+    const resolved = resolveAffiliateImportReportPath(storedPath);
+    if (!resolved.authorized) {
+        logger.warn("[AFFILIATE-IMPORT][job:" + job._id + "] Ruta de reporte no autorizada (" + context + ")");
+        return res.status(403).json({ success: false, message: "Ruta de reporte no autorizada" });
+    }
+
+    const exists = await fs.access(resolved.filePath).then(() => true).catch(() => false);
+    if (!exists) {
+        return res.status(404).json({ success: false, message: notFoundMessage });
+    }
+
+    logLegacyAffiliateImportReportAccess(storedPath, context);
+    return res.download(resolved.filePath, path.basename(resolved.filePath));
+}
+
 function buildExternalImportAccessFilter(req, importJobId) {
     const filter = { _id: importJobId, source: "external_check" };
     if (!canSeeAllAffiliateCheckJobs(req)) filter.uploadedBy = req.user._id;
@@ -473,6 +509,16 @@ exports.getExternalAffiliateCheckImport = async (req, res) => {
         const availability = ["completed", "completed_with_errors"].includes(job.status)
             ? await getImportedAffiliateCheckAvailability(job._id)
             : { eligibleCount: 0, checkableCount: 0, excludedCount: 0, exclusionReasons: {} };
+        const rejectedReport = await buildAffiliateImportReportAvailability(
+            job,
+            "rejectedFilePath",
+            "/affiliates/check/external-file/" + job._id + "/rejected-file"
+        );
+        const updatedReport = await buildAffiliateImportReportAvailability(
+            job,
+            "updatedFilePath",
+            "/affiliates/check/external-file/" + job._id + "/updated-file"
+        );
         return res.json({
             success: true,
             job: {
@@ -487,8 +533,10 @@ exports.getExternalAffiliateCheckImport = async (req, res) => {
                 excludedCount: availability.excludedCount || 0,
                 exclusionReasons: availability.exclusionReasons || {},
                 batchId: job.batchId || null,
-                rejectedFileAvailable: Boolean(job.rejectedFilePath),
-                updatedFileAvailable: Boolean(job.updatedFilePath)
+                rejectedFileAvailable: rejectedReport.available,
+                rejectedFileUrl: rejectedReport.url,
+                updatedFileAvailable: updatedReport.available,
+                updatedFileUrl: updatedReport.url
             }
         });
     } catch (error) {
@@ -498,20 +546,17 @@ exports.getExternalAffiliateCheckImport = async (req, res) => {
 
 async function downloadExternalImportReport(req, res, field, missingMessage) {
     const job = await findAccessibleExternalImport(req, { [field]: 1 });
-    const storedPath = job?.[field];
-    if (!storedPath) {
-        return res.status(404).json({ success: false, message: missingMessage });
+    if (!job) {
+        return res.status(404).json({ success: false, message: "Trabajo de importación no encontrado" });
     }
-    const reportsRoot = path.resolve(IMPORT_REPORT_DIR);
-    const reportPath = path.resolve(storedPath);
-    if (!reportPath.startsWith(`${reportsRoot}${path.sep}`)) {
-        return res.status(403).json({ success: false, message: "Ruta de reporte no autorizada" });
-    }
-    const exists = await fs.access(reportPath).then(() => true).catch(() => false);
-    if (!exists) {
-        return res.status(404).json({ success: false, message: "Reporte no encontrado" });
-    }
-    return res.download(reportPath, path.basename(reportPath));
+    return downloadAffiliateImportReport(
+        res,
+        job,
+        field,
+        missingMessage,
+        "Reporte no encontrado",
+        "external-" + field
+    );
 }
 
 exports.downloadExternalAffiliateCheckRejectedFile = async (req, res) => {
@@ -583,17 +628,26 @@ exports.getAffiliateImportJob = async (req, res) => {
             return res.status(404).json({ success: false, message: "Trabajo de importación no encontrado" });
         }
 
+        const rejectedReport = await buildAffiliateImportReportAvailability(
+            job,
+            "rejectedFilePath",
+            "/affiliates/import-jobs/" + job._id + "/rejected-file"
+        );
+        const updatedReport = await buildAffiliateImportReportAvailability(
+            job,
+            "updatedFilePath",
+            "/affiliates/import-jobs/" + job._id + "/updated-file"
+        );
+
         return res.json({
             success: true,
             job: {
                 ...job,
                 rejectionSummary: serializeRejectionSummary(job.rejectionSummary),
-                rejectedFileUrl: job.rejectedFilePath
-                    ? `/affiliates/import-jobs/${job._id}/rejected-file`
-                    : null,
-                updatedFileUrl: job.updatedFilePath
-                    ? '/affiliates/import-jobs/' + job._id + '/updated-file'
-                    : null
+                rejectedFileAvailable: rejectedReport.available,
+                rejectedFileUrl: rejectedReport.url,
+                updatedFileAvailable: updatedReport.available,
+                updatedFileUrl: updatedReport.url
             }
         });
     } catch (error) {
@@ -613,23 +667,18 @@ exports.downloadAffiliateImportRejectedFile = async (req, res) => {
             { rejectedFilePath: 1 }
         ).lean();
 
-        if (!job?.rejectedFilePath) {
-            return res.status(404).json({ success: false, message: "El trabajo no tiene reporte de rechazados" });
+        if (!job) {
+            return res.status(404).json({ success: false, message: "Trabajo de importación no encontrado" });
         }
 
-        const reportsRoot = path.resolve(IMPORT_REPORT_DIR);
-        const reportPath = path.resolve(job.rejectedFilePath);
-        if (!reportPath.startsWith(`${reportsRoot}${path.sep}`)) {
-            logger.warn(`[AFFILIATE-IMPORT][job:${job._id}] Ruta de reporte inválida`);
-            return res.status(403).json({ success: false, message: "Ruta de reporte no autorizada" });
-        }
-
-        const exists = await fs.access(reportPath).then(() => true).catch(() => false);
-        if (!exists) {
-            return res.status(404).json({ success: false, message: "Reporte de rechazados no encontrado" });
-        }
-
-        return res.download(reportPath, path.basename(reportPath));
+        return downloadAffiliateImportReport(
+            res,
+            job,
+            "rejectedFilePath",
+            "El trabajo no tiene reporte de rechazados",
+            "Reporte de rechazados no encontrado",
+            "normal-rejectedFilePath"
+        );
     } catch (error) {
         logger.error("Error descargando reporte de importación:", error);
         return res.status(500).json({ success: false, message: error.message });
@@ -647,23 +696,18 @@ exports.downloadAffiliateImportUpdatedFile = async (req, res) => {
             { updatedFilePath: 1 }
         ).lean();
 
-        if (!job?.updatedFilePath) {
-            return res.status(404).json({ success: false, message: "El trabajo no tiene reporte de actualizados" });
+        if (!job) {
+            return res.status(404).json({ success: false, message: "Trabajo de importación no encontrado" });
         }
 
-        const reportsRoot = path.resolve(IMPORT_REPORT_DIR);
-        const reportPath = path.resolve(job.updatedFilePath);
-        if (!reportPath.startsWith(`${reportsRoot}${path.sep}`)) {
-            logger.warn(`[AFFILIATE-IMPORT][job:${job._id}] Ruta de reporte actualizado inválida`);
-            return res.status(403).json({ success: false, message: "Ruta de reporte no autorizada" });
-        }
-
-        const exists = await fs.access(reportPath).then(() => true).catch(() => false);
-        if (!exists) {
-            return res.status(404).json({ success: false, message: "Reporte de actualizados no encontrado" });
-        }
-
-        return res.download(reportPath, path.basename(reportPath));
+        return downloadAffiliateImportReport(
+            res,
+            job,
+            "updatedFilePath",
+            "El trabajo no tiene reporte de actualizados",
+            "Reporte de actualizados no encontrado",
+            "normal-updatedFilePath"
+        );
     } catch (error) {
         logger.error("Error descargando reporte de actualizados:", error);
         return res.status(500).json({ success: false, message: error.message });
@@ -675,7 +719,7 @@ exports.downloadAffiliateImportUpdatedFile = async (req, res) => {
 exports.downloadReport = async (req, res) => {
     try {
         const { filename } = req.params;
-        const filePath = path.join(__dirname, "../../uploads/affiliate-reports", filename);
+        const filePath = await buildAffiliateImportReportPath(filename);
 
         /* Seguridad: verificar que el archivo existe y está en el directorio correcto */
         const exists = await fs.access(filePath).then(() => true).catch(() => false);
@@ -1150,17 +1194,33 @@ exports.getBaseStatus = async (req, res) => {
         const recentImportsList = await AffiliateImportJob.find({})
             .sort({ createdAt: -1 })
             .limit(5)
-            .select("originalFilename createdAt createdCount updatedCount rejectedCount status")
+            .select("originalFilename createdAt createdCount updatedCount rejectedCount status rejectedFilePath updatedFilePath")
             .lean();
 
-        const recentImports = recentImportsList.map(job => ({
-            id: job._id,
-            archivo: job.originalFilename,
-            fecha: job.createdAt,
-            nuevos: job.createdCount,
-            actualizados: job.updatedCount,
-            rechazados: job.rejectedCount,
-            estado: job.status
+        const recentImports = await Promise.all(recentImportsList.map(async job => {
+            const rejectedReport = await buildAffiliateImportReportAvailability(
+                job,
+                "rejectedFilePath",
+                "/affiliates/import-jobs/" + job._id + "/rejected-file"
+            );
+            const updatedReport = await buildAffiliateImportReportAvailability(
+                job,
+                "updatedFilePath",
+                "/affiliates/import-jobs/" + job._id + "/updated-file"
+            );
+            return {
+                id: job._id,
+                archivo: job.originalFilename,
+                fecha: job.createdAt,
+                nuevos: job.createdCount,
+                actualizados: job.updatedCount,
+                rechazados: job.rejectedCount,
+                estado: job.status,
+                rejectedFileAvailable: rejectedReport.available,
+                rejectedFileUrl: rejectedReport.url,
+                updatedFileAvailable: updatedReport.available,
+                updatedFileUrl: updatedReport.url
+            };
         }));
 
         // Alerts logic
