@@ -10,6 +10,7 @@ const AffiliateContribution = require("../models/AffiliateContribution");
 const Affiliate = require("../models/Affiliate");
 const { scrapeCuil, scrapeCuilWithSession, BrowserSession, randomDelay } = require("./contributionScraper.service");
 const logger = require("../utils/logger");
+const { computeAndUpdateCanSell } = require("../utils/canSellUtils");
 
 /**
  * Guarda o actualiza el resultado de verificación para un afiliado.
@@ -38,11 +39,23 @@ async function saveResult(affiliateId, cuil, scraperResult, options = {}) {
             $set: {
                 cuil,
                 lastContributionPeriod: scraperResult.lastContributionPeriod,
+                last3ClosedMonthsPaidCount: scraperResult.last3ClosedMonthsPaidCount ?? null,
                 verification: verificationData,
             },
         },
         { upsert: true, new: true }
     );
+
+    const canSellResult = await computeAndUpdateCanSell(String(affiliateId));
+    if (!canSellResult.success) {
+        logger.error(
+            `[CONTRIBUTION-SYNC] CanSell computation failed | affiliateId=${affiliateId} | `
+            + `arcaStatus=${scraperResult.status} | error=${canSellResult.error}`
+        );
+        return { canSellError: canSellResult.error, canSellSuccess: false };
+    }
+
+    return { canSell: canSellResult.canSell, canSellSuccess: true };
 }
 
 /**
