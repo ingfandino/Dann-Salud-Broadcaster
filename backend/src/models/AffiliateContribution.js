@@ -68,6 +68,11 @@ const affiliateContributionSchema = new mongoose.Schema(
             type: verificationSchema,
             default: () => ({}),
         },
+        canSell: {
+            type: Boolean,
+            default: null,
+            index: true,
+        },
     },
     {
         timestamps: true,
