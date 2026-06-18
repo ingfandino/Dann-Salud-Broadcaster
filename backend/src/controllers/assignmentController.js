@@ -260,7 +260,14 @@ exports.distribute = async (req, res) => {
         }
 
         const result = await assignmentService.distributeLeads({ distribution }, req.user._id);
-        res.json({ message: "Distribución completada", result });
+        const message = result.message || "Distribución completada";
+        const statusCode = result.totalAssigned === 0 && result.requestedTotal > 0
+            ? 409
+            : result.partial
+                ? 207
+                : 200;
+
+        res.status(statusCode).json({ message, result });
 
     } catch (error) {
         console.error("Error en distribución:", error);

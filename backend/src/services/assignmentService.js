@@ -9,6 +9,8 @@
 const Affiliate = require("../models/Affiliate");
 const Audit = require("../models/Audit");
 const User = require("../models/User");
+const AffiliateAssignment = require("../models/AffiliateAssignment");
+const AffiliateOperationalState = require("../models/AffiliateOperationalState");
 const LeadAssignment = require("../models/LeadAssignment");
 const Contact = require("../models/Contact");
 const logger = require("../utils/logger");
@@ -21,6 +23,195 @@ function shuffleArray(array) {
         [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     return arr;
+}
+
+function normalizeMix(mixConfig = {}) {
+    const rawFresh = Number(mixConfig.freshPercentage);
+    const freshPercentage = Number.isFinite(rawFresh)
+        ? Math.max(0, Math.min(100, rawFresh))
+        : 50;
+    return {
+        freshPercentage,
+        reusablePercentage: 100 - freshPercentage
+    };
+}
+
+function isStockStateSellable(state, supervisorId, now) {
+    if (!state) return false;
+    const ownershipSupervisor = state.ownership?.supervisorId;
+    if (ownershipSupervisor && String(ownershipSupervisor) !== String(supervisorId)) return false;
+    if (state.canSell !== true) return false;
+    if (state.verificationStatus !== "checked") return false;
+    if (state.saleStatus !== "none") return false;
+    if (state.currentCheckJobId) return false;
+    if (state.verificationExpiresAt && new Date(state.verificationExpiresAt) <= now) return false;
+    return true;
+}
+
+function stockSourceType(assignment, state, affiliate) {
+    const source = state?.freshness || state?.dataSource || affiliate?.dataSource || assignment?.source;
+    return source === "reusable" ? "reusable" : "fresh";
+}
+
+function takeBySource(pool, count, usedIds) {
+    const selected = [];
+    for (const item of pool) {
+        if (selected.length >= count) break;
+        const affiliateKey = String(item.affiliateId);
+        const stockKey = String(item.stockAssignmentId);
+        if (usedIds.has(affiliateKey) || usedIds.has(stockKey)) continue;
+        selected.push(item);
+        usedIds.add(affiliateKey);
+        usedIds.add(stockKey);
+    }
+    return selected;
+}
+
+async function getCanonicalStockLeads(mixConfig, totalCount, supervisorId, usedIds = new Set(), now = new Date()) {
+    const quantity = Math.max(0, Number(totalCount) || 0);
+    if (!quantity) return [];
+
+    const mix = normalizeMix(mixConfig);
+    const targetFresh = Math.floor(quantity * (mix.freshPercentage / 100));
+    const targetReusable = quantity - targetFresh;
+
+    const rawAssignments = await AffiliateAssignment.find({
+        supervisorId,
+        status: "active",
+        expiresAt: { $gt: now },
+        _id: { $nin: Array.from(usedIds).filter(id => String(id).length === 24) }
+    })
+        .populate("affiliateId", "nombre telefono1 cuil obraSocial localidad dataSource active")
+        .populate("operationalStateId")
+        .sort({ assignedAt: 1, _id: 1 })
+        .limit(Math.max(quantity * 5, 100))
+        .lean();
+
+    const affiliateIds = rawAssignments.map(item => item.affiliateId?._id).filter(Boolean);
+    const [statesByAffiliate, activeLeadAffiliateIds] = await Promise.all([
+        AffiliateOperationalState.find({ affiliateId: { $in: affiliateIds } }).lean()
+            .then(rows => new Map(rows.map(row => [String(row.affiliateId), row]))),
+        LeadAssignment.distinct("affiliate", {
+            affiliate: { $in: affiliateIds },
+            active: true
+        }).then(ids => new Set(ids.map(String)))
+    ]);
+
+    const eligible = [];
+    for (const assignment of rawAssignments) {
+        const affiliate = assignment.affiliateId;
+        if (!affiliate || affiliate.active === false) continue;
+        if (activeLeadAffiliateIds.has(String(affiliate._id))) continue;
+        const state = assignment.operationalStateId || statesByAffiliate.get(String(affiliate._id));
+        if (!isStockStateSellable(state, supervisorId, now)) continue;
+        eligible.push({
+            _id: affiliate._id,
+            affiliateId: affiliate._id,
+            stockAssignmentId: assignment._id,
+            operationalStateId: state?._id || assignment.operationalStateId?._id || null,
+            sourceJobId: assignment.sourceJobId || null,
+            stockSource: assignment.source,
+            _source: stockSourceType(assignment, state, affiliate)
+        });
+    }
+
+    const fresh = eligible.filter(item => item._source === "fresh");
+    const reusable = eligible.filter(item => item._source === "reusable");
+    const selectedFresh = takeBySource(fresh, targetFresh, usedIds);
+    const selectedReusable = takeBySource(reusable, targetReusable, usedIds);
+    const selected = [...selectedFresh, ...selectedReusable];
+
+    if (selected.length < quantity) {
+        const selectedKeys = new Set(selected.map(item => String(item.stockAssignmentId)));
+        const remainder = eligible.filter(item => !selectedKeys.has(String(item.stockAssignmentId)));
+        selected.push(...takeBySource(remainder, quantity - selected.length, usedIds));
+    }
+
+    return selected.slice(0, quantity);
+}
+
+async function claimStockForAdvisor(lead, asesorId, supervisorId, now) {
+    const claimed = await AffiliateAssignment.findOneAndUpdate(
+        {
+            _id: lead.stockAssignmentId,
+            affiliateId: lead.affiliateId,
+            supervisorId,
+            status: "active",
+            expiresAt: { $gt: now }
+        },
+        {
+            $set: {
+                status: "released",
+                releasedAt: now,
+                releaseReason: "assigned_to_advisor"
+            }
+        },
+        { new: true }
+    ).lean();
+
+    if (!claimed) return null;
+
+    try {
+        const assignment = await LeadAssignment.create({
+            affiliate: lead.affiliateId,
+            assignedTo: asesorId,
+            assignedBy: supervisorId,
+            supervisor: supervisorId,
+            sourceStockAssignment: lead.stockAssignmentId,
+            operationalState: lead.operationalStateId,
+            sourceCheckJob: lead.sourceJobId,
+            status: "Pendiente",
+            sourceType: lead._source || "fresh",
+            active: true,
+            interactions: [{
+                type: "Nota",
+                note: "Asignación desde stock verificado del supervisor",
+                performedBy: supervisorId,
+                timestamp: now
+            }]
+        });
+
+        await Promise.all([
+            Affiliate.updateOne(
+                { _id: lead.affiliateId },
+                {
+                    $set: {
+                        isUsed: true,
+                        assignedTo: asesorId,
+                        assignedAt: now,
+                        leadStatus: "Asignado"
+                    }
+                }
+            ),
+            lead.operationalStateId
+                ? AffiliateOperationalState.updateOne(
+                    { _id: lead.operationalStateId },
+                    {
+                        $set: {
+                            usageStatus: "assigned",
+                            availableForSale: false,
+                            unavailableReason: "assigned_to_advisor",
+                            lastUsedAt: now
+                        }
+                    }
+                )
+                : Promise.resolve()
+        ]);
+
+        return assignment;
+    } catch (error) {
+        if (error?.code !== 11000) {
+            await AffiliateAssignment.updateOne(
+                { _id: lead.stockAssignmentId, status: "released", releaseReason: "assigned_to_advisor" },
+                {
+                    $set: { status: "active" },
+                    $unset: { releasedAt: "", releaseReason: "" }
+                }
+            ).catch(() => {});
+        }
+        logger.warn(`No se pudo crear LeadAssignment desde stock ${lead.stockAssignmentId}: ${error.message}`);
+        return null;
+    }
 }
 
 /**
@@ -233,7 +424,8 @@ async function recycleAsesorAssignments(asesorId, supervisorId) {
     try {
         const prevAssignments = await LeadAssignment.find({
             assignedTo: asesorId,
-            active: true
+            active: true,
+            sourceStockAssignment: null
         }).lean();
 
         if (prevAssignments.length === 0) return { recycled: 0, freshReturned: 0, reusableReturned: 0 };
@@ -275,6 +467,8 @@ async function recycleAsesorAssignments(asesorId, supervisorId) {
 async function distributeLeads(config, supervisorId) {
     const results = {
         totalAssigned: 0,
+        requestedTotal: 0,
+        partial: false,
         details: []
     };
 
@@ -285,65 +479,58 @@ async function distributeLeads(config, supervisorId) {
             const { asesorId, quantity, mix } = item;
 
             if (!quantity || quantity <= 0) continue;
+            const requested = Number(quantity) || 0;
+            results.requestedTotal += requested;
 
             // PASO 1: Reciclar asignaciones previas del asesor
             const recycleResult = await recycleAsesorAssignments(asesorId, supervisorId);
 
-            // PASO 2: Obtener leads mezclados del pool del supervisor
-            const leads = await getMixedLeads(mix, quantity, supervisorId, usedIds);
+            // PASO 2: Obtener stock verificado del supervisor (modelo canónico)
+            const now = new Date();
+            const stockLeads = await getCanonicalStockLeads(mix, requested, supervisorId, usedIds, now);
 
-            if (leads.length === 0) {
+            if (stockLeads.length === 0) {
                 results.details.push({
                     asesorId,
                     assigned: 0,
                     recycled: recycleResult.recycled,
-                    message: "No hay leads disponibles en el pool del supervisor"
+                    requested,
+                    message: "No hay stock verificado disponible para este supervisor"
                 });
                 continue;
             }
 
-            // PASO 3: Crear asignaciones
-            const assignments = leads.map(lead => ({
-                affiliate: lead._id,
-                assignedTo: asesorId,
-                assignedBy: supervisorId,
-                status: 'Pendiente',
-                sourceType: lead._source || 'fresh',
-                active: true,
-                interactions: [{
-                    type: 'Nota',
-                    note: 'Asignación automática por sistema',
-                    timestamp: new Date()
-                }]
-            }));
-
-            await LeadAssignment.insertMany(assignments);
-
-            // PASO 4: Marcar Affiliates como usados para descontar del pool
-            const affiliateIds = leads.map(l => l._id);
-            await Affiliate.updateMany(
-                { _id: { $in: affiliateIds } },
-                {
-                    isUsed: true,
-                    assignedTo: asesorId,
-                    assignedAt: new Date(),
-                    leadStatus: 'Asignado'
-                }
-            );
+            const createdAssignments = [];
+            for (const lead of stockLeads) {
+                const assignment = await claimStockForAdvisor(lead, asesorId, supervisorId, now);
+                if (assignment) createdAssignments.push(assignment);
+            }
 
             // Actualizar tracking para esta ejecución
-            leads.forEach(l => usedIds.add(l._id.toString()));
-
-            results.totalAssigned += assignments.length;
-            results.details.push({
-                asesorId,
-                assigned: assignments.length,
-                recycled: recycleResult.recycled
+            stockLeads.forEach(l => {
+                usedIds.add(String(l.affiliateId));
+                usedIds.add(String(l.stockAssignmentId));
             });
 
-            logger.info(`✅ Asignados ${assignments.length} leads al asesor ${asesorId} (reciclados: ${recycleResult.recycled})`);
+            results.totalAssigned += createdAssignments.length;
+            results.details.push({
+                asesorId,
+                requested,
+                assigned: createdAssignments.length,
+                recycled: recycleResult.recycled,
+                source: "verified_supervisor_stock",
+                partial: createdAssignments.length < requested
+            });
+
+            logger.info(`✅ Asignados ${createdAssignments.length}/${requested} leads verificados al asesor ${asesorId} (reciclados legacy: ${recycleResult.recycled})`);
         }
 
+        results.partial = results.totalAssigned < results.requestedTotal;
+        if (results.partial) {
+            results.message = `Distribución parcial: ${results.totalAssigned}/${results.requestedTotal} asignados`;
+        } else {
+            results.message = "Distribución completada";
+        }
         return results;
 
     } catch (error) {

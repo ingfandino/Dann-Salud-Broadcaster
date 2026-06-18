@@ -31,6 +31,33 @@ const leadAssignmentSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
+    /** Supervisor stock assignment consumed to create this advisor lead */
+    sourceStockAssignment: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AffiliateAssignment',
+        default: null
+    },
+    /** Operational state snapshot that made the affiliate sellable */
+    operationalState: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AffiliateOperationalState',
+        default: null,
+        index: true
+    },
+    /** Check/extract job that produced the supervisor stock */
+    sourceCheckJob: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AffiliateCheckJob',
+        default: null,
+        index: true
+    },
+    /** Supervisor that owned the stock before advisor distribution */
+    supervisor: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null,
+        index: true
+    },
     /** Fecha de asignación */
     assignedAt: {
         type: Date,
@@ -118,5 +145,15 @@ leadAssignmentSchema.index({ assignedTo: 1, status: 1 });
 leadAssignmentSchema.index({ affiliate: 1 });
 leadAssignmentSchema.index({ assignedAt: 1 });
 leadAssignmentSchema.index({ reassignedTo: 1, isPriority: -1 });
+leadAssignmentSchema.index(
+    { sourceStockAssignment: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            active: true,
+            sourceStockAssignment: { $type: "objectId" }
+        }
+    }
+);
 
 module.exports = mongoose.model('LeadAssignment', leadAssignmentSchema);

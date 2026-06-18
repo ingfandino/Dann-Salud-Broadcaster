@@ -195,8 +195,14 @@ export function ContactarAdministracion() {
                 }))
             }
 
-            await api.assignments.distribute(payload)
-            toast.success("Distribución completada exitosamente")
+            const response = await api.assignments.distribute(payload)
+            const result = response.data?.result
+            const message = response.data?.message || result?.message
+            if (result?.partial) {
+                toast.warning(message || `Distribución parcial: ${result.totalAssigned}/${result.requestedTotal} asignados`)
+            } else {
+                toast.success(message || "Distribución completada exitosamente")
+            }
             setDistribution([]) // Limpiar formulario
 
             // Reload stats if supervisor
@@ -206,7 +212,8 @@ export function ContactarAdministracion() {
             }
         } catch (error) {
             console.error("Error distribuyendo:", error)
-            toast.error("Error al realizar la distribución")
+            const apiMessage = error.response?.data?.message || error.response?.data?.error
+            toast.error(apiMessage || "Error al realizar la distribución")
         } finally {
             setLoading(false)
         }

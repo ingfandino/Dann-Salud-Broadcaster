@@ -23,6 +23,7 @@ const { kickAffiliateImportProcessor } = require("../services/affiliateImport.se
 const { getLocalitiesByZone, normalize, ALL_KNOWN_LOCALITIES } = require("../constants/localityZones");
 const Audit = require("../models/Audit");
 const AffiliateExportConfig = require("../models/AffiliateExportConfig");
+const AffiliateAssignment = require("../models/AffiliateAssignment");
 const AffiliateOperationalState = require("../models/AffiliateOperationalState");
 const AffiliateContribution = require("../models/AffiliateContribution");
 const AffiliateCheckConfig = require("../models/AffiliateCheckConfig");
@@ -1323,6 +1324,61 @@ exports.getSupervisorStats = async (req, res) => {
     try {
         const userId = req.user._id;
         const role = req.user.role.toLowerCase();
+
+        if (role === 'supervisor') {
+            const now = new Date();
+            const stockAssignments = await AffiliateAssignment.find({
+                supervisorId: userId,
+                status: "active",
+                expiresAt: { $gt: now }
+            })
+                .populate("affiliateId", "obraSocial dataSource active")
+                .populate("operationalStateId")
+                .sort({ assignedAt: 1, _id: 1 })
+                .lean();
+
+            const affiliateIds = stockAssignments.map(item => item.affiliateId?._id).filter(Boolean);
+            const statesByAffiliate = await AffiliateOperationalState.find({ affiliateId: { $in: affiliateIds } })
+                .lean()
+                .then(rows => new Map(rows.map(row => [String(row.affiliateId), row])));
+
+            const available = stockAssignments.filter(item => {
+                const affiliate = item.affiliateId;
+                if (!affiliate || affiliate.active === false) return false;
+                const state = item.operationalStateId || statesByAffiliate.get(String(affiliate._id));
+                if (!state) return false;
+                const ownershipSupervisor = state.ownership?.supervisorId;
+                if (ownershipSupervisor && String(ownershipSupervisor) !== String(userId)) return false;
+                if (state.canSell !== true) return false;
+                if (state.verificationStatus !== "checked") return false;
+                if (state.saleStatus !== "none") return false;
+                if (state.currentCheckJobId) return false;
+                if (state.verificationExpiresAt && new Date(state.verificationExpiresAt) <= now) return false;
+                return true;
+            });
+
+            let freshCount = 0;
+            let reusableCount = 0;
+            const obraSocialCounts = new Map();
+
+            for (const item of available) {
+                const affiliate = item.affiliateId;
+                const state = item.operationalStateId || statesByAffiliate.get(String(affiliate._id));
+                const source = state?.freshness || state?.dataSource || affiliate?.dataSource || item.source;
+                if (source === "reusable") reusableCount += 1;
+                else freshCount += 1;
+
+                const obraSocial = affiliate?.obraSocial || "Sin obra social";
+                obraSocialCounts.set(obraSocial, (obraSocialCounts.get(obraSocial) || 0) + 1);
+            }
+
+            const byObraSocial = Array.from(obraSocialCounts.entries())
+                .map(([obraSocial, count]) => ({ obraSocial, count }))
+                .sort((a, b) => b.count - a.count);
+
+            logger.info(`📊 getSupervisorStats stock verificado: supervisor=${userId}, fresh=${freshCount}, reusable=${reusableCount}`);
+            return res.json({ freshCount, reusableCount, byObraSocial });
+        }
 
         // Si es supervisor, solo ve lo asignado a él
         const baseFilter = { active: true };
