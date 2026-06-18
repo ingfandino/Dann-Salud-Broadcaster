@@ -10,6 +10,18 @@ const mongoose = require("mongoose");
 const logger = require("../utils/logger");
 const { envConfig } = require("./index");
 
+function describeMongoTarget(uri) {
+    try {
+        const parsed = new URL(uri);
+        return {
+            host: parsed.hostname || "unknown",
+            database: parsed.pathname?.replace(/^\//, "") || "default"
+        };
+    } catch {
+        return { host: "unparseable", database: "default" };
+    }
+}
+
 /**
  * Establece la conexión con la base de datos MongoDB.
  * Configura opciones de pool de conexiones para optimizar el rendimiento.
@@ -21,7 +33,8 @@ const connectDB = async () => {
             throw new Error("MONGODB_URI no está configurado en las variables de entorno");
         }
         
-        logger.info(`🔌 Conectando a MongoDB: ${envConfig.MONGO_URI.replace(/\/\/.*:.*@/, '//****:****@')}`);
+        const target = describeMongoTarget(envConfig.MONGO_URI);
+        logger.info(`🔌 Conectando a MongoDB host=${target.host} database=${target.database}`);
         
         /** Opciones de conexión optimizadas para rendimiento */
         const options = {
@@ -44,7 +57,11 @@ const connectDB = async () => {
         });
         
     } catch (error) {
-        logger.error("❌ Error conectando a MongoDB:", error.message);
+        logger.error(
+            `❌ Error conectando a MongoDB | name=${error?.name || "unknown"} `
+            + `code=${error?.code || "none"} `
+            + `message=${error?.message || "unknown"}`
+        );
         process.exit(1);
     }
 };
