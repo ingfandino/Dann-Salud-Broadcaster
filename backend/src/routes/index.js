@@ -42,10 +42,15 @@ const evidenciaRoutes = require("./evidencias");
 const expenseRoutes = require("./expenses");
 const privilegeRoutes = require("./privilegeRoutes");
 const affiliateContributionRoutes = require("./affiliateContributions");
+const videoAuditRoutes = require("./videoAuditRoutes");
 const socialHealthListRoutes = require("./socialHealthListRoutes");
 
 // 📌 Rutas públicas
 router.use("/auth", authRoutes);
+
+// VideoAudit has public room routes under /public/:token, so its router applies
+// authentication internally after those public endpoints.
+router.use("/video-audits", videoAuditRoutes);
 
 // 📌 Middleware para proteger el resto
 router.use(requireAuth);
