@@ -6,7 +6,9 @@ const mongoose = require("mongoose");
 const Affiliate = require("../src/models/Affiliate");
 const AffiliateAssignment = require("../src/models/AffiliateAssignment");
 const AffiliateCheckConfig = require("../src/models/AffiliateCheckConfig");
+const AffiliateCheckJob = require("../src/models/AffiliateCheckJob");
 const AffiliateContribution = require("../src/models/AffiliateContribution");
+const AffiliateOperationalState = require("../src/models/AffiliateOperationalState");
 const { rebuildOperationalStateForAffiliateIds } = require("../src/services/affiliateOperationalState.service");
 
 const NOW = new Date("2026-06-17T15:00:00.000Z");
@@ -159,6 +161,107 @@ describe("affiliateOperationalState.service rebuild", () => {
 
         expect(result.states[0].ownership.source).toBe("legacy");
         expect(result.states[0].ownership.supervisorId.toString()).toBe(legacySupervisor.toString());
+    });
+
+
+    test("active reservation keeps otherwise sellable affiliate unavailable", async () => {
+        await createConfig();
+        const affiliate = await createAffiliate({ cuil: "20123456788" });
+        await createContribution(affiliate, new Date("2026-06-16T12:00:00.000Z"));
+        const job = await AffiliateCheckJob.create({ requestedBy: oid(), requestedByRole: "supervisor", mode: "check_new", status: "processing", requestedCount: 1, selectedCount: 1 });
+        await AffiliateOperationalState.create({
+            affiliateId: affiliate._id,
+            cuil: affiliate.cuil,
+            cuilNormalized: affiliate.cuil,
+            currentCheckJobId: job._id,
+            currentCheckStartedAt: new Date("2026-06-17T12:00:00.000Z")
+        });
+
+        await rebuildOperationalStateForAffiliateIds([affiliate._id], { now: NOW });
+        const stored = await AffiliateOperationalState.findOne({ affiliateId: affiliate._id }).lean();
+
+        expect(String(stored.currentCheckJobId)).toBe(String(job._id));
+        expect(stored.availableForSale).toBe(false);
+        expect(stored.unavailableReason).toBe("checking_in_progress");
+    });
+
+    test("active reservation blocks availability while active assignment ownership is preserved", async () => {
+        await createConfig();
+        const supervisor = oid();
+        const affiliate = await createAffiliate({ cuil: "20123456789" });
+        await createContribution(affiliate, new Date("2026-06-16T12:00:00.000Z"));
+        const job = await AffiliateCheckJob.create({ requestedBy: oid(), requestedByRole: "supervisor", mode: "check_reusable", status: "paused", requestedCount: 1, selectedCount: 1 });
+        await AffiliateAssignment.create({
+            affiliateId: affiliate._id,
+            supervisorId: supervisor,
+            assignedBy: supervisor,
+            source: "check_job",
+            sourceJobId: oid(),
+            assignedAt: new Date("2026-06-16T12:00:00.000Z"),
+            expiresAt: new Date("2026-06-25T12:00:00.000Z")
+        });
+        await AffiliateOperationalState.create({
+            affiliateId: affiliate._id,
+            cuil: affiliate.cuil,
+            cuilNormalized: affiliate.cuil,
+            currentCheckJobId: job._id,
+            currentCheckStartedAt: new Date("2026-06-17T12:00:00.000Z")
+        });
+
+        await rebuildOperationalStateForAffiliateIds([affiliate._id], { now: NOW });
+        const stored = await AffiliateOperationalState.findOne({ affiliateId: affiliate._id }).lean();
+
+        expect(String(stored.currentCheckJobId)).toBe(String(job._id));
+        expect(stored.ownership.source).toBe("check_job");
+        expect(String(stored.ownership.supervisorId)).toBe(String(supervisor));
+        expect(stored.availableForSale).toBe(false);
+        expect(stored.unavailableReason).toBe("checking_in_progress");
+    });
+
+    test("unreserved equivalent affiliate follows normal sellable availability", async () => {
+        await createConfig();
+        const affiliate = await createAffiliate({ cuil: "20123456790" });
+        await createContribution(affiliate, new Date("2026-06-16T12:00:00.000Z"));
+
+        const result = await rebuildOperationalStateForAffiliateIds([affiliate._id], { dryRun: true, now: NOW });
+
+        expect(result.states[0].currentCheckJobId).toBeNull();
+        expect(result.states[0].availableForSale).toBe(true);
+        expect(result.states[0].unavailableReason).toBeNull();
+    });
+
+    test("bulk rebuild resolves reservation jobs once for multiple reserved affiliates", async () => {
+        await createConfig();
+        const first = await createAffiliate({ cuil: "20123456791" });
+        const second = await createAffiliate({ cuil: "20123456792" });
+        await createContribution(first, new Date("2026-06-16T12:00:00.000Z"));
+        await createContribution(second, new Date("2026-06-16T12:00:00.000Z"));
+        const firstJob = await AffiliateCheckJob.create({ requestedBy: oid(), requestedByRole: "supervisor", mode: "check_new", status: "pending", requestedCount: 1, selectedCount: 1 });
+        const secondJob = await AffiliateCheckJob.create({ requestedBy: oid(), requestedByRole: "supervisor", mode: "check_reusable", status: "retrying", requestedCount: 1, selectedCount: 1 });
+        await AffiliateOperationalState.create({ affiliateId: first._id, cuil: first.cuil, cuilNormalized: first.cuil, currentCheckJobId: firstJob._id });
+        await AffiliateOperationalState.create({ affiliateId: second._id, cuil: second.cuil, cuilNormalized: second.cuil, currentCheckJobId: secondJob._id });
+        const jobFindSpy = jest.spyOn(AffiliateCheckJob, "find");
+
+        const result = await rebuildOperationalStateForAffiliateIds([first._id, second._id], { dryRun: true, now: NOW });
+
+        expect(jobFindSpy).toHaveBeenCalledTimes(1);
+        expect(result.states).toHaveLength(2);
+        expect(result.states.every(state => state.unavailableReason === "checking_in_progress")).toBe(true);
+        jobFindSpy.mockRestore();
+    });
+
+    test("terminal reservation reference is preserved but does not block availability", async () => {
+        await createConfig();
+        const affiliate = await createAffiliate({ cuil: "20123456793" });
+        await createContribution(affiliate, new Date("2026-06-16T12:00:00.000Z"));
+        const job = await AffiliateCheckJob.create({ requestedBy: oid(), requestedByRole: "supervisor", mode: "check_new", status: "completed", requestedCount: 1, selectedCount: 1 });
+        await AffiliateOperationalState.create({ affiliateId: affiliate._id, cuil: affiliate.cuil, cuilNormalized: affiliate.cuil, currentCheckJobId: job._id });
+
+        const result = await rebuildOperationalStateForAffiliateIds([affiliate._id], { dryRun: true, now: NOW });
+
+        expect(String(result.states[0].currentCheckJobId)).toBe(String(job._id));
+        expect(result.states[0].availableForSale).toBe(true);
+        expect(result.states[0].unavailableReason).toBeNull();
     });
 
     test("bulk rebuild performs one AffiliateAssignment query for all affiliates", async () => {

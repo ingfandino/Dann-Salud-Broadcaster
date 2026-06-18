@@ -13,6 +13,7 @@ const mongoose = require("mongoose");
 const AffiliateCheckConfig = require("../src/models/AffiliateCheckConfig");
 const AffiliateCheckJob = require("../src/models/AffiliateCheckJob");
 const AffiliateCheckRow = require("../src/models/AffiliateCheckRow");
+const AffiliateContribution = require("../src/models/AffiliateContribution");
 const AffiliateImportJob = require("../src/models/AffiliateImportJob");
 const AffiliateImportRow = require("../src/models/AffiliateImportRow");
 const Affiliate = require("../src/models/Affiliate");
@@ -36,6 +37,7 @@ const fs = require("fs");
 const path = require("path");
 const affiliateController = require("../src/controllers/affiliateController");
 const { processAffiliatesData } = require("../src/services/affiliateImport.service");
+const { rebuildOperationalStateForAffiliateIds } = require("../src/services/affiliateOperationalState.service");
 
 function userStub(role = "supervisor") {
     return { _id: new mongoose.Types.ObjectId(), role };
@@ -258,6 +260,46 @@ describe("affiliateCheck.service", () => {
         expect(updatedState.availableForSale).toBe(false);
         expect(updatedState.usageStatus).toBe("assigned");
         expect(updatedState.ownership.supervisorId.toString()).toBe(user._id.toString());
+    });
+
+    test("extract_base does not select an otherwise sellable affiliate after reservation rebuild", async () => {
+        const user = userStub();
+        const affiliate = await createAffiliate({ cuil: "20300000002" });
+        await AffiliateContribution.create({
+            affiliateId: affiliate._id,
+            cuil: affiliate.cuil,
+            canSell: true,
+            verification: { status: "success", checkedAt: new Date("2026-06-16T12:00:00.000Z") }
+        });
+        const activeJob = await AffiliateCheckJob.create({
+            requestedBy: user._id,
+            requestedByRole: user.role,
+            mode: "check_new",
+            status: "processing",
+            requestedCount: 1,
+            selectedCount: 1
+        });
+        await AffiliateOperationalState.create({
+            affiliateId: affiliate._id,
+            cuil: affiliate.cuil,
+            cuilNormalized: affiliate.cuil,
+            currentCheckJobId: activeJob._id,
+            currentCheckStartedAt: new Date("2026-06-17T12:00:00.000Z")
+        });
+
+        await rebuildOperationalStateForAffiliateIds([affiliate._id], { now: new Date("2026-06-17T15:00:00.000Z") });
+        const rebuilt = await AffiliateOperationalState.findOne({ affiliateId: affiliate._id }).lean();
+        const preview = await previewAffiliateCheckSelection({
+            user,
+            mode: "extract_base",
+            requestedCount: 1
+        });
+
+        expect(String(rebuilt.currentCheckJobId)).toBe(String(activeJob._id));
+        expect(rebuilt.availableForSale).toBe(false);
+        expect(rebuilt.unavailableReason).toBe("checking_in_progress");
+        expect(preview.selectableCount).toBe(0);
+        expect(preview.willSelectCount).toBe(0);
     });
 
     test("extract_base quota consumed equals actual assigned count", async () => {

@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const Affiliate = require("../models/Affiliate");
 const AffiliateAssignment = require("../models/AffiliateAssignment");
 const AffiliateCheckConfig = require("../models/AffiliateCheckConfig");
+const AffiliateCheckJob = require("../models/AffiliateCheckJob");
 const AffiliateContribution = require("../models/AffiliateContribution");
 const AffiliateOperationalState = require("../models/AffiliateOperationalState");
 const Audit = require("../models/Audit");
@@ -15,6 +16,7 @@ const DEFAULT_OWNERSHIP_DAYS = 30;
 const DEFAULT_VERIFICATION_EXPIRY_DAYS = 30;
 const CALCULATION_VERSION = "phase2_v1";
 const ALLOWED_DATA_SOURCES = new Set(["fresh", "reusable", "extra"]);
+const ACTIVE_RESERVATION_JOB_STATUSES = new Set(["pending", "processing", "pausing", "paused", "retrying", "stuck"]);
 const REJECTED_AUDIT_STATUSES = new Set(["rechazada"]);
 const FAILED_AUDIT_STATUSES = new Set([
     "caida",
@@ -185,13 +187,15 @@ function determineAvailability({
     saleStatus,
     usageStatus,
     ownership,
+    activeReservation,
     now
 }) {
     let unavailableReason = null;
     if (affiliate.active === false) unavailableReason = "inactive_affiliate";
+    else if (activeReservation) unavailableReason = "checking_in_progress";
+    else if (saleStatus === "qr_done") unavailableReason = "sold_qr_done";
     else if (verificationStatus === "expired") unavailableReason = "verification_expired";
     else if (verificationStatus !== "checked") unavailableReason = "unchecked";
-    else if (saleStatus === "qr_done") unavailableReason = "sold_qr_done";
     else if (canSell !== true) unavailableReason = "cannot_sell";
     else if (usageStatus === "blocked") unavailableReason = "blocked";
     else if (
@@ -210,6 +214,7 @@ function buildOperationalStateForAffiliate({
     contribution = null,
     audits = [],
     activeAssignment = null,
+    reservation = null,
     now = new Date(),
     config = {
         ownershipDays: DEFAULT_OWNERSHIP_DAYS,
@@ -235,6 +240,7 @@ function buildOperationalStateForAffiliate({
         saleStatus: sale.saleStatus,
         usageStatus: effectiveUsageStatus,
         ownership,
+        activeReservation: Boolean(reservation?.active),
         now
     });
 
@@ -264,6 +270,8 @@ function buildOperationalStateForAffiliate({
         uploadDate: affiliate.uploadDate || null,
         contributionId: contribution?._id || null,
         lastAuditId: sale.lastAuditId,
+        currentCheckJobId: reservation?.jobId || null,
+        currentCheckStartedAt: reservation?.startedAt || null,
         calculatedAt: now,
         calculationVersion: CALCULATION_VERSION
     };
@@ -371,7 +379,7 @@ async function rebuildOperationalStateForAffiliateIds(
             : [],
         AffiliateOperationalState.find(
             { affiliateId: { $in: validIds } },
-            { affiliateId: 1 }
+            { affiliateId: 1, currentCheckJobId: 1, currentCheckStartedAt: 1 }
         ).lean()
     ]);
 
@@ -384,6 +392,33 @@ async function rebuildOperationalStateForAffiliateIds(
         if (!assignmentsByAffiliate.has(key)) assignmentsByAffiliate.set(key, []);
         assignmentsByAffiliate.get(key).push(assignment);
     }
+    const reservedJobIds = Array.from(new Set(
+        existingStates
+            .map(item => item.currentCheckJobId)
+            .filter(Boolean)
+            .map(String)
+    )).filter(mongoose.isValidObjectId);
+    const reservationJobs = reservedJobIds.length
+        ? await AffiliateCheckJob.find(
+            { _id: { $in: reservedJobIds } },
+            { status: 1 }
+        ).lean()
+        : [];
+    const reservationJobStatusById = new Map(
+        reservationJobs.map(job => [String(job._id), job.status])
+    );
+    const reservationByAffiliate = new Map();
+    for (const state of existingStates) {
+        const jobId = state.currentCheckJobId ? String(state.currentCheckJobId) : null;
+        if (!jobId) continue;
+        const status = reservationJobStatusById.get(jobId);
+        reservationByAffiliate.set(String(state.affiliateId), {
+            jobId: state.currentCheckJobId,
+            startedAt: state.currentCheckStartedAt || null,
+            status: status || null,
+            active: status ? ACTIVE_RESERVATION_JOB_STATUSES.has(status) : true
+        });
+    }
     const auditsByCuil = groupAuditsByCuil(audits);
     const existingIds = new Set(existingStates.map(item => String(item.affiliateId)));
     const states = validAffiliates.map(affiliate => {
@@ -393,6 +428,7 @@ async function rebuildOperationalStateForAffiliateIds(
             contribution: contributionByAffiliate.get(String(affiliate._id)) || null,
             audits: auditsByCuil.get(cuil) || [],
             activeAssignment: selectActiveAssignment(assignmentsByAffiliate.get(String(affiliate._id)) || [], affiliate._id),
+            reservation: reservationByAffiliate.get(String(affiliate._id)) || null,
             now,
             config
         });
