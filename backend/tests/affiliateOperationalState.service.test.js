@@ -7,9 +7,13 @@ const Affiliate = require("../src/models/Affiliate");
 const AffiliateAssignment = require("../src/models/AffiliateAssignment");
 const AffiliateCheckConfig = require("../src/models/AffiliateCheckConfig");
 const AffiliateCheckJob = require("../src/models/AffiliateCheckJob");
+const AffiliateCheckRow = require("../src/models/AffiliateCheckRow");
 const AffiliateContribution = require("../src/models/AffiliateContribution");
 const AffiliateOperationalState = require("../src/models/AffiliateOperationalState");
 const { rebuildOperationalStateForAffiliateIds } = require("../src/services/affiliateOperationalState.service");
+const {
+    reconcileAffiliateOperationalOwnership
+} = require("../scripts/reconcileAffiliateOperationalOwnership");
 
 const NOW = new Date("2026-06-17T15:00:00.000Z");
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -185,6 +189,40 @@ describe("affiliateOperationalState.service rebuild", () => {
         expect(stored.unavailableReason).toBe("checking_in_progress");
     });
 
+    test("clears stale extract_base ownership without assignment while preserving active reservation", async () => {
+        await createConfig();
+        const supervisor = oid();
+        const affiliate = await createAffiliate({ cuil: "20123456794" });
+        await createContribution(affiliate, new Date("2026-06-16T12:00:00.000Z"));
+        const job = await AffiliateCheckJob.create({ requestedBy: oid(), requestedByRole: "supervisor", mode: "check_new", status: "processing", requestedCount: 1, selectedCount: 1 });
+        await AffiliateOperationalState.create({
+            affiliateId: affiliate._id,
+            cuil: affiliate.cuil,
+            cuilNormalized: affiliate.cuil,
+            verificationStatus: "checked",
+            canSell: true,
+            availableForSale: false,
+            unavailableReason: "assigned_to_supervisor",
+            currentCheckJobId: job._id,
+            currentCheckStartedAt: new Date("2026-06-17T12:00:00.000Z"),
+            ownership: {
+                supervisorId: supervisor,
+                assignedAt: new Date("2026-06-17T12:00:00.000Z"),
+                expiresAt: new Date("2026-06-25T12:00:00.000Z"),
+                source: "extract_base"
+            }
+        });
+
+        await rebuildOperationalStateForAffiliateIds([affiliate._id], { now: NOW });
+        const stored = await AffiliateOperationalState.findOne({ affiliateId: affiliate._id }).lean();
+
+        expect(String(stored.currentCheckJobId)).toBe(String(job._id));
+        expect(stored.ownership.supervisorId).toBeNull();
+        expect(stored.ownership.source).toBeNull();
+        expect(stored.availableForSale).toBe(false);
+        expect(stored.unavailableReason).toBe("checking_in_progress");
+    });
+
     test("active reservation blocks availability while active assignment ownership is preserved", async () => {
         await createConfig();
         const supervisor = oid();
@@ -262,6 +300,128 @@ describe("affiliateOperationalState.service rebuild", () => {
         expect(String(result.states[0].currentCheckJobId)).toBe(String(job._id));
         expect(result.states[0].availableForSale).toBe(true);
         expect(result.states[0].unavailableReason).toBeNull();
+    });
+
+    test("terminal reservation reference does not preserve stale extract_base ownership", async () => {
+        await createConfig();
+        const affiliate = await createAffiliate({ cuil: "20123456795" });
+        await createContribution(affiliate, new Date("2026-06-16T12:00:00.000Z"));
+        const job = await AffiliateCheckJob.create({ requestedBy: oid(), requestedByRole: "supervisor", mode: "check_new", status: "completed", requestedCount: 1, selectedCount: 1 });
+        await AffiliateOperationalState.create({
+            affiliateId: affiliate._id,
+            cuil: affiliate.cuil,
+            cuilNormalized: affiliate.cuil,
+            currentCheckJobId: job._id,
+            ownership: {
+                supervisorId: oid(),
+                assignedAt: new Date("2026-06-17T12:00:00.000Z"),
+                expiresAt: new Date("2026-06-25T12:00:00.000Z"),
+                source: "extract_base"
+            }
+        });
+
+        const result = await rebuildOperationalStateForAffiliateIds([affiliate._id], { dryRun: true, now: NOW });
+
+        expect(String(result.states[0].currentCheckJobId)).toBe(String(job._id));
+        expect(result.states[0].ownership.supervisorId).toBeNull();
+        expect(result.states[0].ownership.source).toBeNull();
+        expect(result.states[0].availableForSale).toBe(true);
+    });
+
+    test("reconciliation script rebuilds stale ownership idempotently without assignment writes", async () => {
+        await createConfig({ verificationExpiryDays: 10 });
+        const affiliate = await createAffiliate({ cuil: "20123456796" });
+        await createContribution(affiliate, new Date(NOW.getTime() - 11 * DAY_MS));
+        await AffiliateOperationalState.create({
+            affiliateId: affiliate._id,
+            cuil: affiliate.cuil,
+            cuilNormalized: affiliate.cuil,
+            verificationStatus: "checked",
+            canSell: true,
+            availableForSale: false,
+            unavailableReason: "assigned_to_supervisor",
+            ownership: {
+                supervisorId: oid(),
+                assignedAt: new Date("2026-06-17T12:00:00.000Z"),
+                expiresAt: new Date("2026-06-25T12:00:00.000Z"),
+                source: "extract_base"
+            }
+        });
+        const models = { Affiliate, AffiliateAssignment, AffiliateCheckJob, AffiliateCheckRow, AffiliateContribution, AffiliateOperationalState, Audit: require("../src/models/Audit") };
+
+        const dryRun = await reconcileAffiliateOperationalOwnership({
+            affiliateId: affiliate._id,
+            execute: false,
+            models,
+            rebuildOperationalStateForAffiliateIds
+        });
+        const executed = await reconcileAffiliateOperationalOwnership({
+            affiliateId: affiliate._id,
+            execute: true,
+            models,
+            rebuildOperationalStateForAffiliateIds
+        });
+        const second = await reconcileAffiliateOperationalOwnership({
+            affiliateId: affiliate._id,
+            execute: true,
+            models,
+            rebuildOperationalStateForAffiliateIds
+        });
+        const stored = await AffiliateOperationalState.findOne({ affiliateId: affiliate._id }).lean();
+
+        expect(dryRun).toMatchObject({ classification: "A", safe: true, executed: false });
+        expect(executed.write).toMatchObject({ matchedCount: 1, modifiedCount: 1 });
+        expect(second.write).toMatchObject({ modifiedCount: 0, reason: "already_reconciled_noop" });
+        expect(stored.ownership.supervisorId).toBeNull();
+        expect(stored.availableForSale).toBe(false);
+        expect(stored.unavailableReason).toBe("verification_expired");
+        expect(await AffiliateAssignment.countDocuments({ affiliateId: affiliate._id })).toBe(0);
+    });
+
+    test("reconciliation script aborts when state changes before guarded write", async () => {
+        await createConfig();
+        const affiliate = await createAffiliate({ cuil: "20123456797" });
+        await createContribution(affiliate, new Date("2026-06-16T12:00:00.000Z"));
+        const state = await AffiliateOperationalState.create({
+            affiliateId: affiliate._id,
+            cuil: affiliate.cuil,
+            cuilNormalized: affiliate.cuil,
+            verificationStatus: "checked",
+            canSell: true,
+            availableForSale: false,
+            unavailableReason: "assigned_to_supervisor",
+            ownership: {
+                supervisorId: oid(),
+                assignedAt: new Date("2026-06-17T12:00:00.000Z"),
+                expiresAt: new Date("2026-06-25T12:00:00.000Z"),
+                source: "extract_base"
+            }
+        });
+        const models = { Affiliate, AffiliateAssignment, AffiliateCheckJob, AffiliateCheckRow, AffiliateContribution, AffiliateOperationalState, Audit: require("../src/models/Audit") };
+        let calls = 0;
+        const racingRebuild = async (ids, options) => {
+            calls += 1;
+            const result = await rebuildOperationalStateForAffiliateIds(ids, options);
+            if (calls === 1) {
+                await AffiliateOperationalState.updateOne(
+                    { _id: state._id },
+                    { $set: { unavailableReason: "assigned_to_supervisor_race" } }
+                );
+            }
+            return result;
+        };
+
+        const result = await reconcileAffiliateOperationalOwnership({
+            affiliateId: affiliate._id,
+            execute: true,
+            models,
+            rebuildOperationalStateForAffiliateIds: racingRebuild
+        });
+        const stored = await AffiliateOperationalState.findById(state._id).lean();
+
+        expect(result.safe).toBe(false);
+        expect(result.write).toMatchObject({ skipped: true, reason: "concurrency_guard_changed" });
+        expect(stored.ownership.supervisorId).not.toBeNull();
     });
 
     test("bulk rebuild performs one AffiliateAssignment query for all affiliates", async () => {
