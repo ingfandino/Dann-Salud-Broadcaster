@@ -302,6 +302,48 @@ describe("affiliateCheck.service", () => {
         expect(preview.willSelectCount).toBe(0);
     });
 
+    test("check_new and check_reusable do not select reserved states", async () => {
+        await AffiliateCheckConfig.updateOne({}, {
+            $set: {
+                "features.checkNewEnabled": true,
+                "features.checkReusableEnabled": true
+            }
+        });
+        const user = userStub();
+        await createState({
+            freshness: "fresh",
+            verificationStatus: "unchecked",
+            usageStatus: "never_used",
+            saleStatus: "none",
+            availableForSale: false,
+            currentCheckJobId: new mongoose.Types.ObjectId()
+        });
+        await createState({
+            freshness: "reusable",
+            verificationStatus: "expired",
+            usageStatus: "available",
+            saleStatus: "none",
+            availableForSale: false,
+            currentCheckJobId: new mongoose.Types.ObjectId()
+        });
+
+        const checkNew = await previewAffiliateCheckSelection({
+            user,
+            mode: "check_new",
+            requestedCount: 1
+        });
+        const reusable = await previewAffiliateCheckSelection({
+            user,
+            mode: "check_reusable",
+            requestedCount: 1
+        });
+
+        expect(checkNew.selectableCount).toBe(0);
+        expect(checkNew.willSelectCount).toBe(0);
+        expect(reusable.selectableCount).toBe(0);
+        expect(reusable.willSelectCount).toBe(0);
+    });
+
     test("extract_base quota consumed equals actual assigned count", async () => {
         const user = userStub();
         await createState({
@@ -1618,32 +1660,41 @@ describe("affiliateCheckExpiration.service", () => {
     test("expireStaleAssignments expires assignments past expiresAt", async () => {
         const { expireStaleAssignments } = require("../src/services/affiliateCheckExpiration.service");
         const supervisorId = new mongoose.Types.ObjectId();
-        const affiliateId = new mongoose.Types.ObjectId();
+        const affiliate = await createAffiliate({ cuil: "20399999991" });
+        await AffiliateContribution.create({
+            affiliateId: affiliate._id,
+            cuil: affiliate.cuil,
+            canSell: true,
+            verification: { status: "success", checkedAt: new Date(Date.now() - 1000) }
+        });
         const expiresAt = new Date(Date.now() - 1000);
         const state = await createState({
-            affiliateId,
+            affiliateId: affiliate._id,
+            cuil: affiliate.cuil,
+            cuilNormalized: affiliate.cuil,
             usageStatus: "assigned",
-            ownership: { supervisorId, expiresAt: expiresAt }
+            ownership: { supervisorId, expiresAt }
         });
         await AffiliateAssignment.create({
-            affiliateId,
+            affiliateId: affiliate._id,
             operationalStateId: state._id,
             supervisorId,
             assignedBy: new mongoose.Types.ObjectId(),
             source: "check_job",
-            expiresAt: expiresAt
+            expiresAt
         });
 
         const stats = await expireStaleAssignments({ now: new Date() });
         expect(stats.expired).toBe(1);
 
-        const assignment = await AffiliateAssignment.findOne({ affiliateId }).lean();
+        const assignment = await AffiliateAssignment.findOne({ affiliateId: affiliate._id }).lean();
         expect(assignment.status).toBe("expired");
         expect(assignment.expiredAt).toBeTruthy();
         expect(assignment.expirationReason).toBe("ownership_period_elapsed");
 
         const updatedState = await AffiliateOperationalState.findById(state._id).lean();
         expect(updatedState.ownership.supervisorId).toBeNull();
+        expect(updatedState.availableForSale).toBe(true);
     });
 
     test("expireStaleAssignments skips assignments not yet expired", async () => {
@@ -1672,12 +1723,23 @@ describe("affiliateCheckExpiration.service", () => {
         expect(assignment.status).toBe("active");
     });
 
-    test("deriveUsageStatusAfterExpiration returns correct statuses", () => {
-        const { deriveUsageStatusAfterExpiration } = require("../src/services/affiliateCheckExpiration.service");
-        expect(deriveUsageStatusAfterExpiration(null)).toBe("available");
-        expect(deriveUsageStatusAfterExpiration({ saleStatus: "qr_done" })).toBe("blocked");
-        expect(deriveUsageStatusAfterExpiration({ verificationStatus: "checked", canSell: true })).toBe("available");
-        expect(deriveUsageStatusAfterExpiration({ verificationStatus: "expired" })).toBe("reusable");
-        expect(deriveUsageStatusAfterExpiration({ usageStatus: "never_used" })).toBe("never_used");
+    test("auditAffiliateCheckExpiration is read-only", async () => {
+        const { auditAffiliateCheckExpiration } = require("../src/services/affiliateCheckExpiration.service");
+        const supervisorId = new mongoose.Types.ObjectId();
+        const affiliateId = new mongoose.Types.ObjectId();
+        await AffiliateAssignment.create({
+            affiliateId,
+            supervisorId,
+            assignedBy: new mongoose.Types.ObjectId(),
+            source: "check_job",
+            expiresAt: new Date(Date.now() - 1000)
+        });
+
+        const stats = await auditAffiliateCheckExpiration({ now: new Date(), limit: 10 });
+        const assignment = await AffiliateAssignment.findOne({ affiliateId }).lean();
+
+        expect(stats.dryRun).toBe(true);
+        expect(stats.eligible).toBe(1);
+        expect(assignment.status).toBe("active");
     });
 });

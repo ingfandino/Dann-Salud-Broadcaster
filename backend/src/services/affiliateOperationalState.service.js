@@ -290,7 +290,7 @@ function groupAuditsByCuil(audits) {
 
 async function rebuildOperationalStateForAffiliateIds(
     affiliateIds,
-    { dryRun = false, now = new Date() } = {}
+    { dryRun = false, now = new Date(), excludedAssignmentIds = [] } = {}
 ) {
     const ids = Array.from(new Set((affiliateIds || []).map(String)))
         .filter(mongoose.isValidObjectId);
@@ -338,17 +338,22 @@ async function rebuildOperationalStateForAffiliateIds(
     const rawCuilVariants = cuils.flatMap(buildCuilStorageVariants);
 
     const config = await loadOperationalStateConfig();
+    const excludedAssignmentObjectIds = Array.from(new Set((excludedAssignmentIds || []).map(String)))
+        .filter(mongoose.isValidObjectId)
+        .map(id => new mongoose.Types.ObjectId(id));
+    const assignmentFilter = {
+        affiliateId: { $in: validIds },
+        status: "active",
+        $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
+        ...(excludedAssignmentObjectIds.length > 0 ? { _id: { $nin: excludedAssignmentObjectIds } } : {})
+    };
     const [contributions, assignments, audits, existingStates] = await Promise.all([
         AffiliateContribution.find(
             { affiliateId: { $in: validIds } },
             { affiliateId: 1, canSell: 1, verification: 1 }
         ).lean(),
         AffiliateAssignment.find(
-            {
-                affiliateId: { $in: validIds },
-                status: "active",
-                $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }]
-            },
+            assignmentFilter,
             {
                 affiliateId: 1,
                 supervisorId: 1,

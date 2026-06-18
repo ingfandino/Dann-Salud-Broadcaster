@@ -2,62 +2,165 @@
 
 const mongoose = require("mongoose");
 const AffiliateAssignment = require("../models/AffiliateAssignment");
-const AffiliateCheckJob = require("../models/AffiliateCheckJob");
-const AffiliateOperationalState = require("../models/AffiliateOperationalState");
+const {
+    rebuildOperationalStateForAffiliateIds
+} = require("./affiliateOperationalState.service");
 const logger = require("../utils/logger").getLogger("affiliate-check-expiration");
 
-const ACTIVE_JOB_STATUSES = ["pending", "processing", "pausing", "paused", "retrying", "stuck"];
 const EXPIRATION_BATCH_SIZE = Number(process.env.AFFILIATE_CHECK_EXPIRATION_BATCH_SIZE || 100);
+const EXPIRATION_REASON = "ownership_period_elapsed";
 
-function deriveUsageStatusAfterExpiration(state) {
-    if (!state) return "available";
-    if (state.saleStatus === "qr_done") return "blocked";
-    if (state.saleStatus === "in_progress") return "blocked";
-    if (state.usageStatus === "blocked") return "blocked";
-    if (state.verificationStatus === "checked" && state.canSell === true) return "available";
-    if (["expired", "error", "no_data", "captcha"].includes(state.verificationStatus)) return "reusable";
-    if (state.usageStatus === "never_used") return "never_used";
-    return "available";
+function asObjectId(value) {
+    if (!value || !mongoose.isValidObjectId(value)) return null;
+    return new mongoose.Types.ObjectId(value);
 }
 
-async function hasActiveCheckJob(affiliateId) {
-    const state = await AffiliateOperationalState.findOne(
-        { affiliateId },
-        { currentCheckJobId: 1 }
-    ).lean();
-    if (!state?.currentCheckJobId) return false;
-    const job = await AffiliateCheckJob.findOne({
-        _id: state.currentCheckJobId,
-        status: { $in: ACTIVE_JOB_STATUSES }
-    }).select("_id").lean();
-    return !!job;
+function createStats({ now = new Date(), limit = EXPIRATION_BATCH_SIZE, dryRun = false } = {}) {
+    return {
+        dryRun,
+        now,
+        batchSize: limit,
+        scanned: 0,
+        eligible: 0,
+        expired: 0,
+        skippedNotDue: 0,
+        skippedChanged: 0,
+        alreadyExpired: 0,
+        missingExpiresAt: 0,
+        duplicateActiveAssignmentAnomalies: 0,
+        operationalStateUpdated: 0,
+        operationalStateFailed: 0,
+        errors: 0,
+        durationMs: 0,
+        effects: {
+            availableGeneralStock: 0,
+            reusableRecheckRequired: 0,
+            blockedByQrSale: 0,
+            blockedByActiveReservation: 0,
+            stillOwnedByAnotherAssignment: 0,
+            unavailableOther: 0
+        },
+        safeToExecute: true
+    };
 }
 
-async function hasNewerActiveAssignment(affiliateId, currentAssignmentId) {
-    const newer = await AffiliateAssignment.findOne({
-        affiliateId,
+function effectKeyForState(state) {
+    if (state?.ownership?.supervisorId) return "stillOwnedByAnotherAssignment";
+    if (state?.unavailableReason === "checking_in_progress") return "blockedByActiveReservation";
+    if (["qr_done", "in_progress"].includes(state?.saleStatus)
+        || state?.unavailableReason === "sold_qr_done") return "blockedByQrSale";
+    if (state?.verificationStatus === "expired"
+        || state?.unavailableReason === "verification_expired") return "reusableRecheckRequired";
+    if (state?.availableForSale === true) return "availableGeneralStock";
+    return "unavailableOther";
+}
+
+function countEffects(stats, states = []) {
+    for (const state of states) {
+        const key = effectKeyForState(state);
+        stats.effects[key] += 1;
+    }
+}
+
+function dueAssignmentQuery(now) {
+    return {
         status: "active",
-        _id: { $ne: currentAssignmentId }
-    }).select("_id").lean();
-    return !!newer;
+        expiresAt: { $ne: null, $lte: now }
+    };
 }
 
-async function expireAssignment(assignment, now = new Date()) {
-    const affiliateId = assignment.affiliateId;
+function activeAssignmentQuery(affiliateIds) {
+    return {
+        affiliateId: { $in: affiliateIds },
+        status: "active"
+    };
+}
 
-    if (await hasActiveCheckJob(affiliateId)) {
-        logger.debug(`[EXPIRATION] Skipping assignment ${assignment._id}: active check job`);
-        return { skipped: true, reason: "active_check_job" };
+async function countDuplicateActiveAssignments(affiliateIds) {
+    const ids = Array.from(new Set((affiliateIds || []).map(String)))
+        .filter(mongoose.isValidObjectId)
+        .map(id => new mongoose.Types.ObjectId(id));
+    if (ids.length === 0) return 0;
+
+    const duplicateGroups = await AffiliateAssignment.aggregate([
+        { $match: activeAssignmentQuery(ids) },
+        { $group: { _id: "$affiliateId", count: { $sum: 1 } } },
+        { $match: { count: { $gt: 1 } } },
+        { $count: "groups" }
+    ]);
+    return duplicateGroups[0]?.groups || 0;
+}
+
+async function loadDueAssignments({ now, limit }) {
+    return AffiliateAssignment.find(dueAssignmentQuery(now))
+        .sort({ expiresAt: 1, _id: 1 })
+        .limit(limit)
+        .lean();
+}
+
+async function previewExpirationEffects(assignments, { now }) {
+    const affiliateIds = assignments.map(item => item.affiliateId).filter(Boolean);
+    const excludedAssignmentIds = assignments.map(item => item._id).filter(Boolean);
+    if (affiliateIds.length === 0) return [];
+    const preview = await rebuildOperationalStateForAffiliateIds(affiliateIds, {
+        dryRun: true,
+        now,
+        excludedAssignmentIds
+    });
+    return preview.states || [];
+}
+
+async function auditAffiliateCheckExpiration({ now = new Date(), limit = EXPIRATION_BATCH_SIZE } = {}) {
+    const startedAt = Date.now();
+    const stats = createStats({ now, limit, dryRun: true });
+    const activeAssignments = await AffiliateAssignment.find({ status: "active" })
+        .sort({ expiresAt: 1, _id: 1 })
+        .limit(limit)
+        .lean();
+
+    stats.scanned = activeAssignments.length;
+    const due = [];
+    const affiliateIds = [];
+    for (const assignment of activeAssignments) {
+        if (!assignment.expiresAt) {
+            stats.missingExpiresAt += 1;
+            continue;
+        }
+        if (new Date(assignment.expiresAt) > now) {
+            stats.skippedNotDue += 1;
+            continue;
+        }
+        due.push(assignment);
+        affiliateIds.push(assignment.affiliateId);
     }
 
-    if (await hasNewerActiveAssignment(affiliateId, assignment._id)) {
-        logger.debug(`[EXPIRATION] Skipping assignment ${assignment._id}: newer active assignment`);
-        return { skipped: true, reason: "newer_assignment" };
+    stats.eligible = due.length;
+    stats.duplicateActiveAssignmentAnomalies = await countDuplicateActiveAssignments(affiliateIds);
+    if (stats.duplicateActiveAssignmentAnomalies > 0) {
+        stats.safeToExecute = false;
+    }
+    const states = await previewExpirationEffects(due, { now });
+    countEffects(stats, states);
+    stats.durationMs = Date.now() - startedAt;
+    return stats;
+}
+
+async function expireAssignment(assignment, now = new Date(), { rebuildState = true } = {}) {
+    const assignmentId = asObjectId(assignment?._id);
+    if (!assignmentId) return { skipped: true, reason: "invalid_assignment" };
+    if (assignment.status && assignment.status !== "active") {
+        return {
+            skipped: true,
+            reason: assignment.status === "expired" ? "already_expired" : "already_transitioned"
+        };
+    }
+    if (!assignment.expiresAt || new Date(assignment.expiresAt) > now) {
+        return { skipped: true, reason: "not_due" };
     }
 
     const updated = await AffiliateAssignment.findOneAndUpdate(
         {
-            _id: assignment._id,
+            _id: assignmentId,
             status: "active",
             expiresAt: assignment.expiresAt
         },
@@ -65,84 +168,96 @@ async function expireAssignment(assignment, now = new Date()) {
             $set: {
                 status: "expired",
                 expiredAt: now,
-                expirationReason: "ownership_period_elapsed"
+                expirationReason: EXPIRATION_REASON
             }
         },
         { new: true }
-    );
-    if (!updated) {
-        return { skipped: true, reason: "already_transitioned" };
-    }
-
-    const state = await AffiliateOperationalState.findOne(
-        { affiliateId }
     ).lean();
 
-    if (state) {
-        const isStillOwnedBySameSuper = state.ownership?.supervisorId
-            && String(state.ownership.supervisorId) === String(assignment.supervisorId);
-
-        if (isStillOwnedBySameSuper) {
-            const newUsageStatus = deriveUsageStatusAfterExpiration(state);
-            await AffiliateOperationalState.updateOne(
-                {
-                    affiliateId,
-                    currentCheckJobId: null,
-                    "ownership.supervisorId": assignment.supervisorId,
-                    "ownership.expiresAt": assignment.expiresAt
-                },
-                {
-                    $set: {
-                        "ownership.supervisorId": null,
-                        "ownership.teamId": null,
-                        "ownership.assignedAt": null,
-                        "ownership.expiresAt": null,
-                        usageStatus: newUsageStatus,
-                        calculatedAt: now
-                    }
-                }
-            );
-        }
+    if (!updated) {
+        const current = await AffiliateAssignment.findById(assignmentId)
+            .select("status expiresAt")
+            .lean();
+        return {
+            skipped: true,
+            reason: current?.status === "expired" ? "already_expired" : "already_transitioned"
+        };
     }
 
-    logger.info(`[EXPIRATION] Expired assignment ${assignment._id} for affiliate ${affiliateId}`);
-    return { expired: true };
+    let operationalState = null;
+    if (rebuildState && updated.affiliateId) {
+        const rebuild = await rebuildOperationalStateForAffiliateIds([updated.affiliateId], { now });
+        operationalState = rebuild.states?.[0] || null;
+    }
+
+    logger.info(`[EXPIRATION] Expired assignment assignmentId=${updated._id} affiliateId=${updated.affiliateId} sourceJobId=${updated.sourceJobId || "none"} supervisorId=${updated.supervisorId || "none"}`);
+    return { expired: true, assignment: updated, operationalState };
 }
 
-async function expireStaleAssignments({ now = new Date(), limit = EXPIRATION_BATCH_SIZE } = {}) {
-    const assignments = await AffiliateAssignment.find({
-        status: "active",
-        expiresAt: { $lte: now }
-    })
-        .sort({ expiresAt: 1 })
-        .limit(limit)
-        .lean();
+async function expireStaleAssignments({ now = new Date(), limit = EXPIRATION_BATCH_SIZE, rebuildOperationalState = rebuildOperationalStateForAffiliateIds } = {}) {
+    const startedAt = Date.now();
+    const stats = createStats({ now, limit, dryRun: false });
+    const assignments = await loadDueAssignments({ now, limit });
+    stats.scanned = assignments.length;
+    stats.eligible = assignments.length;
 
-    const stats = { scanned: assignments.length, expired: 0, skipped: 0, errors: 0 };
+    const affiliateIds = assignments.map(item => item.affiliateId).filter(Boolean);
+    stats.duplicateActiveAssignmentAnomalies = await countDuplicateActiveAssignments(affiliateIds);
+    const blockedAffiliates = new Set();
+    if (stats.duplicateActiveAssignmentAnomalies > 0) {
+        const duplicateGroups = await AffiliateAssignment.aggregate([
+            { $match: activeAssignmentQuery(affiliateIds) },
+            { $group: { _id: "$affiliateId", count: { $sum: 1 } } },
+            { $match: { count: { $gt: 1 } } }
+        ]);
+        for (const group of duplicateGroups) blockedAffiliates.add(String(group._id));
+        logger.warn(`[EXPIRATION] duplicate_active_assignments groups=${duplicateGroups.length}; affected affiliates skipped`);
+    }
 
+    const expiredAffiliateIds = [];
     for (const assignment of assignments) {
         try {
-            const result = await expireAssignment(assignment, now);
-            if (result.expired) stats.expired += 1;
-            else stats.skipped += 1;
+            if (blockedAffiliates.has(String(assignment.affiliateId))) {
+                stats.skippedChanged += 1;
+                continue;
+            }
+            const result = await expireAssignment(assignment, now, { rebuildState: false });
+            if (result.expired) {
+                stats.expired += 1;
+                expiredAffiliateIds.push(result.assignment.affiliateId);
+            } else if (result.reason === "already_expired") {
+                stats.alreadyExpired += 1;
+            } else if (result.reason === "not_due") {
+                stats.skippedNotDue += 1;
+            } else {
+                stats.skippedChanged += 1;
+            }
         } catch (error) {
             stats.errors += 1;
-            logger.error(`[EXPIRATION] Error expiring assignment ${assignment._id}: ${error.message}`);
+            logger.error(`[EXPIRATION] Error expiring assignment assignmentId=${assignment._id}: ${error.message}`);
         }
     }
 
-    if (stats.scanned > 0) {
-        logger.info(`[EXPIRATION] Batch complete: scanned=${stats.scanned} expired=${stats.expired} skipped=${stats.skipped} errors=${stats.errors}`);
+    if (expiredAffiliateIds.length > 0) {
+        try {
+            const rebuild = await rebuildOperationalState(expiredAffiliateIds, { now });
+            stats.operationalStateUpdated = (rebuild.created || 0) + (rebuild.updated || 0);
+            countEffects(stats, rebuild.states || []);
+        } catch (error) {
+            stats.operationalStateFailed = expiredAffiliateIds.length;
+            stats.errors += 1;
+            logger.warn(`[EXPIRATION] Operational-state rebuild failed after expiration count=${expiredAffiliateIds.length}: ${error.message}`);
+        }
     }
 
+    stats.durationMs = Date.now() - startedAt;
+    logger.info(`[EXPIRATION] batch scanned=${stats.scanned} eligible=${stats.eligible} expired=${stats.expired} skippedNotDue=${stats.skippedNotDue} skippedChanged=${stats.skippedChanged} alreadyExpired=${stats.alreadyExpired} operationalStateUpdated=${stats.operationalStateUpdated} operationalStateFailed=${stats.operationalStateFailed} errors=${stats.errors} durationMs=${stats.durationMs}`);
     return stats;
 }
 
 module.exports = {
-    ACTIVE_JOB_STATUSES,
-    deriveUsageStatusAfterExpiration,
+    EXPIRATION_REASON,
+    auditAffiliateCheckExpiration,
     expireAssignment,
-    expireStaleAssignments,
-    hasActiveCheckJob,
-    hasNewerActiveAssignment
+    expireStaleAssignments
 };

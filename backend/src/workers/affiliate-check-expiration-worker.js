@@ -19,7 +19,7 @@ async function runBatch() {
     isRunning = true;
     try {
         const stats = await expireStaleAssignments({ limit: BATCH_SIZE });
-        logger.info(`[AFFILIATE-CHECK-EXPIRATION-WORKER] scanned=${stats.scanned} expired=${stats.expired} skipped=${stats.skipped} errors=${stats.errors}`);
+        logger.info(`[AFFILIATE-CHECK-EXPIRATION-WORKER] scanned= eligible= expired= skippedNotDue= skippedChanged= alreadyExpired= operationalStateUpdated= operationalStateFailed= errors= durationMs=`);
         return stats;
     } catch (error) {
         logger.error(`[AFFILIATE-CHECK-EXPIRATION-WORKER] Batch failed: ${error.stack || error.message}`);
