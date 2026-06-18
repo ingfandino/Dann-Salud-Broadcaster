@@ -41,6 +41,7 @@ const {
     previewAffiliateCheckSelection
 } = require("../services/affiliateCheck.service");
 const { getAffiliateCheckDashboardSummary } = require("../services/affiliateCheckDashboard.service");
+const { getAffiliateFlowManagementSnapshot } = require("../services/affiliateFlowManagement.service");
 const {
     AffiliateCheckOperationError,
     buildJobScope,
@@ -1250,11 +1251,14 @@ exports.getBaseStatus = async (req, res) => {
             });
         }
 
+        const flowManagement = await getAffiliateFlowManagementSnapshot({ user: req.user });
+
         res.json({
             totals,
             verificationHealth,
             byObraSocial,
             recentImports,
+            flowManagement,
             alerts
         });
 

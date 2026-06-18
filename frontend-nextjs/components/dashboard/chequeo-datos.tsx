@@ -562,6 +562,55 @@ interface BaseStatus {
         expired: number
         qrDone: number
     }>
+    flowManagement?: {
+        scope?: {
+            role?: string
+            management?: boolean
+            supervisorRef?: string | null
+        }
+        counts?: {
+            processingReservations?: number
+            eligible?: number
+            nonEligible?: number
+            availableGeneralStock?: number
+            supervisorOwned?: number
+            advisorAssigned?: number
+            recheckRequired?: number
+            activeJobs?: number
+            errorsOrStuckJobs?: number
+        }
+        recentCheckJobs?: Array<{
+            jobRef: string
+            mode: CheckMode
+            status: string
+            selectedCount?: number
+            eligibleCount?: number
+            assignedCount?: number
+            createdAt?: string
+            finishedAt?: string | null
+            supervisorRef?: string | null
+        }>
+        recentDistributions?: Array<{
+            assignmentRef: string
+            stockAssignmentRef?: string | null
+            checkJobRef?: string | null
+            supervisorRef?: string | null
+            advisorRef?: string | null
+            assignedAt?: string
+            status?: string
+            sourceType?: string
+            currentOutcomeAt?: string | null
+        }>
+        recentAdvisorOutcomes?: Array<{
+            assignmentRef: string
+            checkJobRef?: string | null
+            supervisorRef?: string | null
+            advisorRef?: string | null
+            outcome?: string
+            outcomeAt?: string
+            sourceType?: string
+        }>
+    }
 }
 
 interface ObraSocialAvailabilityItem {
@@ -1654,6 +1703,7 @@ export function ChequeoDatos() {
                 </div>
                 <div className="min-w-0 space-y-5">
                     <StockPersonalPanel baseStatus={baseStatus} loading={loading} role={role} />
+                    <FlowTraceabilityPanel baseStatus={baseStatus} loading={loading} />
                     <ActivityPanel jobs={jobs} loading={loading} />
                 </div>
             </section>
@@ -2392,6 +2442,7 @@ function RecentCheckJobsTable({
 }
 
 function StockPersonalPanel({ baseStatus, loading, role }: { baseStatus: BaseStatus | null; loading: boolean; role: string }) {
+    const flowCounts = baseStatus?.flowManagement?.counts || {}
     return (
         <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 p-4">
@@ -2408,11 +2459,11 @@ function StockPersonalPanel({ baseStatus, loading, role }: { baseStatus: BaseSta
                     </div>
                     <div className="flex-1 px-2">
                         <p className="text-[11px] font-semibold uppercase text-slate-500">Asignados a mi equipo</p>
-                        <p className="mt-1 text-xl font-bold text-slate-700">—</p>
+                        <p className="mt-1 text-xl font-bold text-slate-700">{loading ? "—" : formatCheckNumber(flowCounts.advisorAssigned)}</p>
                     </div>
                     <div className="flex-1 px-2">
                         <p className="text-[11px] font-semibold uppercase text-slate-500">Disponibles para asignar</p>
-                        <p className="mt-1 text-xl font-bold text-slate-700">—</p>
+                        <p className="mt-1 text-xl font-bold text-slate-700">{loading ? "—" : formatCheckNumber(flowCounts.supervisorOwned)}</p>
                     </div>
                 </div>
                 <div className="mt-4 flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
@@ -2423,6 +2474,92 @@ function StockPersonalPanel({ baseStatus, loading, role }: { baseStatus: BaseSta
                         <p className="text-sm font-bold text-emerald-800">Asignar datos a afiliados</p>
                         <p className="mt-1 text-xs text-emerald-600">Redistribuí datos de tu stock a los afiliados de tu equipo.</p>
                     </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+function TraceRef({ label, value }: { label: string; value?: string | null }) {
+    if (!value) return null
+    return <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">{label} {value}</span>
+}
+
+function FlowTraceabilityPanel({ baseStatus, loading }: { baseStatus: BaseStatus | null; loading: boolean }) {
+    const flow = baseStatus?.flowManagement
+    const counts = flow?.counts || {}
+    const distributions = flow?.recentDistributions || []
+    const outcomes = flow?.recentAdvisorOutcomes || []
+
+    return (
+        <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 p-4">
+                <div>
+                    <h3 className="text-base font-bold text-slate-900">Trazabilidad operativa</h3>
+                    <p className="text-xs text-slate-500">Conteos canónicos y actividad sin datos personales</p>
+                </div>
+                {loading && <RefreshCw className="h-4 w-4 animate-spin text-slate-300" />}
+            </div>
+            <div className="space-y-4 p-5">
+                <div className="grid grid-cols-2 gap-3">
+                    <MiniStat label="En chequeo" value={formatCheckNumber(counts.processingReservations)} loading={loading} icon={<Radio className="h-4 w-4" />} color="blue" />
+                    <MiniStat label="Aptos" value={formatCheckNumber(counts.eligible)} loading={loading} icon={<PackageCheck className="h-4 w-4" />} color="emerald" />
+                    <MiniStat label="Stock supervisor" value={formatCheckNumber(counts.supervisorOwned)} loading={loading} icon={<Shield className="h-4 w-4" />} color="violet" />
+                    <MiniStat label="Con asesor" value={formatCheckNumber(counts.advisorAssigned)} loading={loading} icon={<Users className="h-4 w-4" />} color="orange" />
+                    <MiniStat label="Rechequear" value={formatCheckNumber(counts.recheckRequired)} loading={loading} icon={<RotateCcw className="h-4 w-4" />} color="violet" />
+                    <MiniStat label="Errores/jobs" value={formatCheckNumber(counts.errorsOrStuckJobs)} loading={loading} icon={<AlertTriangle className="h-4 w-4" />} color="orange" />
+                </div>
+
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Distribuciones recientes</p>
+                    {loading ? (
+                        <p className="mt-3 text-sm text-slate-400">Cargando...</p>
+                    ) : distributions.length === 0 ? (
+                        <p className="mt-3 text-sm text-slate-400">Sin distribuciones recientes.</p>
+                    ) : (
+                        <div className="mt-3 space-y-2">
+                            {distributions.slice(0, 3).map(item => (
+                                <div key={item.assignmentRef} className="rounded-lg border border-slate-100 bg-white p-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="text-sm font-semibold text-slate-800">{item.status || "Sin estado"}</span>
+                                        <span className="text-[11px] text-slate-500">{formatCheckDate(item.assignedAt)}</span>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                        <TraceRef label="Lead" value={item.assignmentRef} />
+                                        <TraceRef label="Sup" value={item.supervisorRef} />
+                                        <TraceRef label="Asesor" value={item.advisorRef} />
+                                        <TraceRef label="Job" value={item.checkJobRef} />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Resultados de asesores</p>
+                    {loading ? (
+                        <p className="mt-3 text-sm text-slate-400">Cargando...</p>
+                    ) : outcomes.length === 0 ? (
+                        <p className="mt-3 text-sm text-slate-400">Sin resultados recientes.</p>
+                    ) : (
+                        <div className="mt-3 space-y-2">
+                            {outcomes.slice(0, 3).map(item => (
+                                <div key={item.assignmentRef} className="rounded-lg border border-slate-100 bg-white p-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="text-sm font-semibold text-slate-800">{item.outcome || "Sin resultado"}</span>
+                                        <span className="text-[11px] text-slate-500">{formatCheckDate(item.outcomeAt)}</span>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                        <TraceRef label="Lead" value={item.assignmentRef} />
+                                        <TraceRef label="Sup" value={item.supervisorRef} />
+                                        <TraceRef label="Asesor" value={item.advisorRef} />
+                                        <TraceRef label="Job" value={item.checkJobRef} />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
