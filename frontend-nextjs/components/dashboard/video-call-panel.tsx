@@ -1097,10 +1097,7 @@ export function VideoCallPanel({ ventaId, roomId, token, onRecordingSaved }: Vid
       )}
 
       <AlertDialog open={restartConfirmOpen} onOpenChange={setRestartConfirmOpen}>
-        <AlertDialogContent
-          overlayClassName="z-[10000]"
-          className="z-[10001]"
-        >
+        <AlertDialogContent className="z-[10001]">
           <AlertDialogHeader>
             <AlertDialogTitle>Reiniciar grabación</AlertDialogTitle>
             <AlertDialogDescription>
