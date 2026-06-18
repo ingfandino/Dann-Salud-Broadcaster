@@ -18,6 +18,7 @@ import { useAuth } from "@/lib/auth"
 import { useSocialHealthList } from "@/hooks/useSocialHealthList"
 import { SearchableSocialHealthSelect } from "./searchable-social-health-select"
 import { CelebrationAnimation } from "./celebration-animation"
+import { VideoAuditPanel } from "./video-audit-panel"
 
 /* Estados que disparan la animación de celebración */
 const CELEBRATION_STATUSES = ["Completa", "QR hecho"]
@@ -269,7 +270,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
 
     const [loading, setLoading] = useState(false)
     const [reprogramar, setReprogramar] = useState(false)
-    const [activeTab, setActiveTab] = useState<"details" | "history">("details")
+    const [activeTab, setActiveTab] = useState<"details" | "history" | "video">("details")
     const [showCelebration, setShowCelebration] = useState(false)
     const pendingResponseRef = useRef<any>(null) // Guardar datos de respuesta para después de la animación
 
@@ -712,6 +713,19 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                     >
                         Historial
                     </button>
+                    {process.env.NEXT_PUBLIC_ENABLE_VIDEO_AUDIT_MVP === "true" && user?._id && audit.auditor?._id && String(user._id) === String(audit.auditor._id) && (
+                        <button
+                            onClick={() => setActiveTab("video")}
+                            className={cn(
+                                "flex-1 px-4 py-3 text-sm font-medium transition-colors border-b-2 flex items-center justify-center gap-2",
+                                activeTab === "video"
+                                    ? theme === "dark" ? "border-purple-500 text-purple-400" : "border-purple-600 text-purple-600"
+                                    : "border-transparent text-gray-500 hover:text-gray-700"
+                            )}
+                        >
+                            Video
+                        </button>
+                    )}
                 </div>
 
                 {/* Contenido principal */}
@@ -740,6 +754,9 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                         </div>
                     )}
                     {/* ✅ Recuperador tiene acceso SOLO LECTURA - deshabilitamos TODO el fieldset */}
+                    {activeTab === "video" ? (
+                        <VideoAuditPanel ventaId={audit._id} />
+                    ) : (
                     <fieldset disabled={isAsesor || isLockedByQR || isReadOnly} className="contents">
                         {activeTab === "details" ? (
                             <div className="space-y-4">
@@ -1229,6 +1246,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                             </div>
                         )}
                     </fieldset>
+                    )}
                 </div>
 
                 {/* Pie del modal con botones */}

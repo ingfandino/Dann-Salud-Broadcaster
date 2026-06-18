@@ -16,7 +16,7 @@ export function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
     /* Permitir rutas públicas */
-    if (pathname === '/' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/recover')) {
+    if (pathname === '/' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/recover') || pathname.startsWith('/video-auditoria') || pathname.startsWith('/va')) {
         return NextResponse.next();
     }
 

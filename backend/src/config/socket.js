@@ -194,8 +194,116 @@ function initSocket(server, app = null, allowedOrigins = []) {
         /** Notificar al cliente que la conexión está lista */
         socket.emit("server:ready", { connected: true, ts: Date.now() });
 
+        /* ========== VIDEOAUDIT WEBRTC SIGNALING (Phase 2D) ========== */
+        if (process.env.ENABLE_VIDEO_AUDIT_WEBRTC_MVP === 'true') {
+            socket.on("videoaudit:join_call", async ({ ventaId, publicToken, role } = {}) => {
+                try {
+                    const VideoAudit = require('../models/VideoAudit');
+                    let videoAudit = null;
+
+                    if (role === 'auditor') {
+                        if (!socket.user) {
+                            return socket.emit('videoaudit:call_error', { code: 'UNAUTHORIZED', message: 'Autenticación requerida' });
+                        }
+                        if (!ventaId) return socket.emit('videoaudit:call_error', { code: 'MISSING_VENTA_ID' });
+                        videoAudit = await VideoAudit.findOne({ ventaId }).select('room');
+                    } else if (role === 'affiliate') {
+                        if (!publicToken) return socket.emit('videoaudit:call_error', { code: 'MISSING_TOKEN' });
+                        videoAudit = await VideoAudit.findOne({
+                            $or: [
+                                { 'room.publicToken': publicToken },
+                                { 'room.shortCode': publicToken }
+                            ]
+                        }).select('room');
+                        if (videoAudit?.room?.status === 'expired' || videoAudit?.room?.status === 'cancelled') {
+                            return socket.emit('videoaudit:call_error', { code: 'ROOM_UNAVAILABLE', message: 'La sala no está disponible' });
+                        }
+                    } else {
+                        return socket.emit('videoaudit:call_error', { code: 'INVALID_ROLE' });
+                    }
+
+                    if (!videoAudit?.room?.roomId) {
+                        return socket.emit('videoaudit:call_error', { code: 'ROOM_NOT_FOUND', message: 'Sala no encontrada. Generá el link primero.' });
+                    }
+
+                    const sigRoom = `videoaudit_call_${videoAudit.room.roomId}`;
+                    socket.join(sigRoom);
+                    socket._vaSignalingRoom = sigRoom;
+                    socket._vaRole = role;
+
+                    const roomSockets = await ioInstance.in(sigRoom).fetchSockets();
+                    let peersRemoved = 0;
+
+                    for (const s of roomSockets) {
+                        if (s.id !== socket.id && s._vaRole === role) {
+                            s.leave(sigRoom);
+                            s._vaSignalingRoom = null;
+                            s.emit('videoaudit:call_error', { code: 'DUPLICATE_SESSION', message: 'Se inició sesión desde otro dispositivo o pestaña.' });
+                            peersRemoved++;
+                        }
+                    }
+
+                    const activeSockets = await ioInstance.in(sigRoom).fetchSockets();
+                    const peerCount = activeSockets.length;
+
+                    logger.info(`[VA:WebRTC] ${role} joined ${sigRoom} (peers: ${peerCount}, removed: ${peersRemoved})`);
+                    socket.emit('videoaudit:joined_call', { roomId: videoAudit.room.roomId, role, peerCount });
+
+                    // Notify existing peers about the new joiner
+                    socket.to(sigRoom).emit('videoaudit:peer_ready', { role });
+
+                    // Tell the new joiner about already-present peers
+                    if (peerCount > 1) {
+                        const others = activeSockets.filter(s => s.id !== socket.id);
+                        if (others.length > 0) {
+                            socket.emit('videoaudit:peer_ready', { role: others[0]._vaRole });
+                        }
+                    }
+                } catch (err) {
+                    logger.error('[VA:WebRTC] join_call error:', err.message);
+                    socket.emit('videoaudit:call_error', { code: 'SERVER_ERROR' });
+                }
+            });
+
+            socket.on("videoaudit:offer", ({ offer, roomId } = {}) => {
+                if (!roomId) return;
+                socket.to(`videoaudit_call_${roomId}`).emit('videoaudit:offer', { offer });
+            });
+
+            socket.on("videoaudit:answer", ({ answer, roomId } = {}) => {
+                if (!roomId) return;
+                socket.to(`videoaudit_call_${roomId}`).emit('videoaudit:answer', { answer });
+            });
+
+            socket.on("videoaudit:ice_candidate", ({ candidate, roomId } = {}) => {
+                if (!roomId || !candidate) return;
+                socket.to(`videoaudit_call_${roomId}`).emit('videoaudit:ice_candidate', { candidate });
+            });
+
+            socket.on("videoaudit:media_state", ({ roomId, videoEnabled, audioEnabled } = {}) => {
+                if (!roomId) return;
+                const payload = {};
+                if (typeof videoEnabled === 'boolean') payload.videoEnabled = videoEnabled;
+                if (typeof audioEnabled === 'boolean') payload.audioEnabled = audioEnabled;
+                if (!Object.keys(payload).length) return;
+                socket.to(`videoaudit_call_${roomId}`).emit('videoaudit:media_state', payload);
+            });
+
+            socket.on("videoaudit:peer_left", ({ roomId } = {}) => {
+                if (!roomId) return;
+                socket.to(`videoaudit_call_${roomId}`).emit('videoaudit:peer_left', { role: socket._vaRole });
+                socket.leave(`videoaudit_call_${roomId}`);
+                socket._vaSignalingRoom = null;
+            });
+        }
+        /* ========================================================= */
+
         /** Manejar desconexión del cliente */
         socket.on("disconnect", () => {
+            // Notify WebRTC peers if socket was in a call room
+            if (socket._vaSignalingRoom) {
+                ioInstance.to(socket._vaSignalingRoom).emit('videoaudit:peer_left', { role: socket._vaRole });
+            }
             if (userId) {
                 removeUser(userId);
             }

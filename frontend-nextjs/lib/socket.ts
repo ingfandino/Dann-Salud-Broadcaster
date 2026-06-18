@@ -10,7 +10,27 @@
 
 import { io, Socket } from 'socket.io-client';
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+function getSocketUrl() {
+  const defaultSocketUrl =
+    process.env.NEXT_PUBLIC_SOCKET_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    (typeof window !== 'undefined' ? window.location.origin : '');
+
+  const tunnelSocketUrl = process.env.NEXT_PUBLIC_SOCKET_URL_TUNNEL;
+
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+
+    if ((protocol === 'https:' || hostname.endsWith('.trycloudflare.com')) && tunnelSocketUrl) {
+      return tunnelSocketUrl;
+    }
+  }
+
+  return defaultSocketUrl;
+}
+
+const SOCKET_URL = getSocketUrl();
 
 let socket: Socket | null = null;
 
