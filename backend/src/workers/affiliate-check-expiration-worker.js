@@ -1,6 +1,6 @@
 "use strict";
 
-require("dotenv").config();
+require("dotenv").config({ quiet: true });
 
 const connectDB = require("../config/db");
 const logger = require("../utils/logger").getLogger("affiliate-check-expiration-worker");
@@ -19,7 +19,7 @@ async function runBatch() {
     isRunning = true;
     try {
         const stats = await expireStaleAssignments({ limit: BATCH_SIZE });
-        logger.info(`[AFFILIATE-CHECK-EXPIRATION-WORKER] scanned= eligible= expired= skippedNotDue= skippedChanged= alreadyExpired= operationalStateUpdated= operationalStateFailed= errors= durationMs=`);
+        logger.info(`[AFFILIATE-CHECK-EXPIRATION-WORKER] scanned=${stats.scanned} eligible=${stats.eligible} expired=${stats.expired} skippedNotDue=${stats.skippedNotDue} skippedChanged=${stats.skippedChanged} alreadyExpired=${stats.alreadyExpired} operationalStateUpdated=${stats.operationalStateUpdated} operationalStateFailed=${stats.operationalStateFailed} errors=${stats.errors} durationMs=${stats.durationMs}`);
         return stats;
     } catch (error) {
         logger.error(`[AFFILIATE-CHECK-EXPIRATION-WORKER] Batch failed: ${error.stack || error.message}`);
