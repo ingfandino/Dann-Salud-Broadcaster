@@ -214,6 +214,7 @@ export const api = {
         getStockByObraSocial: (obraSocial: string) => apiClient.get(`/affiliates/stock-by-obra-social?obraSocial=${encodeURIComponent(obraSocial)}`),
         check: {
             getConfig: () => apiClient.get('/affiliates/check/config'),
+            updateConfig: (data: any) => apiClient.put('/affiliates/check/config', data),
             getDashboardSummary: (params?: any) => apiClient.get('/affiliates/check/dashboard-summary', { params }),
             getObraSocialAvailability: (payload: { mode: 'check_new' | 'check_reusable'; search?: string; limit?: number; selectedCodes?: number[] }) =>
                 apiClient.post('/affiliates/check/obra-social-availability', payload),

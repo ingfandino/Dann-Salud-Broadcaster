@@ -754,6 +754,15 @@ export function ChequeoDatos() {
     const [selectedObrasSociales, setSelectedObrasSociales] = useState<ObraSocialAvailabilityItem[]>([])
     const [obraSocialLoading, setObraSocialLoading] = useState(false)
     const [lastCreationSummary, setLastCreationSummary] = useState<any | null>(null)
+    const [configModalOpen, setConfigModalOpen] = useState(false)
+    const [configSaving, setConfigSaving] = useState(false)
+    const [configError, setConfigError] = useState<string | null>(null)
+    const [configForm, setConfigForm] = useState({
+        checkNew: "",
+        checkReusable: "",
+        ownershipDays: "",
+        verificationExpiryDays: "",
+    })
 
     const needsSupervisor = (mode: CheckMode | null) =>
         mode === "extract_base" && CHECK_MANAGER_ROLES.includes(role)
@@ -953,6 +962,53 @@ export function ChequeoDatos() {
             setError(err.response?.data?.message || "No se pudo cancelar el trabajo")
         } finally {
             setCancellingJobId(null)
+        }
+    }
+
+    const openConfigModal = () => {
+        setConfigError(null)
+        setConfigForm({
+            checkNew: String(config?.dailyQuota?.checkNew ?? ""),
+            checkReusable: String(config?.dailyQuota?.checkReusable ?? ""),
+            ownershipDays: String(config?.ownershipDays ?? ""),
+            verificationExpiryDays: String(config?.verificationExpiryDays ?? ""),
+        })
+        setConfigModalOpen(true)
+    }
+
+    const parseConfigNumber = (value: string, minimum: number) => {
+        const parsed = Number(value)
+        if (!Number.isInteger(parsed) || parsed < minimum) return null
+        return parsed
+    }
+
+    const saveOperationalConfig = async () => {
+        const checkNew = parseConfigNumber(configForm.checkNew, 0)
+        const checkReusable = parseConfigNumber(configForm.checkReusable, 0)
+        const ownershipDays = parseConfigNumber(configForm.ownershipDays, 1)
+        const verificationExpiryDays = parseConfigNumber(configForm.verificationExpiryDays, 1)
+
+        if (checkNew == null || checkReusable == null || ownershipDays == null || verificationExpiryDays == null) {
+            setConfigError("Ingresá números enteros válidos. Los días deben ser mayores a cero.")
+            return
+        }
+
+        setConfigSaving(true)
+        setConfigError(null)
+        try {
+            const response = await api.affiliates.check.updateConfig({
+                dailyQuota: { checkNew, checkReusable },
+                ownershipDays,
+                verificationExpiryDays,
+            })
+            setConfig(response.data?.config || null)
+            setConfigModalOpen(false)
+            toast.success("Configuración actualizada")
+            await loadDashboard()
+        } catch (err: any) {
+            setConfigError(err.response?.data?.message || err.response?.data?.error || "No se pudo guardar la configuración")
+        } finally {
+            setConfigSaving(false)
         }
     }
 
@@ -1168,7 +1224,7 @@ export function ChequeoDatos() {
 
                     <div className="flex flex-wrap items-center gap-2">
                         {CHECK_MANAGER_ROLES.includes(role) && (
-                            <button type="button" disabled className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+                            <button type="button" onClick={openConfigModal} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">
                                 <Settings className="h-4 w-4" />
                                 Configuración
                             </button>
@@ -1192,6 +1248,56 @@ export function ChequeoDatos() {
                 </div>
             )}
 
+            {configModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+                    <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
+                        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                            <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
+                                <Settings className="h-4 w-4" />
+                                Configuración operativa
+                            </h2>
+                            <button type="button" onClick={() => setConfigModalOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Cerrar configuración">
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+                        <div className="space-y-4 px-5 py-4">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                <label className="text-sm font-semibold text-slate-700">
+                                    Cupo diario nuevos
+                                    <input type="number" min={0} step={1} value={configForm.checkNew} onChange={event => setConfigForm(prev => ({ ...prev, checkNew: event.target.value }))} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
+                                </label>
+                                <label className="text-sm font-semibold text-slate-700">
+                                    Cupo diario reutilizables
+                                    <input type="number" min={0} step={1} value={configForm.checkReusable} onChange={event => setConfigForm(prev => ({ ...prev, checkReusable: event.target.value }))} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+                                </label>
+                                <label className="text-sm font-semibold text-slate-700">
+                                    Días de propiedad
+                                    <input type="number" min={1} step={1} value={configForm.ownershipDays} onChange={event => setConfigForm(prev => ({ ...prev, ownershipDays: event.target.value }))} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+                                </label>
+                                <label className="text-sm font-semibold text-slate-700">
+                                    Vigencia del chequeo
+                                    <input type="number" min={1} step={1} value={configForm.verificationExpiryDays} onChange={event => setConfigForm(prev => ({ ...prev, verificationExpiryDays: event.target.value }))} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+                                </label>
+                            </div>
+                            {configError && (
+                                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                                    {configError}
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
+                            <button type="button" onClick={() => setConfigModalOpen(false)} className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                                Cancelar
+                            </button>
+                            <button type="button" onClick={saveOperationalConfig} disabled={configSaving} className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
+                                {configSaving && <RefreshCw className="h-4 w-4 animate-spin" />}
+                                Guardar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.65fr)_minmax(360px,1fr)]">
                 <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="mb-5 flex items-center justify-between gap-3">
@@ -1212,13 +1318,19 @@ export function ChequeoDatos() {
 
                 <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
                     <h2 className="text-base font-bold text-slate-900">Propiedad del dato</h2>
-                    <div className="mt-5 flex items-center gap-3">
+                    <div className="mt-5 flex items-start gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
                             <Calendar className="h-5 w-5" />
                         </div>
-                        <div>
-                            <p className="text-2xl font-bold text-slate-950">{loading ? "—" : (config?.ownershipDays ?? "—")} días</p>
-                            <p className="text-xs text-slate-500">Tiempo asignado por propiedad</p>
+                        <div className="space-y-3">
+                            <div>
+                                <p className="text-2xl font-bold text-slate-950">{loading ? "—" : (config?.ownershipDays ?? "—")} días</p>
+                                <p className="text-xs text-slate-500">Tiempo asignado por propiedad</p>
+                            </div>
+                            <div>
+                                <p className="text-lg font-bold text-slate-950">{loading ? "—" : (config?.verificationExpiryDays ?? "—")} días</p>
+                                <p className="text-xs text-slate-500">Vigencia del chequeo</p>
+                            </div>
                         </div>
                     </div>
                 </div>
