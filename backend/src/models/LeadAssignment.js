@@ -100,6 +100,12 @@ const leadAssignmentSchema = new mongoose.Schema({
             required: true
         },
         note: String,
+        statusFrom: String,
+        statusTo: String,
+        idempotencyKey: {
+            type: String,
+            trim: true
+        },
         timestamp: {
             type: Date,
             default: Date.now
@@ -109,6 +115,22 @@ const leadAssignmentSchema = new mongoose.Schema({
             ref: 'User'
         }
     }],
+    /** Último resultado registrado por el asesor en Datos del Día */
+    lastOutcomeAt: {
+        type: Date,
+        default: null,
+        index: true
+    },
+    lastOutcomeBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    lastOutcomeNote: {
+        type: String,
+        default: '',
+        trim: true
+    },
     /** Fecha programada para seguimiento */
     dueDate: { type: Date },
     /** Origen del dato: fresh (nuevo) o reusable (reciclado) */

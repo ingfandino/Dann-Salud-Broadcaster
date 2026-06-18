@@ -21,6 +21,82 @@ const User = require('../models/User');
 const { getWhatsappClient, isReady } = require('../config/whatsapp');
 const ExcelJS = require('exceljs');
 
+const MANAGEMENT_READ_ROLES = new Set(['gerencia', 'auditor', 'desarrollador']);
+const TEAM_READ_ROLES = new Set(['supervisor', 'encargado']);
+
+function roleOf(user) {
+    return String(user?.role || '').toLowerCase();
+}
+
+function leadAssignmentStatusValues() {
+    return LeadAssignment.schema.path('status').enumValues;
+}
+
+function cleanIdempotencyKey(req) {
+    const raw = req.get?.('Idempotency-Key') || req.body?.idempotencyKey;
+    return raw ? String(raw).trim().slice(0, 120) : '';
+}
+
+async function buildAssignmentReadQuery(req, id) {
+    const role = roleOf(req.user);
+    const userId = req.user._id;
+
+    if (MANAGEMENT_READ_ROLES.has(role)) {
+        return { _id: id };
+    }
+
+    if (TEAM_READ_ROLES.has(role)) {
+        const or = [
+            { assignedTo: userId },
+            { reassignedTo: userId },
+            { supervisor: userId }
+        ];
+
+        if (req.user.numeroEquipo) {
+            const teamMembers = await User.find({
+                numeroEquipo: req.user.numeroEquipo,
+                active: true
+            }).select('_id').lean();
+            const teamIds = teamMembers.map(member => member._id);
+            if (teamIds.length > 0) {
+                or.push({ assignedTo: { $in: teamIds } });
+            }
+        }
+
+        return { _id: id, $or: or };
+    }
+
+    return {
+        _id: id,
+        $or: [
+            { assignedTo: userId },
+            { reassignedTo: userId }
+        ]
+    };
+}
+
+function buildAssignmentOutcomeQuery(req, id) {
+    return {
+        _id: id,
+        $or: [
+            { assignedTo: req.user._id },
+            { reassignedTo: req.user._id }
+        ]
+    };
+}
+
+function populateAssignmentAudit(query) {
+    return query
+        .populate('affiliate', 'nombre telefono1 cuil obraSocial localidad')
+        .populate('assignedTo', 'nombre email role numeroEquipo')
+        .populate('assignedBy', 'nombre email role numeroEquipo')
+        .populate('supervisor', 'nombre email role numeroEquipo')
+        .populate('lastOutcomeBy', 'nombre email role numeroEquipo')
+        .populate('sourceStockAssignment', 'source sourceJobId status assignedAt releasedAt releaseReason')
+        .populate('operationalState', 'usageStatus saleStatus canSell availableForSale unavailableReason verificationStatus verificationExpiresAt ownership')
+        .populate('sourceCheckJob', 'mode status createdAt completedAt ownership');
+}
+
 /** Formatea número de teléfono al formato de WhatsApp Argentina */
 const formatPhoneToId = (phone) => {
     let number = phone.replace(/\D/g, ''); // Eliminar no-dígitos
@@ -67,7 +143,7 @@ exports.sendWhatsApp = async (req, res) => {
         await client.sendMessage(chatId, message);
 
         // Actualizar estado e historial
-        assignment.status = 'En Gestión'; // Automáticamente pasa a gestión
+        assignment.status = 'Llamando';
         assignment.interactions.push({
             type: 'WhatsApp',
             note: `Mensaje enviado: ${message.substring(0, 50)}...`,
@@ -102,9 +178,9 @@ exports.reschedule = async (req, res) => {
         assignment.dueDate = new Date(date);
         assignment.subStatus = 'Reprogramado';
 
-        // Si estaba pendiente, pasar a 'En Gestión'
+        // Si estaba pendiente, pasar a gestión con el estado existente del modelo.
         if (assignment.status === 'Pendiente') {
-            assignment.status = 'En Gestión';
+            assignment.status = 'Llamando';
         }
 
         assignment.interactions.push({
@@ -286,73 +362,106 @@ exports.getMyLeads = async (req, res) => {
     }
 };
 
+
+// Obtener detalle auditable de una asignación
+exports.getAssignmentDetail = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const query = await buildAssignmentReadQuery(req, id);
+        const assignment = await populateAssignmentAudit(LeadAssignment.findOne(query));
+
+        if (!assignment) {
+            return res.status(404).json({ success: false, error: "Asignación no encontrada o sin permiso" });
+        }
+
+        return res.json({ success: true, assignment });
+    } catch (error) {
+        console.error("[getAssignmentDetail] Error:", error.message);
+        return res.status(500).json({ success: false, error: "Error al obtener asignación" });
+    }
+};
+
 // Actualizar estado de un lead
 exports.updateStatus = async (req, res) => {
     try {
         const { id } = req.params;
         const { status, subStatus, note } = req.body;
-        const userRole = req.user.role?.toLowerCase();
-        
-        console.log(`[updateStatus] Usuario: ${req.user.email}, Rol: ${userRole}, ID: ${id}, Nuevo estado: ${status}`);
-
-        let assignment;
-
-        // ✅ Gerencia/Auditor pueden editar cualquier lead
-        if (userRole === 'gerencia' || userRole === 'auditor') {
-            assignment = await LeadAssignment.findById(id);
-        }
-        // ✅ Supervisor/Encargado puede editar leads de su equipo
-        else if (userRole === 'supervisor' || userRole === 'encargado') {
-            // Buscar asesores del equipo del supervisor
-            const teamMembers = await User.find({ 
-                numeroEquipo: req.user.numeroEquipo,
-                active: true 
-            }).select('_id');
-            const teamIds = teamMembers.map(m => m._id);
-            
-            assignment = await LeadAssignment.findOne({
-                _id: id,
-                $or: [
-                    { assignedTo: req.user._id },           // Asignado al supervisor
-                    { assignedTo: { $in: teamIds } },      // Asignado a alguien de su equipo
-                    { reassignedTo: req.user._id }          // Reasignado al supervisor
-                ]
+        if (!leadAssignmentStatusValues().includes(status)) {
+            return res.status(400).json({
+                success: false,
+                error: "Estado inválido",
+                validStatuses: leadAssignmentStatusValues()
             });
         }
-        // ✅ Asesor solo puede editar sus propios leads
-        else {
-            assignment = await LeadAssignment.findOne({
-                _id: id,
-                assignedTo: req.user._id
-            });
-        }
+
+        const outcomeQuery = buildAssignmentOutcomeQuery(req, id);
+        const assignment = await LeadAssignment.findOne(outcomeQuery);
 
         if (!assignment) {
-            console.log(`[updateStatus] ❌ Asignación no encontrada para ID: ${id}, Usuario: ${req.user.email}`);
-            return res.status(404).json({ error: "Asignación no encontrada o sin permiso" });
+            return res.status(404).json({ success: false, error: "Asignación no encontrada o sin permiso" });
         }
 
-        console.log(`[updateStatus] ✅ Asignación encontrada, estado anterior: ${assignment.status}`);
+        const idempotencyKey = cleanIdempotencyKey(req);
+        const previousStatus = assignment.status;
+        const now = new Date();
+        const update = {
+            $set: {
+                status,
+                lastOutcomeAt: now,
+                lastOutcomeBy: req.user._id,
+                lastOutcomeNote: note || ''
+            },
+            $push: {
+                interactions: {
+                    type: 'Cambio Estado',
+                    note: note || `Cambio a ${status}`,
+                    statusFrom: previousStatus,
+                    statusTo: status,
+                    idempotencyKey: idempotencyKey || undefined,
+                    performedBy: req.user._id,
+                    timestamp: now
+                }
+            }
+        };
 
-        assignment.status = status;
-        if (subStatus) assignment.subStatus = subStatus;
+        if (subStatus !== undefined) {
+            update.$set.subStatus = subStatus;
+        }
 
-        // Registrar interacción - SIN agregar al array para evitar errores de validación
-        // assignment.interactions.push({
-        //     type: 'Cambio Estado',
-        //     note: note || `Cambio a ${status}`,
-        //     performedBy: req.user._id,
-        //     timestamp: new Date()
-        // });
+        const atomicQuery = {
+            ...outcomeQuery,
+            ...(idempotencyKey ? { 'interactions.idempotencyKey': { $ne: idempotencyKey } } : {})
+        };
 
-        await assignment.save();
-        console.log(`[updateStatus] ✅ Estado actualizado correctamente a: ${status}`);
-        res.json(assignment);
+        const updated = await populateAssignmentAudit(
+            LeadAssignment.findOneAndUpdate(atomicQuery, update, {
+                new: true,
+                runValidators: true
+            })
+        );
+
+        if (!updated && idempotencyKey) {
+            const existing = await populateAssignmentAudit(LeadAssignment.findOne(outcomeQuery));
+            const previous = existing?.interactions?.find(item => item.idempotencyKey === idempotencyKey);
+            if (previous && previous.statusTo !== status) {
+                return res.status(409).json({
+                    success: false,
+                    error: "La clave de idempotencia ya fue usada con otro estado"
+                });
+            }
+            return res.json({ success: true, idempotent: true, assignment: existing });
+        }
+
+        if (!updated) {
+            return res.status(404).json({ success: false, error: "Asignación no encontrada o sin permiso" });
+        }
+
+        return res.json({ success: true, idempotent: false, assignment: updated });
 
     } catch (error) {
         console.error("[updateStatus] ❌ Error:", error.message);
         console.error("[updateStatus] Stack:", error.stack);
-        res.status(500).json({ error: "Error al actualizar estado", details: error.message });
+        res.status(500).json({ success: false, error: "Error al actualizar estado", details: error.message });
     }
 };
 
@@ -378,9 +487,9 @@ exports.logInteraction = async (req, res) => {
             timestamp: new Date()
         });
 
-        // Si estaba pendiente, pasar a 'En Gestión' automáticamente
+        // Si estaba pendiente, pasar a gestión con el estado existente del modelo.
         if (assignment.status === 'Pendiente') {
-            assignment.status = 'En Gestión';
+            assignment.status = 'Llamando';
         }
 
         await assignment.save();

@@ -35,6 +35,13 @@ router.get(
     assignmentController.exportMyLeads
 );
 
+router.get(
+    "/:id",
+    requireAuth,
+    permit("asesor", "supervisor", "gerencia", "auditor", "encargado", "independiente"),
+    assignmentController.getAssignmentDetail
+);
+
 router.patch(
     "/:id/status",
     requireAuth,
