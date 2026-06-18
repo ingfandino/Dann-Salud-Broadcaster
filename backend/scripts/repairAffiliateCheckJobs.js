@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "../.env") });
+
 const mongoose = require("mongoose");
 const connectDB = require("../src/config/db");
 const AffiliateAssignment = require("../src/models/AffiliateAssignment");
