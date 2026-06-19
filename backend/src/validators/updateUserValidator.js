@@ -3,6 +3,8 @@
 const { body, param } = require("express-validator");
 const User = require("../models/User");
 
+const validRoles = ["administrativo", "supervisor", "asesor", "auditor", "gerencia", "RR.HH", "recuperador", "encargado", "independiente", "desarrollador", "obra_social"];
+
 exports.updateUserValidator = [
     param("id").isMongoId().withMessage("ID de usuario inválido"),
 
@@ -34,4 +36,20 @@ exports.updateUserValidator = [
         .matches(/[a-z]/).withMessage("La clave debe contener al menos una minúscula")
         .matches(/[A-Z]/).withMessage("La clave debe contener al menos una mayúscula")
         .matches(/[0-9]/).withMessage("La clave debe contener al menos un número"),
+
+    body("role")
+        .optional()
+        .isIn(validRoles).withMessage("Rol no válido"),
+
+    body("obraSocialId")
+        .optional({ nullable: true, checkFalsy: true })
+        .isMongoId().withMessage("obraSocialId inválido"),
+
+    body()
+        .custom((value) => {
+            if (value.role === "obra_social" && !value.obraSocialId) {
+                throw new Error("obraSocialId es obligatorio para usuarios obra_social");
+            }
+            return true;
+        }),
 ];

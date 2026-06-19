@@ -309,9 +309,10 @@ exports.notifyBannedWordDetection = async (detectionData) => {
         await detection.save();
 
         // Emitir evento de Socket.IO para notificaciones en tiempo real
+        // DIAGNOSTIC FIX: room format must match socket.js (user_ not user:)
         if (global.io) {
             usersToNotify.forEach(notifyUser => {
-                global.io.to(`user:${notifyUser._id}`).emit("bannedWordAlert", {
+                global.io.to(`user_${notifyUser._id}`).emit("bannedWordAlert", {
                     detection: detection._id,
                     word,
                     user: {

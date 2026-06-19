@@ -17,6 +17,7 @@ router.use(requireAuth, permit('administrativo', 'auditor', 'gerencia', 'supervi
 router.get('/', liquidacion.list);
 router.get('/by-tipo', liquidacion.listByTipo);
 router.get('/stats-monthly', liquidacion.statsMonthly);
+router.get('/salary-calculation', liquidacion.calculateSalary);
 
 // Ruta DIRECTA sin middleware adicional para debugging
 router.post('/export-direct', liquidacion.exportLiquidationDirect);

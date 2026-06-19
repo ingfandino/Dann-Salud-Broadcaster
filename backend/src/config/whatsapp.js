@@ -20,7 +20,7 @@ const { Client, LocalAuth } = require("whatsapp-web.js");
 const EventEmitter = require("events");
 EventEmitter.defaultMaxListeners = 50;
 const path = require("path");
-const logger = require("../utils/logger");
+const logger = require("../utils/logger").getLogger("whatsapp");
 
 /** Instancia del cliente de WhatsApp */
 let whatsappClient = null;

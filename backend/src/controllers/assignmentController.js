@@ -18,7 +18,10 @@ const recyclingService = require('../services/recyclingService');
 
 const LeadAssignment = require('../models/LeadAssignment');
 const User = require('../models/User');
-const { getWhatsappClient, isReady } = require('../config/whatsapp');
+const AffiliateContribution = require('../models/AffiliateContribution');
+const { isReady, sendMessage, getActiveEngine } = require('../services/whatsappUnified');
+const { formatWhatsAppJid, maskJid } = require('../utils/whatsappJid');
+const { recordWhatsAppSendAttempt } = require('../services/whatsappSendAttemptService');
 const ExcelJS = require('exceljs');
 
 const MANAGEMENT_READ_ROLES = new Set(['gerencia', 'auditor', 'desarrollador']);
@@ -97,36 +100,44 @@ function populateAssignmentAudit(query) {
         .populate('sourceCheckJob', 'mode status createdAt completedAt ownership');
 }
 
-/** Formatea número de teléfono al formato de WhatsApp Argentina */
-const formatPhoneToId = (phone) => {
-    let number = phone.replace(/\D/g, ''); // Eliminar no-dígitos
-    if (number.startsWith('549')) {
-        // Ya tiene formato
-    } else if (number.startsWith('54')) {
-        number = '549' + number.substring(2);
-    } else if (number.startsWith('15')) {
-        number = '549' + number.substring(2);
-    } else {
-        // Asumir local sin prefijo internacional
-        number = '549' + number;
-    }
-    return `${number}@c.us`;
-};
-
 // Enviar WhatsApp (Asesor)
 exports.sendWhatsApp = async (req, res) => {
+    const userId = req.user?._id;
+    const engine = getActiveEngine();
+
     try {
         const { id } = req.params;
-        const { message, templateId } = req.body;
+        const { message } = req.body;
 
-        if (!isReady()) {
-            return res.status(503).json({ error: "El servicio de WhatsApp no está conectado" });
+        if (!message || !String(message).trim()) {
+            return res.status(400).json({
+                success: false,
+                sendStatus: "failed",
+                code: "WHATSAPP_EMPTY_MESSAGE",
+                message: "El mensaje de WhatsApp está vacío."
+            });
+        }
+
+        if (!isReady(userId)) {
+            await recordWhatsAppSendAttempt({
+                flow: "assignment",
+                userId,
+                sourceId: id,
+                engine,
+                sendStatus: "not_connected"
+            });
+            return res.status(503).json({
+                success: false,
+                sendStatus: "not_connected",
+                code: "WHATSAPP_NOT_CONNECTED",
+                message: "Tu WhatsApp no está conectado."
+            });
         }
 
         const assignment = await LeadAssignment.findOne({
             _id: id,
-            assignedTo: req.user._id
-        }).populate('affiliate');
+            assignedTo: userId
+        }).populate("affiliate");
 
         if (!assignment) {
             return res.status(404).json({ error: "Asignación no encontrada" });
@@ -136,27 +147,121 @@ exports.sendWhatsApp = async (req, res) => {
             return res.status(400).json({ error: "El afiliado no tiene teléfono registrado" });
         }
 
-        const client = getWhatsappClient();
-        const chatId = formatPhoneToId(assignment.affiliate.telefono1);
+        let chatId;
+        try {
+            chatId = formatWhatsAppJid(assignment.affiliate.telefono1, engine);
+        } catch (jidError) {
+            await recordWhatsAppSendAttempt({
+                flow: "assignment",
+                userId,
+                sourceId: id,
+                engine,
+                recipient: assignment.affiliate.telefono1,
+                sendStatus: "failed",
+                errorCode: jidError.code || "INVALID_WHATSAPP_PHONE",
+                errorMessage: jidError.message
+            });
+            return res.status(400).json({
+                success: false,
+                sendStatus: "failed",
+                code: jidError.code || "INVALID_WHATSAPP_PHONE",
+                message: "El teléfono del afiliado no es válido para WhatsApp."
+            });
+        }
 
-        // Enviar mensaje
-        await client.sendMessage(chatId, message);
+        let sendResult;
+        try {
+            await recordWhatsAppSendAttempt({
+                flow: "assignment",
+                userId,
+                sourceId: id,
+                engine,
+                jid: chatId,
+                recipient: assignment.affiliate.telefono1,
+                sendStatus: "queued"
+            });
+            sendResult = await sendMessage(userId, chatId, message);
+        } catch (sendError) {
+            const sendStatus = sendError.status || (sendError.code === "WHATSAPP_SEND_UNAVAILABLE" ? "unavailable" : "failed");
+            await recordWhatsAppSendAttempt({
+                flow: "assignment",
+                userId,
+                sourceId: id,
+                engine: sendError.engine || engine,
+                jid: chatId,
+                recipient: assignment.affiliate.telefono1,
+                sendStatus,
+                errorCode: sendError.code || "WHATSAPP_SEND_FAILED",
+                errorMessage: sendError.message
+            });
 
-        // Actualizar estado e historial
-        assignment.status = 'Llamando';
+            return res.status(sendStatus === "not_connected" ? 503 : 502).json({
+                success: false,
+                sendStatus,
+                code: sendError.code || "WHATSAPP_SEND_FAILED",
+                message: sendStatus === "unavailable"
+                    ? "El servicio de WhatsApp no está disponible para esta sesión."
+                    : "No se pudo enviar el mensaje por WhatsApp."
+            });
+        }
+
+        if (!sendResult?.success || sendResult?.status !== "accepted") {
+            await recordWhatsAppSendAttempt({
+                flow: "assignment",
+                userId,
+                sourceId: id,
+                engine: sendResult?.engine || engine,
+                jid: chatId,
+                recipient: assignment.affiliate.telefono1,
+                sendStatus: sendResult?.status || "failed",
+                errorCode: sendResult?.code || "WHATSAPP_SEND_FAILED",
+                errorMessage: sendResult?.message || "No se pudo enviar el mensaje por WhatsApp."
+            });
+            return res.status(502).json({
+                success: false,
+                sendStatus: sendResult?.status || "failed",
+                code: sendResult?.code || "WHATSAPP_SEND_FAILED",
+                message: "No se pudo enviar el mensaje por WhatsApp."
+            });
+        }
+
+        await recordWhatsAppSendAttempt({
+            flow: "assignment",
+            userId,
+            sourceId: id,
+            engine: sendResult.engine || engine,
+            jid: chatId,
+            recipient: assignment.affiliate.telefono1,
+            sendStatus: "accepted",
+            messageId: sendResult.messageId || null
+        });
+
+        assignment.status = "Llamando";
         assignment.interactions.push({
-            type: 'WhatsApp',
-            note: `Mensaje enviado: ${message.substring(0, 50)}...`,
-            performedBy: req.user._id,
+            type: "WhatsApp",
+            note: "Mensaje aceptado por WhatsApp. Entrega no confirmada.",
+            performedBy: userId,
             timestamp: new Date()
         });
 
         await assignment.save();
-        res.json({ success: true, message: "Mensaje enviado" });
+        return res.json({
+            success: true,
+            sendStatus: "accepted",
+            message: "Mensaje enviado a WhatsApp. No pudimos confirmar entrega.",
+            engine: sendResult.engine || engine,
+            messageId: sendResult.messageId || null,
+            jid: maskJid(chatId)
+        });
 
     } catch (error) {
         console.error("Error enviando WhatsApp:", error);
-        res.status(500).json({ error: "Error al enviar mensaje de WhatsApp" });
+        return res.status(500).json({
+            success: false,
+            sendStatus: "failed",
+            code: "WHATSAPP_SEND_FAILED",
+            message: "Error al enviar mensaje de WhatsApp"
+        });
     }
 };
 
@@ -293,23 +398,38 @@ exports.exportMyLeads = async (req, res) => {
         const workbook = new ExcelJS.Workbook();
         const worksheet = workbook.addWorksheet('Mis Leads');
 
-        // Columnas requeridas: telefono, nombre, cuil, obra_social, localidad
+        // Enrich with contribution data
+        const exportAffiliateIds = assignments.map(a => a.affiliate?._id).filter(Boolean);
+        const exportContribMap = {};
+        if (exportAffiliateIds.length > 0) {
+            const contribs = await AffiliateContribution.find(
+                { affiliateId: { $in: exportAffiliateIds } },
+                { affiliateId: 1, last3ClosedMonthsPaidCount: 1 }
+            ).lean();
+            for (const c of contribs) {
+                exportContribMap[String(c.affiliateId)] = c.last3ClosedMonthsPaidCount;
+            }
+        }
+
         worksheet.columns = [
             { header: 'telefono', key: 'telefono', width: 20 },
             { header: 'nombre', key: 'nombre', width: 30 },
             { header: 'cuil', key: 'cuil', width: 15 },
             { header: 'obra_social', key: 'obra_social', width: 20 },
             { header: 'localidad', key: 'localidad', width: 20 },
+            { header: 'trim_pagos', key: 'trim_pagos', width: 15 },
         ];
 
         assignments.forEach(assign => {
             if (assign.affiliate) {
+                const trimPagos = exportContribMap[String(assign.affiliate._id)];
                 worksheet.addRow({
                     telefono: assign.affiliate.telefono1 || '',
                     nombre: assign.affiliate.nombre || '',
                     cuil: assign.affiliate.cuil || '',
                     obra_social: assign.affiliate.obraSocial || '',
-                    localidad: assign.affiliate.localidad || ''
+                    localidad: assign.affiliate.localidad || '',
+                    trim_pagos: trimPagos != null ? trimPagos : ''
                 });
             }
         });
@@ -355,13 +475,38 @@ exports.distribute = async (req, res) => {
 exports.getMyLeads = async (req, res) => {
     try {
         const leads = await assignmentService.getDailyAssignments(req.user._id);
-        res.json(leads);
+
+        // Enrich with last3ClosedMonthsPaidCount from AffiliateContribution
+        const affiliateIds = leads
+            .map(l => l.affiliate?._id)
+            .filter(Boolean);
+
+        const contribMap = {};
+        if (affiliateIds.length > 0) {
+            const contribs = await AffiliateContribution.find(
+                { affiliateId: { $in: affiliateIds } },
+                { affiliateId: 1, last3ClosedMonthsPaidCount: 1 }
+            ).lean();
+            for (const c of contribs) {
+                contribMap[String(c.affiliateId)] = c.last3ClosedMonthsPaidCount;
+            }
+        }
+
+        const enriched = leads.map(l => {
+            const obj = l.toObject ? l.toObject() : l;
+            if (obj.affiliate) {
+                const key = String(obj.affiliate._id);
+                obj.affiliate.last3ClosedMonthsPaidCount = contribMap[key] ?? null;
+            }
+            return obj;
+        });
+
+        res.json(enriched);
     } catch (error) {
         console.error("Error obteniendo leads:", error);
         res.status(500).json({ error: "Error al obtener leads" });
     }
 };
-
 
 // Obtener detalle auditable de una asignación
 exports.getAssignmentDetail = async (req, res) => {
@@ -386,6 +531,7 @@ exports.updateStatus = async (req, res) => {
     try {
         const { id } = req.params;
         const { status, subStatus, note } = req.body;
+
         if (!leadAssignmentStatusValues().includes(status)) {
             return res.status(400).json({
                 success: false,
@@ -487,7 +633,7 @@ exports.logInteraction = async (req, res) => {
             timestamp: new Date()
         });
 
-        // Si estaba pendiente, pasar a gestión con el estado existente del modelo.
+        // Si estaba pendiente, pasar a 'En Gestión' automáticamente
         if (assignment.status === 'Pendiente') {
             assignment.status = 'Llamando';
         }

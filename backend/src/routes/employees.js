@@ -99,4 +99,7 @@ router.get('/stats/:userId', isGerenciaRRHHOrSupervisor, employeeController.getE
 // Ruta para subir foto de DNI
 router.post('/upload-dni', isGerenciaRRHHOrSupervisor, uploadDNI.single('fotoDNI'), employeeController.uploadDNI);
 
+// Fecha de ingreso por userId (público autenticado, usado por Liquidación)
+router.get('/user/:userId/ingreso', requireAuth, employeeController.getIngresoByUserId);
+
 module.exports = router;

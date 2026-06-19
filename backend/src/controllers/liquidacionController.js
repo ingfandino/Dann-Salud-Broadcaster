@@ -9,6 +9,207 @@
 const Audit = require('../models/Audit');
 const Employee = require('../models/Employee');
 const logger = require('../utils/logger');
+const mongoose = require('mongoose');
+
+function getArgentinaDateKey(date = new Date()) {
+    const argentinaDate = new Date(date.getTime() - (3 * 60 * 60 * 1000));
+    return argentinaDate.toISOString().slice(0, 10);
+}
+
+function toIdString(value) {
+    if (!value) return '';
+    if (value._id) return value._id.toString();
+    return value.toString();
+}
+
+/**
+ * ============================================================
+ * FUNCIONES DE UTILIDAD PARA LIQUIDACIÓN
+ * ============================================================
+ */
+
+/**
+ * Determina si una fecha es el último día laborable del mes
+ * Días laborables: Lunes(1) a Sábado(6). Domingo(0) NO es laborable.
+ * Si el último día del mes es domingo, se usa el sábado anterior.
+ * 
+ * @param {Date} date - Fecha a verificar
+ * @returns {boolean} - true si es el último día laborable del mes
+ */
+function isLastWorkingDayOfMonth(date) {
+    if (!date) return false;
+    
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = d.getMonth();
+    const day = d.getDate();
+    const dayOfWeek = d.getDay(); // 0=Domingo, 1=Lunes, ..., 6=Sábado
+    
+    // Último día del mes actual
+    const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
+    
+    // Si es domingo (0), no es laborable
+    if (dayOfWeek === 0) return false;
+    
+    // Si es el último día del mes y es laborable (Lun-Sáb)
+    if (day === lastDayOfMonth && dayOfWeek >= 1 && dayOfWeek <= 6) {
+        return true;
+    }
+    
+    // Si el último día del mes es domingo y hoy es sábado (día anterior)
+    const lastDayWeekDay = new Date(year, month + 1, 0).getDay();
+    if (lastDayWeekDay === 0 && dayOfWeek === 6 && day === lastDayOfMonth - 1) {
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Normaliza el estado de auditoría para identificar "QR hecho" real
+ * Excluye variantes temporales o especiales como "QR hecho (Temporal)"
+ * 
+ * @param {string} status - Estado original
+ * @returns {boolean} - true si es QR hecho real (no temporal)
+ */
+function isRealQRHecho(status) {
+    if (!status) return false;
+    const normalized = status.toLowerCase().trim();
+    // Debe incluir "qr hecho" pero NO "temporal"
+    return normalized.includes('qr hecho') && !normalized.includes('temporal');
+}
+
+/**
+ * ============================================================
+ * CÁLCULOS DE SUELDOS POR ROL
+ * ============================================================
+ */
+
+/**
+ * Calcula sueldo para Asesores según escala Telemarketer
+ * 
+ * @param {number} ventas - Cantidad de ventas QR hecho
+ * @param {number} ventasSemanal - Ventas en la semana actual (viernes-jueves)
+ * @returns {Object} - { basico, comisionMensual, premioSemanal, total }
+ */
+function calcularSueldoAsesor(ventas, ventasSemanal = 0) {
+    // Básico según rango de ventas mensuales
+    let basico = 400000; // 0-16 ventas
+    if (ventas >= 17 && ventas <= 20) basico = 500000;
+    else if (ventas >= 21) basico = 700000;
+    
+    // Comisión mensual por tramos
+    let comisionMensual = 0;
+    if (ventas >= 10 && ventas <= 11) comisionMensual = 110000;
+    else if (ventas >= 12 && ventas <= 16) comisionMensual = 200000;
+    else if (ventas >= 17 && ventas <= 20) comisionMensual = 350000;
+    else if (ventas >= 21 && ventas <= 23) comisionMensual = 500000;
+    else if (ventas >= 24) comisionMensual = 700000;
+    
+    // Premio semanal (viernes a jueves) - por tramo, no acumulativo
+    let premioSemanal = 0;
+    if (ventasSemanal >= 10) premioSemanal = 200000;
+    else if (ventasSemanal >= 8) premioSemanal = 100000;
+    else if (ventasSemanal >= 6) premioSemanal = 80000;
+    else if (ventasSemanal >= 4) premioSemanal = 40000;
+    else if (ventasSemanal >= 3) premioSemanal = 0; // Sábado libre
+    
+    return {
+        basico,
+        comisionMensual,
+        premioSemanal,
+        total: basico + comisionMensual + premioSemanal
+    };
+}
+
+/**
+ * Calcula sueldo para Supervisores
+ * 
+ * @param {number} ventas - Cantidad de QR hechos del equipo
+ * @param {number} ventasSemanal - QR del equipo en semana actual (viernes-jueves)
+ * @returns {Object} - { basico, comisionMensual, premioSemanal, total }
+ */
+function calcularSueldoSupervisor(ventas, ventasSemanal = 0) {
+    // Básico según rango
+    let basico = 500000; // 0-60 ventas
+    if (ventas >= 61) basico = 700000;
+    
+    // Comisión mensual por tramos
+    let comisionMensual = 0;
+    if (ventas >= 60 && ventas <= 79) comisionMensual = 500000;
+    else if (ventas >= 80 && ventas <= 99) comisionMensual = 800000;
+    else if (ventas >= 100 && ventas <= 119) comisionMensual = 1100000;
+    else if (ventas >= 120) comisionMensual = 1500000;
+    
+    // Premio semanal (viernes a jueves) - por tramo
+    let premioSemanal = 0;
+    if (ventasSemanal >= 30) premioSemanal = 700000;
+    else if (ventasSemanal >= 25) premioSemanal = 500000;
+    else if (ventasSemanal >= 20) premioSemanal = 150000;
+    else if (ventasSemanal >= 18) premioSemanal = 100000;
+    
+    return {
+        basico,
+        comisionMensual,
+        premioSemanal,
+        total: basico + comisionMensual + premioSemanal
+    };
+}
+
+/**
+ * Calcula sueldo para Auditores
+ * 
+ * @param {number} auditoriasLiquidables - Cantidad de auditorías completadas por el auditor
+ * @returns {Object} - { basico, comisionPorAuditoria, total }
+ */
+function calcularSueldoAuditor(auditoriasLiquidables) {
+    const basico = 400000;
+    const comisionPorAuditoria = 3500;
+    const comisionTotal = auditoriasLiquidables * comisionPorAuditoria;
+    
+    return {
+        basico,
+        comisionPorAuditoria,
+        auditoriasLiquidables,
+        comisionTotal,
+        total: basico + comisionTotal
+    };
+}
+
+function buildAuditorRows(audits, { fromKey, toKey, userId } = {}) {
+    const rows = [];
+    audits.forEach((audit) => {
+        const history = Array.isArray(audit.completeHistory) ? audit.completeHistory : [];
+        history
+            .filter((entry) => {
+                const role = entry?.completedByRole?.toLowerCase();
+                const completeDate = entry?.completeDate;
+                if ((role !== 'auditor' && role !== 'rr.hh') || !completeDate) return false;
+                if (fromKey && completeDate < fromKey) return false;
+                if (toKey && completeDate > toKey) return false;
+                if (userId && toIdString(entry.completedByUserId) !== userId) return false;
+                return true;
+            })
+            .forEach((entry) => {
+                const creditedAuditor = entry.completedByUserId && typeof entry.completedByUserId === 'object'
+                    ? entry.completedByUserId
+                    : audit.auditor;
+
+                rows.push({
+                    ...audit,
+                    _id: `${audit._id?.toString()}_${entry.monthKey}`,
+                    auditId: audit._id,
+                    originalAuditId: audit._id,
+                    assignedAuditor: audit.auditor,
+                    auditor: creditedAuditor || audit.auditor,
+                    auditorCompletion: entry,
+                    completeDate: entry.completeDate,
+                    liquidacionMonth: entry.monthKey
+                });
+            });
+    });
+    return rows;
+}
 
 /** Lista auditorías con estado "QR hecho" listas para liquidación */
 exports.list = async (req, res) => {
@@ -270,8 +471,8 @@ exports.listByTipo = async (req, res) => {
         const User = require('../models/User');
         const { tipo, dateFrom, dateTo } = req.query;
 
-        if (!tipo || !['supervisor', 'auditor', 'administrativo'].includes(tipo)) {
-            return res.status(400).json({ message: 'Parámetro tipo requerido: supervisor | auditor | administrativo' });
+        if (!tipo || !['supervisor', 'auditor', 'administrativo', 'asesor'].includes(tipo)) {
+            return res.status(400).json({ message: 'Parámetro tipo requerido: supervisor | auditor | administrativo | asesor' });
         }
 
         // ============================================================
@@ -281,14 +482,15 @@ exports.listByTipo = async (req, res) => {
         const userRole = currentUser?.role?.toLowerCase();
 
         const ALLOWED_TIPOS_BY_ROLE = {
-            gerencia:           ['supervisor', 'auditor', 'administrativo'],
-            encargado:          ['supervisor', 'auditor', 'administrativo'],
+            gerencia:           ['supervisor', 'auditor', 'administrativo', 'asesor'],
+            encargado:          ['supervisor', 'auditor', 'administrativo', 'asesor'],
             supervisor:         ['supervisor'],
             supervisor_reventa: ['supervisor'],
-            asesor:             ['supervisor'],
-            auditor:            ['auditor'],
+            asesor:             ['asesor', 'supervisor'],
+            auditor:            ['auditor', 'asesor'],
+            'rr.hh':            ['auditor'],  // RR.HH uses same liquidation logic as auditor
             administrativo:     ['administrativo'],
-            independiente:      ['supervisor', 'auditor'],
+            independiente:      ['supervisor', 'auditor', 'asesor'],
             recuperador:        ['supervisor'],
         };
 
@@ -303,7 +505,10 @@ exports.listByTipo = async (req, res) => {
             { path: 'asesor', select: 'nombre name email numeroEquipo role' },
             { path: 'auditor', select: 'nombre name email' },
             { path: 'administrador', select: 'nombre name email' },
+            { path: 'completeHistory.completedByUserId', select: 'nombre name email role' },
         ];
+        let auditorFromKey = null;
+        let auditorToKey = null;
 
         // Date range filter
         if (dateFrom && dateTo) {
@@ -313,7 +518,7 @@ exports.listByTipo = async (req, res) => {
             to.setUTCDate(to.getUTCDate() + 1);
             to.setUTCHours(2, 59, 59, 999);
 
-            if (tipo === 'supervisor') {
+            if (tipo === 'supervisor' || tipo === 'asesor') {
                 const fromAdjusted = new Date(from.getTime() - (3 * 60 * 60 * 1000));
                 filter.$or = [
                     { fechaCreacionQR: { $ne: null, $gte: fromAdjusted, $lte: to } },
@@ -324,6 +529,9 @@ exports.listByTipo = async (req, res) => {
                         ]
                     }
                 ];
+            } else if (tipo === 'auditor') {
+                auditorFromKey = dateFrom;
+                auditorToKey = dateTo;
             } else {
                 filter.scheduledAt = { $gte: from, $lte: to };
             }
@@ -345,7 +553,7 @@ exports.listByTipo = async (req, res) => {
             monthEnd.setUTCDate(monthEnd.getUTCDate() + 7);
             monthEnd.setUTCHours(2, 59, 59, 999);
 
-            if (tipo === 'supervisor') {
+            if (tipo === 'supervisor' || tipo === 'asesor') {
                 const monthStartAdjusted = new Date(monthStart.getTime() - (3 * 60 * 60 * 1000));
                 filter.$and = [{
                     $or: [
@@ -358,27 +566,30 @@ exports.listByTipo = async (req, res) => {
                         }
                     ]
                 }];
+            } else if (tipo === 'auditor') {
+                auditorFromKey = getArgentinaDateKey(monthStart);
+                auditorToKey = getArgentinaDateKey(monthEnd);
             } else {
                 filter.scheduledAt = { $gte: monthStart, $lte: monthEnd };
             }
         }
 
         // Status filter by tipo
-        if (tipo === 'supervisor') {
-            filter.status = { $in: ["QR hecho", "Cargada", "Aprobada"] };
+        // ✅ NUEVA LÓGICA: Supervisor y Asesor solo ven QR hecho real (no temporal) + excepción Binimed
+        if (tipo === 'supervisor' || tipo === 'asesor') {
+            // Filtro base: QR hecho real (normalizado, excluye temporal)
+            // El filtrado detallado se hace post-query para manejar la excepción Binimed
+            filter.status = { $regex: /^qr hecho$/i }; // Solo QR hecho exacto, no temporal ni variantes
         } else if (tipo === 'auditor') {
-            filter.status = { $in: [
-                'Rechazada', 'Completa', 'Pendiente', 'QR hecho',
-                'QR hecho pero pendiente de aprobación', 'AFIP',
-                'Baja laboral sin nueva alta', 'Baja laboral con nueva alta',
-                'Padrón', 'En revisión', 'Remuneración no válida',
-                'Cargada', 'Aprobada', 'Aprobada, pero no reconoce clave',
-                'El afiliado cambió la clave'
-            ]};
-            filter.auditor = { $ne: null };
+            filter.completeHistory = {
+                $elemMatch: {
+                    completedByRole: { $in: [/^auditor$/i, /^rr\.hh$/i] },
+                    completeDate: { $gte: auditorFromKey, $lte: auditorToKey }
+                }
+            };
         } else if (tipo === 'administrativo') {
             // Nuevo universo: ventas con estos estados de seguimiento + administrador asignado
-            filter.status = { $regex: /^(qr hecho(\s\(temporal\))?|qr hecho pero pendiente de aprobación|afip|padrón|baja laboral sin nueva alta|baja laboral con nueva alta|remuneración no válida|cargada|aprobada(, pero no reconoce clave)?|rechazada)$/i };
+            filter.status = { $regex: /^(qr hecho(\s\(temporal\))?|qr hecho pero pendiente de aprobación|afip|baja laboral sin nueva alta|baja laboral con nueva alta|remuneración no válida|cargada|aprobada( pero no reconoce clave)?|rechazada)$/i }; // ✅ Canonical: no comma
             filter.administrador = { $ne: null };
         }
 
@@ -402,7 +613,70 @@ exports.listByTipo = async (req, res) => {
         const isIndependiente = userRole === 'independiente';
         const userId = currentUser._id?.toString();
 
-        if (tipo === 'supervisor') {
+        if (tipo === 'auditor') {
+            const auditorUserId = (isAuditorRole || isIndependiente) ? userId : null;
+            audits = buildAuditorRows(audits, {
+                fromKey: auditorFromKey,
+                toKey: auditorToKey,
+                userId: auditorUserId
+            });
+        }
+
+        // ============================================================
+        // Post-query filtering: QR hecho real + Binimed exception (para supervisor y asesor)
+        // ============================================================
+        if (tipo === 'supervisor' || tipo === 'asesor') {
+            // Fecha actual para verificar excepción Binimed
+            const now = new Date();
+            const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            
+            const ventasValidas = [];
+            const binimedExceptionsToMark = [];
+            
+            for (const audit of audits) {
+                const status = audit.status || '';
+                const isQRHechoReal = isRealQRHecho(status);
+                
+                if (isQRHechoReal) {
+                    // QR hecho real - incluir siempre
+                    ventasValidas.push(audit);
+                } else if (status.toLowerCase() === 'cargada' && 
+                           audit.obraSocialVendida === 'Binimed' &&
+                           isLastWorkingDayOfMonth(audit.scheduledAt) &&
+                           !audit.binimedLiquidationException?.applied) {
+                    // Excepción Binimed: Cargada + Binimed + último día laborable + no aplicada aún
+                    ventasValidas.push({
+                        ...audit,
+                        _binimedException: true // Flag interno para UI
+                    });
+                    binimedExceptionsToMark.push(audit._id);
+                }
+                // Otros estados (incluyendo QR hecho temporal) se excluyen
+            }
+            
+            // Marcar excepciones Binimed como aplicadas (fire-and-forget)
+            if (binimedExceptionsToMark.length > 0) {
+                Audit.updateMany(
+                    { _id: { $in: binimedExceptionsToMark } },
+                    {
+                        $set: {
+                            'binimedLiquidationException.applied': true,
+                            'binimedLiquidationException.period': currentPeriod,
+                            'binimedLiquidationException.appliedAt': new Date(),
+                            'binimedLiquidationException.appliedBy': currentUser._id,
+                            'binimedLiquidationException.reason': 'BINIMED_MONTH_END_CARGADA'
+                        }
+                    }
+                ).catch(err => logger.error('Error marcando binimedLiquidationException:', err));
+            }
+            
+            audits = ventasValidas;
+        }
+
+        // ============================================================
+        // Role-based result filtering (server-side enforcement)
+        // ============================================================
+        if (tipo === 'supervisor' || tipo === 'asesor') {
             if (isSupervisorRole && currentUser?.numeroEquipo) {
                 // Supervisor: only their team's sales
                 const target = String(currentUser.numeroEquipo || '').trim().toLowerCase();
@@ -414,17 +688,11 @@ exports.listByTipo = async (req, res) => {
                 // Asesor: only sales where they are the asesor
                 audits = audits.filter(a => a.asesor?._id?.toString() === userId);
             } else if (isIndependiente) {
-                // Independiente in supervisor accordion: only sales where they are the asesor
+                // Independiente in supervisor/asesor accordion: only sales where they are the asesor
                 audits = audits.filter(a => a.asesor?._id?.toString() === userId);
-            }
-            // Gerencia, Encargado: see all (no filter)
-        } else if (tipo === 'auditor') {
-            if (isAuditorRole) {
-                // Auditor: only sales where they are the auditor
-                audits = audits.filter(a => a.auditor?._id?.toString() === userId);
-            } else if (isIndependiente) {
-                // Independiente in auditor accordion: only sales where they are the auditor
-                audits = audits.filter(a => a.auditor?._id?.toString() === userId);
+            } else if (isAuditorRole && currentUser?.numeroEquipo) {
+                // Auditor con equipo actúa como asesor: solo sus propias ventas
+                audits = audits.filter(a => a.asesor?._id?.toString() === userId);
             }
             // Gerencia, Encargado: see all (no filter)
         } else if (tipo === 'administrativo') {
@@ -460,7 +728,7 @@ exports.listByTipo = async (req, res) => {
 };
 
 /**
- * GET /api/liquidacion/stats-monthly?tipo=supervisor|auditor|administrativo&userId=optional
+ * GET /api/liquidacion/stats-monthly?tipo=supervisor|auditor|administrativo|asesor&userId=optional
  * Aggregation pipeline: últimos 4 meses, conteo por {year, month}.
  * Si userId se proporciona, filtra por ese usuario (modo individual).
  */
@@ -468,20 +736,100 @@ exports.statsMonthly = async (req, res) => {
     try {
         const { tipo, userId } = req.query;
 
-        if (!tipo || !['supervisor', 'auditor', 'administrativo'].includes(tipo)) {
-            return res.status(400).json({ message: 'Parámetro tipo requerido: supervisor | auditor | administrativo' });
+        if (!tipo || !['supervisor', 'auditor', 'administrativo', 'asesor'].includes(tipo)) {
+            return res.status(400).json({ message: 'Parámetro tipo requerido: supervisor | auditor | administrativo | asesor' });
         }
 
         const now = new Date();
         // 4 months ago: start of that month
         const fourMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
         fourMonthsAgo.setUTCHours(3, 0, 0, 0); // Argentina midnight
+        const fourMonthsAgoKey = `${fourMonthsAgo.getFullYear()}-${String(fourMonthsAgo.getMonth() + 1).padStart(2, '0')}`;
+
+        if (tipo === 'auditor') {
+            const auditorMatch = {
+                'completeHistory.completedByRole': { $in: [/^auditor$/i, /^rr\.hh$/i] },
+                'completeHistory.monthKey': { $gte: fourMonthsAgoKey }
+            };
+
+            if (userId) {
+                auditorMatch['completeHistory.completedByUserId'] = mongoose.Types.ObjectId.createFromHexString(userId);
+            }
+
+            const totalPipeline = [
+                { $unwind: '$completeHistory' },
+                { $match: auditorMatch },
+                {
+                    $group: {
+                        _id: {
+                            year: { $toInt: { $substr: ['$completeHistory.monthKey', 0, 4] } },
+                            month: { $toInt: { $substr: ['$completeHistory.monthKey', 5, 2] } }
+                        },
+                        count: { $sum: 1 }
+                    }
+                },
+                { $sort: { '_id.year': 1, '_id.month': 1 } }
+            ];
+
+            let globalPipeline = null;
+            if (userId) {
+                const globalMatch = {
+                    'completeHistory.completedByRole': { $in: [/^auditor$/i, /^rr\.hh$/i] },
+                    'completeHistory.monthKey': { $gte: fourMonthsAgoKey }
+                };
+                globalPipeline = [
+                    { $unwind: '$completeHistory' },
+                    { $match: globalMatch },
+                    {
+                        $group: {
+                            _id: {
+                                year: { $toInt: { $substr: ['$completeHistory.monthKey', 0, 4] } },
+                                month: { $toInt: { $substr: ['$completeHistory.monthKey', 5, 2] } }
+                            },
+                            count: { $sum: 1 }
+                        }
+                    },
+                    { $sort: { '_id.year': 1, '_id.month': 1 } }
+                ];
+            }
+
+            const [filteredResults, globalResults] = await Promise.all([
+                Audit.aggregate(totalPipeline),
+                globalPipeline ? Audit.aggregate(globalPipeline) : Promise.resolve(null)
+            ]);
+
+            const months = [];
+            for (let i = 3; i >= 0; i--) {
+                const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                months.push({ year: d.getFullYear(), month: d.getMonth() + 1 });
+            }
+
+            const mesesNombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+            const data = months.map(m => {
+                const filtered = filteredResults.find(r => r._id.year === m.year && r._id.month === m.month);
+                const global = globalResults ? globalResults.find(r => r._id.year === m.year && r._id.month === m.month) : null;
+
+                return {
+                    label: `${mesesNombres[m.month - 1]} ${m.year}`,
+                    year: m.year,
+                    month: m.month,
+                    filtered: filtered?.count || 0,
+                    global: global?.count || 0
+                };
+            });
+
+            console.log(`📊 Liquidación stats-monthly (${tipo}${userId ? ', user: ' + userId : ''}):`, data.map(d => `${d.label}: ${d.filtered}`).join(', '));
+            return res.json({ tipo, userId: userId || null, data });
+        }
 
         // Build match stage
         let match = {};
 
-        if (tipo === 'supervisor') {
-            match.status = { $in: ["QR hecho", "Cargada", "Aprobada"] };
+        if (tipo === 'supervisor' || tipo === 'asesor') {
+            // ✅ NUEVA LÓGICA: Solo QR hecho real (sin temporal) + Binimed en Cargada
+            // Para stats mensuales usamos un enfoque simplificado: solo QR hecho exacto
+            // La excepción Binimed se maneja mejor en el endpoint detallado
+            match.status = { $regex: /^qr hecho$/i };
             match.$or = [
                 { fechaCreacionQR: { $gte: fourMonthsAgo } },
                 {
@@ -491,32 +839,20 @@ exports.statsMonthly = async (req, res) => {
                     ]
                 }
             ];
-        } else if (tipo === 'auditor') {
-            match.status = { $in: [
-                'Rechazada', 'Completa', 'Pendiente', 'QR hecho',
-                'QR hecho pero pendiente de aprobación', 'AFIP',
-                'Baja laboral sin nueva alta', 'Baja laboral con nueva alta',
-                'Padrón', 'En revisión', 'Remuneración no válida',
-                'Cargada', 'Aprobada', 'Aprobada, pero no reconoce clave',
-                'El afiliado cambió la clave'
-            ]};
-            match.auditor = { $ne: null };
-            match.scheduledAt = { $gte: fourMonthsAgo };
-            if (userId) match.auditor = require('mongoose').Types.ObjectId.createFromHexString(userId);
         } else if (tipo === 'administrativo') {
-            match.status = { $regex: /^(qr hecho(\s\(temporal\))?|qr hecho pero pendiente de aprobación|afip|padrón|baja laboral sin nueva alta|baja laboral con nueva alta|remuneración no válida|cargada|aprobada(, pero no reconoce clave)?|rechazada)$/i };
+            match.status = { $regex: /^(qr hecho(\s\(temporal\))?|qr hecho pero pendiente de aprobación|afip|baja laboral sin nueva alta|baja laboral con nueva alta|remuneración no válida|cargada|aprobada( pero no reconoce clave)?|rechazada)$/i }; // ✅ Canonical: no comma
             match.administrador = { $ne: null };
             match.scheduledAt = { $gte: fourMonthsAgo };
             if (userId) match.administrador = require('mongoose').Types.ObjectId.createFromHexString(userId);
         }
 
-        // For supervisor tipo with individual user filter
-        if (tipo === 'supervisor' && userId) {
-            match['supervisorSnapshot._id'] = require('mongoose').Types.ObjectId.createFromHexString(userId);
+        // For supervisor/asesor tipo with individual user filter
+        if ((tipo === 'supervisor' || tipo === 'asesor') && userId) {
+            match['asesor'] = require('mongoose').Types.ObjectId.createFromHexString(userId);
         }
 
         // Aggregation: total (all matching audits) grouped by month
-        const dateExpr = tipo === 'supervisor'
+        const dateExpr = (tipo === 'supervisor' || tipo === 'asesor')
             ? { $ifNull: ['$fechaCreacionQR', '$scheduledAt'] }
             : '$scheduledAt';
 
@@ -538,8 +874,6 @@ exports.statsMonthly = async (req, res) => {
         let globalMatch = { ...match };
         if (tipo === 'supervisor' && userId) {
             delete globalMatch['supervisorSnapshot._id'];
-        } else if (tipo === 'auditor' && userId) {
-            globalMatch.auditor = { $ne: null };
         } else if (tipo === 'administrativo' && userId) {
             globalMatch.administrador = { $ne: null };
         }
@@ -871,4 +1205,164 @@ exports.exportLiquidationDirect = (req, res) => {
         });
 
     console.log('🔍 [DIRECT] Función retornada (sin return explícito)');
+};
+
+/**
+ * ============================================================
+ * GET /api/liquidacion/salary-calculation
+ * Calcula sueldos on-the-fly para Asesores, Supervisores o Auditores
+ * 
+ * Query params:
+ * - tipo: 'asesor' | 'supervisor' | 'auditor'
+ * - userId: ID del usuario (requerido para asesor/supervisor)
+ * - dateFrom: fecha inicio (opcional, default mes actual)
+ * - dateTo: fecha fin (opcional, default mes actual)
+ * - ventasSemanal: número de ventas en semana actual (viernes-jueves)
+ * 
+ * Retorna: { basico, comisionMensual, premioSemanal, total, detalle }
+ * ============================================================
+ */
+exports.calculateSalary = async (req, res) => {
+    try {
+        const { tipo, userId, dateFrom, dateTo, ventasSemanal = 0 } = req.query;
+        
+        // Validaciones
+        if (!tipo || !['asesor', 'supervisor', 'auditor'].includes(tipo)) {
+            return res.status(400).json({ message: 'Parámetro tipo requerido: asesor | supervisor | auditor' });
+        }
+        
+        if (!userId && tipo !== 'auditor') {
+            return res.status(400).json({ message: 'Parámetro userId requerido para asesor y supervisor' });
+        }
+        
+        const User = require('../models/User');
+        const currentUser = req.user;
+        const userRole = currentUser?.role?.toLowerCase();
+        
+        // Verificar permisos
+        const canViewAll = ['gerencia', 'encargado'].includes(userRole);
+        const isOwnUser = userId === currentUser._id?.toString();
+        
+        if (!canViewAll && !isOwnUser) {
+            return res.status(403).json({ message: 'No autorizado para ver cálculo de otros usuarios' });
+        }
+        
+        // Fechas default: mes actual
+        const now = new Date();
+        const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        
+        const from = dateFrom ? new Date(dateFrom) : currentMonthStart;
+        const to = dateTo ? new Date(dateTo) : currentMonthEnd;
+        
+        // Ajustar horas
+        from.setUTCHours(3, 0, 0, 0);
+        to.setUTCHours(2, 59, 59, 999);
+        
+        let resultado = {};
+        
+        if (tipo === 'asesor' || tipo === 'supervisor') {
+            // Buscar usuario
+            const user = await User.findById(userId).select('nombre role numeroEquipo').lean();
+            if (!user) {
+                return res.status(404).json({ message: 'Usuario no encontrado' });
+            }
+            
+            // Construir filtro de ventas
+            const fromAdjusted = new Date(from.getTime() - (3 * 60 * 60 * 1000));
+            const matchFilter = {
+                status: { $regex: /^qr hecho$/i },
+                $or: [
+                    { fechaCreacionQR: { $ne: null, $gte: fromAdjusted, $lte: to } },
+                    {
+                        $and: [
+                            { $or: [{ fechaCreacionQR: { $exists: false } }, { fechaCreacionQR: null }] },
+                            { scheduledAt: { $gte: from, $lte: to } }
+                        ]
+                    }
+                ]
+            };
+            
+            if (tipo === 'asesor') {
+                // Asesor: sus propias ventas
+                matchFilter.asesor = require('mongoose').Types.ObjectId.createFromHexString(userId);
+            } else {
+                // Supervisor: ventas de su equipo
+                if (!user.numeroEquipo) {
+                    return res.status(400).json({ message: 'Usuario supervisor sin numeroEquipo asignado' });
+                }
+                // Buscar asesores del equipo
+                const asesoresEquipo = await User.find({ 
+                    numeroEquipo: user.numeroEquipo,
+                    role: { $in: ['asesor', 'Asesor', 'auditor', 'Auditor', 'independiente', 'Independiente'] },
+                    active: true
+                }).select('_id').lean();
+                
+                const asesorIds = asesoresEquipo.map(a => a._id);
+                if (asesorIds.length === 0) {
+                    resultado = calcularSueldoSupervisor(0, parseInt(ventasSemanal) || 0);
+                    resultado.detalle = { usuario: user.nombre, ventasMensuales: 0, ventasSemanal, periodo: { from, to } };
+                    return res.json(resultado);
+                }
+                
+                matchFilter.asesor = { $in: asesorIds };
+            }
+            
+            // Contar ventas del período
+            const ventasCount = await Audit.countDocuments(matchFilter);
+            
+            // Calcular sueldo
+            const ventasSemanalNum = parseInt(ventasSemanal) || 0;
+            if (tipo === 'asesor') {
+                resultado = calcularSueldoAsesor(ventasCount, ventasSemanalNum);
+            } else {
+                resultado = calcularSueldoSupervisor(ventasCount, ventasSemanalNum);
+            }
+            
+            resultado.detalle = {
+                usuario: user.nombre,
+                rol: user.role,
+                ventasMensuales: ventasCount,
+                ventasSemanal: ventasSemanalNum,
+                periodo: { from: from.toISOString(), to: to.toISOString() }
+            };
+            
+        } else if (tipo === 'auditor') {
+            // Para auditor: contar auditorías completadas en el período
+            const targetUserId = userId || currentUser._id?.toString();
+            
+            const auditorMatch = {
+                'completeHistory.completedByRole': { $in: [/^auditor$/i, /^rr\.hh$/i] },
+                'completeHistory.completedByUserId': require('mongoose').Types.ObjectId.createFromHexString(targetUserId),
+                'completeHistory.completeDate': {
+                    $gte: getArgentinaDateKey(from),
+                    $lte: getArgentinaDateKey(to)
+                }
+            };
+            
+            const pipeline = [
+                { $match: { completeHistory: { $exists: true, $ne: [] } } },
+                { $unwind: '$completeHistory' },
+                { $match: auditorMatch },
+                { $count: 'total' }
+            ];
+            
+            const countResult = await Audit.aggregate(pipeline);
+            const auditoriasCount = countResult[0]?.total || 0;
+            
+            resultado = calcularSueldoAuditor(auditoriasCount);
+            resultado.detalle = {
+                auditorId: targetUserId,
+                auditoriasLiquidables: auditoriasCount,
+                periodo: { from: from.toISOString(), to: to.toISOString() }
+            };
+        }
+        
+        console.log(`💰 Salary calculation [${tipo}] user=${userId}:`, resultado);
+        res.json({ data: resultado });
+        
+    } catch (err) {
+        logger.error('liquidacion.calculateSalary error:', err);
+        res.status(500).json({ message: 'Error interno al calcular sueldo' });
+    }
 };

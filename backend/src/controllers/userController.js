@@ -16,7 +16,7 @@ const logger = require("../utils/logger");
 /** Crea un nuevo usuario. Solo admin/gerencia pueden asignar roles. */
 async function createUser(req, res) {
     try {
-        const { nombre, email, password, role, supervisor } = req.body;
+        const { nombre, email, password, role, supervisor, obraSocialId } = req.body;
 
         const exists = await User.findOne({ email });
         if (exists) {
@@ -37,12 +37,17 @@ async function createUser(req, res) {
             }
         }
 
+        if (finalRole === "obra_social" && !obraSocialId) {
+            return res.status(400).json({ error: "obraSocialId es obligatorio para usuarios obra_social" });
+        }
+
         const user = new User({
             nombre,
             email,
             password,
             role: finalRole,
             supervisor: finalSupervisor,
+            obraSocialId: finalRole === "obra_social" ? obraSocialId : null,
             active: false
         });
 
@@ -54,6 +59,7 @@ async function createUser(req, res) {
             email: user.email,
             role: user.role,
             supervisor: user.supervisor,
+            obraSocialId: user.obraSocialId,
         });
     } catch (err) {
         logger.error("❌ Error creando usuario:", err);
@@ -188,6 +194,10 @@ async function updateUser(req, res) {
             updateData.numeroEquipo = null;
         }
 
+        if (Object.prototype.hasOwnProperty.call(updateData, "obraSocialId") && (updateData.obraSocialId === "" || updateData.obraSocialId === undefined)) {
+            updateData.obraSocialId = null;
+        }
+
         // Evitar borrar el password accidentalmente
         if (!updateData.password) {
             delete updateData.password;
@@ -212,6 +222,15 @@ async function updateUser(req, res) {
         if (!(req.user.role === "administrativo" || req.user.role === "gerencia" || req.user.role === "encargado")) {
             delete updateData.role;
             delete updateData.supervisor;
+            delete updateData.obraSocialId;
+        }
+
+        if (updateData.role === "obra_social" && !updateData.obraSocialId) {
+            return res.status(400).json({ error: "obraSocialId es obligatorio para usuarios obra_social" });
+        }
+
+        if (updateData.role && updateData.role !== "obra_social") {
+            updateData.obraSocialId = null;
         }
 
         const updatedUser = await User.findByIdAndUpdate(id, { $set: updateData }, { new: true });
@@ -354,16 +373,20 @@ async function getUsersAdmin(req, res) {
 async function updateUserRole(req, res) {
     try {
         const { id } = req.params;
-        const { role } = req.body;
+        const { role, obraSocialId } = req.body;
 
         // Solo admin, gerencia, RRHH y encargado pueden editar usuarios
         if (!(req.user.role === "administrativo" || req.user.role === "gerencia" || req.user.role === "RR.HH" || req.user.role === "encargado")) {
             return res.status(403).json({ error: "Acceso denegado" });
         }
 
-        const validRoles = ["asesor", "supervisor", "auditor", "administrativo", "gerencia", "RR.HH", "recuperador", "encargado", "independiente"];
+        const validRoles = ["asesor", "supervisor", "auditor", "administrativo", "gerencia", "RR.HH", "recuperador", "encargado", "independiente", "obra_social"];
         if (!validRoles.includes(role)) {
             return res.status(400).json({ error: "Rol no válido" });
+        }
+
+        if (role === "obra_social" && !obraSocialId) {
+            return res.status(400).json({ error: "obraSocialId es obligatorio para usuarios obra_social" });
         }
 
         if (req.user._id.toString() === id) {
@@ -378,7 +401,7 @@ async function updateUserRole(req, res) {
 
         const updatedUser = await User.findByIdAndUpdate(
             id,
-            { $set: { role } },
+            { $set: { role, obraSocialId: role === "obra_social" ? obraSocialId : null } },
             { new: true }
         );
 
@@ -390,7 +413,7 @@ async function updateUserRole(req, res) {
             updatedBy: req.user.email,
         });
 
-        return res.json({ message: "Rol actualizado correctamente", role });
+        return res.json({ message: "Rol actualizado correctamente", role, obraSocialId: updatedUser.obraSocialId });
     } catch (err) {
         logger.error("❌ Error actualizando rol de usuario:", err);
         return res.status(500).json({ error: "Error interno del servidor" });

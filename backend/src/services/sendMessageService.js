@@ -12,11 +12,13 @@ const SendJob = require("../models/SendJob");
 const Contact = require("../models/Contact");
 const Affiliate = require("../models/Affiliate");
 const LeadAssignment = require("../models/LeadAssignment");
-const { getOrInitClient, isReady, sendMessage, USE_MULTI, USE_BAILEYS } = require("./whatsappUnified");
+const { isReady, sendMessage, USE_MULTI, USE_BAILEYS, getActiveEngine } = require("./whatsappUnified");
 const { emitJobProgress } = require("../config/socket");
 const { addLog } = require("../services/logService");
 const { parseSpintax } = require("../utils/spintax");
-const logger = require("../utils/logger");
+const { formatWhatsAppJid, maskJid, normalizePhoneDigits } = require("../utils/whatsappJid");
+const { recordWhatsAppSendAttempt } = require("./whatsappSendAttemptService");
+const logger = require("../utils/logger").getLogger("whatsapp");
 
 logger.info(`[SendMessageService] Usando ${USE_BAILEYS ? 'Baileys' : 'whatsapp-web.js'}, Multi: ${USE_MULTI}`);
 
@@ -284,22 +286,8 @@ async function processJob(jobId) {
     const jobBatchSize = Number.isFinite(parseInt(initialJob.batchSize, 10)) ? parseInt(initialJob.batchSize, 10) : (config.batchSize || 10);
     const pauseMinutes = Number.isFinite(parseInt(initialJob.pauseBetweenBatchesMinutes, 10)) ? parseInt(initialJob.pauseBetweenBatchesMinutes, 10) : Math.ceil((config.batchPause || 60) / 60);
 
-    const normalizeArNumber = (raw) => {
-        let digits = String(raw || "").replace(/\D/g, "");
-        // quitar ceros iniciales
-        digits = digits.replace(/^0+/, "");
-        // quitar 15 al inicio (caso comunes locales)
-        if (digits.startsWith("15")) digits = digits.slice(2);
-        // si empieza con 54 pero sin 549, insertar 9
-        if (digits.startsWith("54") && !digits.startsWith("549")) {
-            digits = "549" + digits.slice(2);
-        }
-        // si no tiene prefijo país, agregar 549
-        if (!digits.startsWith("54")) {
-            digits = "549" + digits;
-        }
-        return digits;
-    };
+    const engine = getActiveEngine();
+    const normalizeArNumber = normalizePhoneDigits;
 
     // Set para evitar duplicados dentro del mismo Job (por teléfono normalizado)
     const seenPhones = new Set();
@@ -405,6 +393,7 @@ async function processJob(jobId) {
         }
 
         const to = `${toDigits}@c.us`;
+        const sendTo = formatWhatsAppJid(contact.telefono, engine);
 
         // 🚨 VERIFICACIÓN GLOBAL: Evitar duplicados ENTRE CAMPAÑAS
         // Verificar si ya se envió un mensaje a este número en las últimas 24 horas
@@ -446,23 +435,51 @@ async function processJob(jobId) {
             // ✅ CORRECCIÓN: Aplicar throttling global antes de enviar
             await throttleMessage();
 
+            await recordWhatsAppSendAttempt({
+                flow: "mass_messaging",
+                userId: userId || initialJob.createdBy || null,
+                sourceId: initialJob._id,
+                engine,
+                jid: sendTo,
+                recipient: contact.telefono,
+                sendStatus: "queued"
+            });
+
             // ✅ NUEVO: Sistema de reintentos optimizado
             const MAX_RETRIES = 3; // Reducido de 20 a 3
             let attempt = 0;
             let sent = false;
+            let sendResult = null;
             let lastError = null;
 
             while (attempt < MAX_RETRIES && !sent) {
                 try {
-                    await sendMessage(userId, to, messageText);
+                    const result = await sendMessage(userId, sendTo, messageText);
+                    if (!result?.success || result?.status !== "accepted") {
+                        const sendErr = new Error(result?.message || "WhatsApp no acepto el envio");
+                        sendErr.code = result?.code || "WHATSAPP_SEND_FAILED";
+                        sendErr.status = result?.status || "failed";
+                        throw sendErr;
+                    }
+                    sendResult = result;
                     sent = true;
+                    await recordWhatsAppSendAttempt({
+                        flow: "mass_messaging",
+                        userId: userId || initialJob.createdBy || null,
+                        sourceId: initialJob._id,
+                        engine: result.engine || engine,
+                        jid: sendTo,
+                        recipient: contact.telefono,
+                        sendStatus: "accepted",
+                        messageId: result.messageId || null,
+                    });
                 } catch (err) {
                     attempt++;
                     lastError = err;
                     const errMsg = (err.message || "").toLowerCase();
 
                     // 🚨 FAIL FAST: Si el número no existe o no tiene WhatsApp, NO reintentar
-                    if (errMsg.includes("not-authorized") || errMsg.includes("no exists") || errMsg.includes("invalid jid")) {
+                    if (errMsg.includes("not-authorized") || errMsg.includes("no exists") || errMsg.includes("invalid jid") || errMsg.includes("no tiene whatsapp")) {
                         logger.warn(`🛑 FAIL FAST: Número inválido detectado (${contact.telefono}). Abortando reintentos.`);
 
                         await Contact.findByIdAndUpdate(contact._id, { noWhatsApp: true });
@@ -500,6 +517,10 @@ async function processJob(jobId) {
                 }
             }
 
+            if (!sent) {
+                throw lastError || new Error("WhatsApp no acepto el envio");
+            }
+
             // ✅ CORRECCIÓN BUG 1: Verificar si ya existe mensaje para este contacto en este job
             const existingMsg = await Message.findOne({
                 job: initialJob._id,
@@ -508,7 +529,12 @@ async function processJob(jobId) {
             });
 
             if (existingMsg) {
-                logger.warn(`⚠️ Mensaje duplicado detectado en BD para ${contact.telefono}, omitiendo guardado pero marcando como enviado...`);
+                if (existingMsg.status !== "enviado") {
+                    existingMsg.status = "enviado";
+                    existingMsg.timestamp = new Date();
+                    await existingMsg.save();
+                }
+                logger.warn(`⚠️ Mensaje duplicado detectado en BD para ; envio actual aceptado por WhatsApp y registro conservado.`);
                 wasSent = true;
             } else {
                 const newMsg = new Message({
@@ -524,12 +550,28 @@ async function processJob(jobId) {
                 await newMsg.save();
 
                 await Contact.findByIdAndUpdate(contact._id, { massMessagedAt: new Date() });
-                logger.info(`✅ Enviado a ${contact.telefono} (marcado massMessagedAt)`);
+                logger.info(`✅ Envio aceptado por WhatsApp a  (marcado massMessagedAt)`, {
+                    flow: "campaign",
+                    engine: sendResult?.engine || engine,
+                    jid: maskJid(sendTo),
+                    sendStatus: "accepted",
+                    messageId: sendResult?.messageId || null,
+                });
                 wasSent = true;
             }
 
         } catch (err) {
-            logger.error(`❌ Error enviando a ${contact.telefono}`, { error: err.message });
+            await recordWhatsAppSendAttempt({
+                flow: "mass_messaging",
+                userId: userId || initialJob.createdBy || null,
+                sourceId: initialJob._id,
+                engine,
+                jid: sendTo,
+                recipient: contact.telefono,
+                sendStatus: err.status || "failed",
+                errorCode: err.code || "WHATSAPP_SEND_FAILED",
+                errorMessage: err.message,
+            });
 
             // Verificar si ya existe registro antes de guardar como fallido
             const existingMsg = await Message.findOne({
@@ -765,14 +807,99 @@ async function processJob(jobId) {
     }
 }
 
-async function sendSingleMessage(userId, to, text) {
+async function sendSingleMessage(userId, to, text, options = {}) {
+    const engine = getActiveEngine();
+    const flow = options.flow || 'direct';
+    const sourceId = options.sourceId || null;
+    
     try {
-        const chatId = to.includes("@c.us") ? to : `${to}@c.us`;
-        const userClient = await getOrInitClient(userId);
-        await userClient.sendMessage(chatId, text);
-        return { success: true };
+        await recordWhatsAppSendAttempt({
+            flow,
+            userId,
+            sourceId,
+            engine,
+            recipient: to,
+            sendStatus: "queued"
+        });
+
+        if (!text || !String(text).trim()) {
+            await recordWhatsAppSendAttempt({
+                flow, userId, sourceId, engine, recipient: to,
+                sendStatus: "failed", errorCode: "WHATSAPP_EMPTY_MESSAGE", errorMessage: "El mensaje de WhatsApp esta vacio."
+            });
+            return {
+                success: false,
+                sendStatus: "failed",
+                status: "failed",
+                engine,
+                code: "WHATSAPP_EMPTY_MESSAGE",
+                message: "El mensaje de WhatsApp esta vacio.",
+            };
+        }
+
+        if (!isReady(userId)) {
+            await recordWhatsAppSendAttempt({
+                flow, userId, sourceId, engine, recipient: to,
+                sendStatus: "not_connected", errorCode: "WHATSAPP_NOT_CONNECTED", errorMessage: "WhatsApp no esta conectado."
+            });
+            return {
+                success: false,
+                sendStatus: "not_connected",
+                status: "not_connected",
+                engine,
+                code: "WHATSAPP_NOT_CONNECTED",
+                message: "WhatsApp no esta conectado.",
+            };
+        }
+
+        const chatId = formatWhatsAppJid(to, engine);
+        const result = await sendMessage(userId, chatId, text);
+        if (!result?.success || result?.status !== "accepted") {
+            await recordWhatsAppSendAttempt({
+                flow, userId, sourceId, engine: result?.engine || engine, jid: chatId, recipient: to,
+                sendStatus: result?.status || "failed", errorCode: result?.code || "WHATSAPP_SEND_FAILED", errorMessage: result?.message || "No se pudo enviar el mensaje por WhatsApp."
+            });
+            return {
+                success: false,
+                sendStatus: result?.status || "failed",
+                status: result?.status || "failed",
+                engine: result?.engine || engine,
+                code: result?.code || "WHATSAPP_SEND_FAILED",
+                message: result?.message || "No se pudo enviar el mensaje por WhatsApp.",
+            };
+        }
+
+        await recordWhatsAppSendAttempt({
+            flow, userId, sourceId, engine: result.engine || engine, jid: chatId, recipient: to,
+            sendStatus: "accepted", messageId: result.messageId || null
+        });
+
+        return {
+            success: true,
+            sendStatus: "accepted",
+            status: "accepted",
+            engine: result.engine || engine,
+            messageId: result.messageId || null,
+            jid: maskJid(chatId),
+            message: "WhatsApp acepto el envio.",
+        };
     } catch (err) {
-        return { success: false, error: err.message };
+        const status = err.status || (err.code === "WHATSAPP_SEND_UNAVAILABLE" ? "unavailable" : "failed");
+        await recordWhatsAppSendAttempt({
+            flow, userId, sourceId, engine: err.engine || engine, recipient: to,
+            sendStatus: status, errorCode: err.code || "WHATSAPP_SEND_FAILED", errorMessage: err.message
+        });
+        return {
+            success: false,
+            sendStatus: status,
+            status,
+            engine: err.engine || engine,
+            code: err.code || "WHATSAPP_SEND_FAILED",
+            message: status === "unavailable"
+                ? "El servicio de WhatsApp no tiene un metodo de envio disponible para esta sesion."
+                : "No se pudo enviar el mensaje por WhatsApp.",
+            error: err.message,
+        };
     }
 }
 

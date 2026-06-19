@@ -15,33 +15,33 @@ const http = require("http");
 const path = require("path");
 const connectDB = require("./config/db");
 const { initSocket, getIO } = require("./config/socket");
-const initScheduledJobs = require('./cron/recyclerJob');
+const logger = require("./utils/logger");
 
-/* Inicializar tareas programadas */
-initScheduledJobs();
+// DIAGNOSTIC: Startup tracking for root cause analysis
+const STARTUP_TIME = Date.now();
+let requestCount = 0;
+let firstErrorTime = null;
+let firstErrorDetails = null;
 
-const { initWhatsappClient, whatsappEvents } = require("./config/whatsapp");
-const { startScheduler } = require("./services/jobScheduler");
-const { startRecoveryScheduler } = require("./services/recoveryScheduler");
-const { startAuditReminderCron } = require("./services/auditReminderCron");
-const { startAffiliateExportCron } = require("./services/affiliateExportCron");
-const { startAuditFollowUpScheduler } = require("./services/auditFollowUpScheduler");
-const { pushMetrics } = require("./services/metricsService");
+function logStartupCheckpoint(label, data = {}) {
+    const elapsed = Date.now() - STARTUP_TIME;
+    console.log(`[STARTUP-DIAGNOSTIC] [${elapsed}ms] ${label}`, data);
+    logger.info(`[STARTUP-DIAGNOSTIC] [${elapsed}ms] ${label}`, data);
+}
 
-// ✅ Cron job para Recovery (ejecuta a las 23:01 diariamente)
-require("./cron/recoveryJob");
+// ============================================================
+// NOTA: Workers separados en procesos PM2 independientes
+// ============================================================
+// Los siguientes módulos ahora corren en workers dedicados:
+// - whatsapp-worker: WhatsApp + jobScheduler + recovery + crons
+// - arca-worker: Verificación ARCA (ArcaAssistedTask)
+// - padron-worker: Verificación Padrón
+// - dateas-worker: Bot DATEAS (Base Nativa)
+//
+// Ver: ecosystem.config.js para la configuración de procesos
 
-// ✅ Cron job para Reciclaje de Datos del Día (ejecuta a las 23:01 diariamente)
-require("./cron/leadAssignmentRecycleJob");
 
-// ✅ Cron job para notificación de vencimiento de recargas de teléfonos (cada hora)
-require("./cron/phoneRechargeNotificationJob");
 
-// ✅ Cron job para Liberación de Padrón (primer día de cada mes a las 00:01)
-require("./cron/padronReleaseJob");
-
-// ✅ Cron job para Verificación de Aportes ARCA (lunes 03:00 hs)
-require("./cron/affiliateContributionCron");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const errorHandler = require("./middlewares/errorHandler");
@@ -56,7 +56,7 @@ const Evidencia = require("./models/Evidencia");
 const routes = require("./routes");
 const { requireAuth } = require("./middlewares/authMiddleware");
 const { validateEnv, ENV } = require("./config");
-const logger = require("./utils/logger");
+const { pushMetrics } = require("./services/metricsService");
 
 validateEnv();
 
@@ -172,9 +172,17 @@ if (interfaces) {
 allowedOrigins.push("http://localhost:5000");
 allowedOrigins.push("http://localhost:3000");
 
+// Production frontend origins used by direct browser uploads to api.dannsalud.com.ar.
+// Keep these explicit because VideoAudit recordings intentionally bypass the Next proxy.
+allowedOrigins.push("https://dannsalud.com.ar");
+allowedOrigins.push("https://www.dannsalud.com.ar");
+
 if (process.env.NODE_ENV === "development") {
   allowedOrigins.push("http://localhost:5173"); // Vite por defecto
 }
+
+allowedOrigins = [...new Set(allowedOrigins)];
+
 if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
   logger.error("FATAL ERROR: La variable de entorno ALLOWED_ORIGINS no está definida para producción.");
   process.exit(1);
@@ -259,8 +267,8 @@ if (process.env.NODE_ENV === "development") {
       legacyHeaders: false,
       skip: (req) => {
         const p = req.path || "";
-        // Evitar 429 en endpoints de polling rápido
-        return p.startsWith("/api/whatsapp/me/status") || p.startsWith("/api/whatsapp/me/qr");
+        // Evitar 429 en endpoints de polling rápido y en Socket.IO
+        return p.startsWith("/api/whatsapp/me/status") || p.startsWith("/api/whatsapp/me/qr") || p.startsWith("/socket.io/");
       },
     })
   );
@@ -294,6 +302,44 @@ app.get("/api/ping-auth", requireAuth, (_req, res) =>
 
 // 🔹 Montar rutas
 app.use("/api", routes);
+
+// DIAGNOSTIC: Request tracking middleware to identify first failure in degradation window
+app.use((req, res, next) => {
+    requestCount++;
+    const reqNum = requestCount;
+    const elapsed = Date.now() - STARTUP_TIME;
+    const isEarlyRequest = elapsed < 15000; // Track first 15 seconds
+    
+    if (isEarlyRequest) {
+        logStartupCheckpoint(`REQUEST #${reqNum} ${req.method} ${req.originalUrl}`, {
+            user: req.user?.id || req.user?._id || 'unauthenticated',
+            ip: req.ip
+        });
+    }
+    
+    // Capture response status for early requests
+    if (isEarlyRequest) {
+        const originalSend = res.json;
+        res.json = function(data) {
+            if (res.statusCode >= 500 && !firstErrorTime) {
+                firstErrorTime = Date.now() - STARTUP_TIME;
+                firstErrorDetails = {
+                    requestNum: reqNum,
+                    method: req.method,
+                    url: req.originalUrl,
+                    status: res.statusCode,
+                    elapsed: firstErrorTime
+                };
+                logStartupCheckpoint(`FIRST-500-ERROR`, firstErrorDetails);
+            }
+            return originalSend.call(this, data);
+        };
+    }
+    
+    next();
+});
+
+// 🔹 Static files for uploads (with auth in production)
 if (process.env.NODE_ENV === 'production' || process.env.PROTECT_UPLOADS === 'true') {
   app.use('/uploads', requireAuth, express.static(path.join(__dirname, '../uploads')));
 } else {
@@ -383,47 +429,24 @@ app.use(errorHandler);
 
 const appServer = http.createServer(app);
 
-// 🔹 Inicialización de servicios (excepto en test)
+// 🔹 Inicialización de Socket.IO (excepto en test)
 let metricsInterval;
 if (process.env.NODE_ENV !== "test") {
-  startScheduler();
-  startRecoveryScheduler();
-  startAuditReminderCron();
-  startAffiliateExportCron();
-  startAuditFollowUpScheduler(); // Notificaciones después de 12h en estado "Falta documentación" o "Falta clave"
-
+  // NOTA: Los workers (WhatsApp, ARCA, Padrón, DATEAS) ahora corren en procesos PM2 separados
+  // Ver: src/workers/ y ecosystem.config.js
+  
+  logStartupCheckpoint("SOCKET-IO-INIT-START");
   initSocket(appServer, app, allowedOrigins);
+  logStartupCheckpoint("SOCKET-IO-INIT-COMPLETE");
 
-  const USE_MULTI = process.env.USE_MULTI_SESSION === 'true';
-  if (!USE_MULTI) {
-    whatsappEvents.on("qr", (qr) => {
-      getIO().emit("qr", qr);
-    });
-
-    whatsappEvents.on("ready", () => {
-      getIO().emit("ready");
-    });
-
-    whatsappEvents.on("authenticated", () => {
-      getIO().emit("authenticated");
-    });
-
-    whatsappEvents.on("disconnected", (reason) => {
-      getIO().emit("disconnected", { reason });
-    });
-
-    whatsappEvents.on("auth_failure", (msg) => {
-      getIO().emit("auth_failure", { message: msg });
-    });
-
-    whatsappEvents.on("qr_expired", () => {
-      getIO().emit("qr_expired");
-    });
-
-    whatsappEvents.on("qr_refresh", () => {
-      getIO().emit("qr_refresh");
-    });
-  }
+  // 🧹 Iniciar job de limpieza de chequeo de datos temporales (24h/72h)
+  const { startCleanupJob } = require("./jobs/dataCheckCleanupJob");
+  startCleanupJob();
+  
+  // NOTA: Los eventos de WhatsApp (QR, ready, etc.) se manejan en whatsapp-worker
+  // El backend no tiene acceso directo a estas events porque el cliente WhatsApp
+  // corre en un proceso separado. Para ver el estado de WhatsApp, usar la API
+  // o conectar directamente al worker.
 
   metricsInterval = setInterval(() => {
     pushMetrics().catch(err =>
@@ -444,13 +467,15 @@ if (process.env.NODE_ENV !== "test") {
   process.on("SIGINT", () => shutdown("SIGINT"));
 
   process.on("uncaughtException", (err) => {
-    console.error("\n❌ ========== UNCAUGHT EXCEPTION ==========");
+    const elapsed = Date.now() - STARTUP_TIME;
+    console.error(`\n❌ [STARTUP-DIAGNOSTIC] [${elapsed}ms] ========== UNCAUGHT EXCEPTION ==========`);
     console.error("Message:", err.message);
     console.error("Stack:", err.stack);
-    logger.error("Uncaught Exception", {
+    logger.error(`[STARTUP-DIAGNOSTIC] [${elapsed}ms] Uncaught Exception - first fatal error`, {
       error: err.message,
       stack: err.stack,
-      name: err.name
+      name: err.name,
+      elapsed
     });
     try {
       if (metricsInterval) clearInterval(metricsInterval);
@@ -460,8 +485,14 @@ if (process.env.NODE_ENV !== "test") {
     }
   });
 
-  process.on("unhandledRejection", (reason) => {
-    logger.error("Unhandled Rejection", { reason });
+  process.on("unhandledRejection", (reason, promise) => {
+    logger.error("❌ [SYSTEM] Unhandled Rejection - exiting to prevent broken state", { 
+      reason: reason?.message || reason,
+      stack: reason?.stack,
+      promise: promise?.toString?.() || 'unknown promise'
+    });
+    // DIAGNOSTIC FIX: Exit after short delay to allow log flush
+    setTimeout(() => process.exit(1), 1000);
   });
 
   const PORT = process.env.PORT || 5000;
@@ -478,14 +509,21 @@ if (process.env.NODE_ENV !== "test") {
         ?.address
       : "localhost";
 
+    logStartupCheckpoint("SERVER-LISTEN-ACTIVE", { port: PORT, host: HOST });
+    
     logger.info(`🚀 Servidor corriendo en:`);
     logger.info(`   🌐 Local:   http://localhost:${PORT}`);
     logger.info(`   🖥️  LAN:     http://${localIp || "192.168.x.x"}:${PORT}`);
-
-    const USE_MULTI_START = process.env.USE_MULTI_SESSION === 'true';
-    if (!USE_MULTI_START) {
-      initWhatsappClient();
-    }
+    logger.info(`   ⚡ Workers: Verificar estado con pm2 status`);
+    
+    // DIAGNOSTIC: Log warning if degradation hasn't been diagnosed after 15s
+    setTimeout(() => {
+        if (!firstErrorTime) {
+            logStartupCheckpoint("NO-ERRORS-15S", { totalRequests: requestCount });
+        } else {
+            logStartupCheckpoint("DEGRADATION-DETECTED", firstErrorDetails);
+        }
+    }, 15000);
   });
 }
 

@@ -8,7 +8,7 @@
  * - Gestión de multimedia (imágenes, videos, claves)
  * - Exportación a CSV
  * - Notificaciones en tiempo real vía Socket.IO
- * 
+ *
  * Las auditorías representan ventas pendientes de verificación.
  */
 
@@ -16,6 +16,9 @@ const Audit = require('../models/Audit');
 const User = require('../models/User');
 const InternalMessage = require('../models/InternalMessage');
 const AffiliateContribution = require('../models/AffiliateContribution');
+const Affiliate = require('../models/Affiliate');
+const { computeAndUpdateCanSell } = require('../utils/canSellUtils');
+const { normalizeCuil, buildCuilLooseRegex } = require('../utils/cuilUtils');
 const {
     emitNewAudit,
     emitAuditUpdate,
@@ -29,10 +32,6 @@ const {
     normalizeAuditPhoneRole,
 } = require("../utils/auditPhoneVisibility");
 const {
-    AuditPhoneValidationError,
-    normalizeAuditPhone,
-} = require("../utils/auditPhoneValidation");
-const {
     notifyAuditDeleted,
     notifyAuditCreated,
     notifyAuditCompleted,
@@ -40,11 +39,63 @@ const {
     notifyRecoveryAuditCompleted
 } = require("../services/notificationService");
 const { escapeRegex } = require("../utils/stringUtils");
+const {
+    normalizeCuil: normalizeAuditCuil,
+    isValidNormalizedCuil,
+    findBlockingAuditByCuilNormalized,
+    buildDuplicateCuilResponse,
+} = require("../utils/auditDuplicateUtils");
+const documentProcessingCaseService = require("../services/documentProcessingCase.service");
+const { resolveStatusUpdate } = require("../utils/statusResolver");
+const {
+    AuditPhoneValidationError,
+    normalizeAuditPhone,
+} = require("../utils/auditPhoneValidation");
+
+const AUDIT_UPDATE_ALLOWED_FIELDS = new Set([
+    "nombre",
+    "cuil",
+    "tipoVenta",
+    "obraSocialAnterior",
+    "obraSocialVendida",
+    "scheduledAt",
+    "asesor",
+    "validador",
+    "auditor",
+    "administrador",
+    "groupId",
+    "datosExtra",
+    "aporte",
+    "cuit",
+    "observacionPrivada",
+    "clave",
+    "esAutovinculacion",
+    "email",
+    "status",
+    "statusAdministrativo",
+    "fechaCreacionQR",
+    "isRecuperada",
+    "disponibleParaVenta",
+    "isReferido",
+    "supervisor",
+    "numeroEquipo",
+    "_sourceInterface",
+]);
 
 const CLIENT_PROTECTED_AUDIT_FIELDS = new Set([
     "telefono",
     "telefonoHistory",
 ]);
+
+function pickAuditUpdates(body = {}) {
+    const updates = {};
+    for (const field of AUDIT_UPDATE_ALLOWED_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(body, field)) {
+            updates[field] = body[field];
+        }
+    }
+    return updates;
+}
 
 function hasProtectedAuditField(body = {}) {
     return [...CLIENT_PROTECTED_AUDIT_FIELDS].find(field => Object.prototype.hasOwnProperty.call(body, field));
@@ -89,9 +140,57 @@ function handleAuditPhoneValidationError(res, err) {
     throw err;
 }
 
-/**
- * Parsea un string tipo 'YYYY-MM-DDTHH:mm' a Date local
- */
+function serializeAuditForUser(audit, user, existingCanViewPhone = false) {
+    if (!audit) return audit;
+    const plainAudit = audit.toObject ? audit.toObject() : audit;
+    return maskAuditPhoneIfNeeded(plainAudit, user, existingCanViewPhone);
+}
+
+async function maybeCreateDocumentProcessingCase(audit, user) {
+    try {
+        await documentProcessingCaseService.maybeCreateFromAudit(audit, user);
+    } catch (error) {
+        logger.error("Error creando caso de procesamiento documental:", error);
+    }
+}
+
+async function recomputeCanSellByCuil(cuil, context = {}) {
+    const normalized = normalizeCuil(cuil);
+    if (!normalized) return { matched: 0, recomputed: 0, failed: 0 };
+
+    const looseRegex = buildCuilLooseRegex(normalized);
+    const affiliates = await Affiliate.find({
+        $or: [
+            { cuil },
+            { cuil: normalized },
+            { cuil: looseRegex }
+        ]
+    }).select('_id cuil').lean();
+
+    let recomputed = 0;
+    let failed = 0;
+
+    for (const affiliate of affiliates) {
+        const result = await computeAndUpdateCanSell(affiliate._id);
+        if (result.success) recomputed++;
+        else failed++;
+        logger.info(
+            "[AUDIT-QR-HECHO] CanSell recomputed | context=" + (context.action || "unknown") + " | " +
+            "auditId=" + (context.auditId || "-") + " | cuil=" + cuil + " | affiliateId=" + affiliate._id + " | " +
+            "canSell=" + result.canSell + " | success=" + result.success
+        );
+    }
+
+    if (affiliates.length === 0) {
+        logger.info(
+            "[AUDIT-QR-HECHO] No Affiliate found for CanSell recomputation | context=" + (context.action || "unknown") + " | " +
+            "auditId=" + (context.auditId || "-") + " | cuil=" + cuil
+        );
+    }
+
+    return { matched: affiliates.length, recomputed, failed };
+}
+
 function parseLocalDateTime(datetimeStr) {
     if (!datetimeStr || typeof datetimeStr !== 'string') return null;
     const [datePart, timePart = '00:00:00'] = datetimeStr.split('T');
@@ -100,9 +199,6 @@ function parseLocalDateTime(datetimeStr) {
     return new Date(year, (month || 1) - 1, day || 1, hh || 0, mm || 0, ss || 0, 0);
 }
 
-/**
- * Parsea un string 'YYYY-MM-DD' a Date inicio del día local
- */
 function parseLocalDate(dateStr) {
     if (!dateStr) {
         const d = new Date();
@@ -113,12 +209,111 @@ function parseLocalDate(dateStr) {
     return new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
 }
 
+function getArgentinaDateKey(date = new Date()) {
+    const argentinaDate = new Date(date.getTime() - (3 * 60 * 60 * 1000));
+    return argentinaDate.toISOString().slice(0, 10);
+}
+
+async function checkAuditorBlockingAssignment(currentAuditId, auditorId, scheduledAt) {
+    if (!auditorId) return { hasBlocking: false, blockingAudit: null };
+
+    const today = scheduledAt ? new Date(scheduledAt) : new Date();
+    const argentinaOffset = 3 * 60 * 60 * 1000;
+    const argentinaToday = new Date(today.getTime() - argentinaOffset);
+
+    const dayStart = new Date(argentinaToday);
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const dayStartUTC = new Date(dayStart.getTime() + argentinaOffset);
+
+    const dayEnd = new Date(argentinaToday);
+    dayEnd.setUTCHours(23, 59, 59, 999);
+    const dayEndUTC = new Date(dayEnd.getTime() + argentinaOffset);
+
+    const blockingStatuses = [null, undefined, "", "Seleccione", "Mensaje enviado", "En videollamada"];
+    const statusClauses = blockingStatuses.map(status => {
+        if (status === null) return { status: null };
+        if (status === undefined) return { status: { $exists: false } };
+        return { status: status };
+    });
+
+    const blockingAudit = await Audit.findOne({
+        _id: { $ne: currentAuditId },
+        auditor: auditorId,
+        scheduledAt: {
+            $gte: dayStartUTC,
+            $lte: dayEndUTC
+        },
+        $or: statusClauses
+    }).select('nombre status scheduledAt').lean();
+
+    return {
+        hasBlocking: !!blockingAudit,
+        blockingAudit: blockingAudit || null
+    };
+}
+
+const AUDITOR_LIQUIDATION_COMPLETION_STATUSES = [
+  "Completa",
+  "Autovinculación"
+];
+
+function normalizeAuditorLiquidationRole(role) {
+    const normalized = String(role || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[\s._-]/g, '');
+
+    if (normalized === 'auditor') return 'auditor';
+    if (normalized === 'rrhh' || normalized === 'recursoshumanos') return 'rr.hh';
+    return normalized;
+}
+
+function shouldCreditAuditorCompletion(audit, monthKey, user) {
+    const userRole = normalizeAuditorLiquidationRole(user?.role);
+    if (!['auditor', 'rr.hh'].includes(userRole) || !user?._id) return false;
+    const history = Array.isArray(audit?.completeHistory) ? audit.completeHistory : [];
+    return !history.some(entry => entry?.monthKey === monthKey);
+}
+
+function shouldTrackCompletionForAuditorLiquidation(previousStatus, newStatus) {
+  const previousWasCompletion = AUDITOR_LIQUIDATION_COMPLETION_STATUSES.includes(previousStatus);
+  const newIsCompletion = AUDITOR_LIQUIDATION_COMPLETION_STATUSES.includes(newStatus);
+  return !previousWasCompletion && newIsCompletion;
+}
+
+function buildCompleteHistoryEntry(completeDate, user) {
+    return {
+        monthKey: completeDate.slice(0, 7),
+        completeDate,
+        completedByUserId: user._id,
+        completedByRole: user.role
+    };
+}
+
+const LEGACY_STATUS_MAP = {
+    "Aprobada pero no reconoce clave": ["Aprobada pero no reconoce clave", "Aprobada, pero no reconoce clave"]
+};
+
+function normalizeStatusFilter(statusValues) {
+    if (!Array.isArray(statusValues)) return statusValues;
+
+    const normalized = new Set();
+    statusValues.forEach(status => {
+        normalized.add(status);
+        if (LEGACY_STATUS_MAP[status]) {
+            LEGACY_STATUS_MAP[status].forEach(s => normalized.add(s));
+        }
+    });
+
+    return [...normalized];
+}
+
 /**
  * Crear auditoría y notificar
  */
 exports.createAudit = async (req, res) => {
     const { nombre, cuil, telefono, tipoVenta, obraSocialAnterior, obraSocialVendida, scheduledAt, asesor, validador } = req.body;
-
     let normalizedTelefono;
     try {
         normalizedTelefono = normalizeAuditPhone(telefono);
@@ -126,17 +321,14 @@ exports.createAudit = async (req, res) => {
         return handleAuditPhoneValidationError(res, err);
     }
 
-    /* Parsear scheduledAt como Date - el frontend envía ISO string con timezone correcto */
     const sched = new Date(scheduledAt);
     if (!sched || isNaN(sched.getTime())) {
         return res.status(400).json({ message: 'Fecha inválida' });
     }
 
-    // ✅ PRIVILEGIO ESPECIAL: Gerencia y Encargado pueden crear ventas de cualquier fecha
     const isGerencia = req.user?.role?.toLowerCase() === 'gerencia' || req.user?.role?.toLowerCase() === 'encargado';
 
     if (!isGerencia) {
-        // Solo validar fecha para roles que NO sean Gerencia
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         if (sched < today) {
@@ -144,7 +336,6 @@ exports.createAudit = async (req, res) => {
         }
     }
 
-    // ✅ LÓGICA ESPECIAL PARA ROL INDEPENDIENTE
     const userRole = req.user?.role?.toLowerCase();
     const isIndependiente = userRole === 'independiente';
     let finalAsesor = asesor;
@@ -152,10 +343,8 @@ exports.createAudit = async (req, res) => {
     let isReferidoFlag = req.body.isReferido || false;
 
     if (isIndependiente) {
-        // Auto-asignar como asesor
         finalAsesor = req.user._id;
-        
-        // Buscar Eliana Soledad como supervisor (búsqueda flexible)
+
         const User = require('../models/User');
         const elianaSoledad = await User.findOne({
             $or: [
@@ -165,42 +354,32 @@ exports.createAudit = async (req, res) => {
             role: 'gerencia',
             active: true
         }).select('_id nombre numeroEquipo');
-        
+
         if (!elianaSoledad) {
-            return res.status(400).json({ 
-                message: 'No se pudo asignar supervisor automático. Eliana Soledad (Gerencia) no encontrada en el sistema.' 
+            return res.status(400).json({
+                message: 'No se pudo asignar supervisor automático. Eliana Soledad (Gerencia) no encontrada en el sistema.'
             });
         }
-        
-        // Construir supervisorSnapshot para Independiente
+
         supervisorSnapshotForIndependiente = {
             _id: elianaSoledad._id,
             nombre: elianaSoledad.nombre,
-            numeroEquipo: null // Independientes no tienen equipo
+            numeroEquipo: null
         };
-        
-        // Marcar como referido para proteger el supervisorSnapshot
+
         isReferidoFlag = true;
-        
-        logger.info(`[INDEPENDIENTE] Usuario ${req.user.nombre} creando venta. Asesor: auto-asignado, Supervisor: ${elianaSoledad.nombre}`);
+        logger.info("[INDEPENDIENTE] Usuario " + req.user.nombre + " creando venta. Asesor: auto-asignado, Supervisor: " + elianaSoledad.nombre);
     }
 
-    // 👉 Validación de CUIL único (solo si se proporciona)
-    // ✅ Permite reutilizar CUIL si la auditoría anterior está "Rechazada"
-    if (cuil && cuil.trim()) {
-        const existing = await Audit.findOne({ cuil: cuil.trim() }).populate('asesor', 'nombre');
-        if (existing && existing.status !== 'Rechazada') {
-            return res.status(409).json({
-                error: true,
-                code: "DUPLICATE_CUIL",
-                message: 'El CUIL ingresado ya se encuentra registrado.',
-                existingSale: {
-                    id: existing._id,
-                    status: existing.status,
-                    createdAt: existing.createdAt,
-                    asesor: existing.asesor?.nombre || null
-                }
-            });
+    const cuilNormalized = normalizeAuditCuil(cuil);
+    if (cuil && String(cuil).trim() && !isValidNormalizedCuil(cuilNormalized)) {
+        return res.status(400).json({ message: "CUIL inválido. Debe tener 11 dígitos." });
+    }
+
+    if (cuilNormalized) {
+        const existing = await findBlockingAuditByCuilNormalized(cuilNormalized);
+        if (existing) {
+            return res.status(409).json(buildDuplicateCuilResponse(existing));
         }
     }
 
@@ -211,12 +390,10 @@ exports.createAudit = async (req, res) => {
     const count = await Audit.countDocuments({
         scheduledAt: { $gte: slotStart, $lt: slotEnd }
     });
-    if (count >= 10) { // ✅ Aumentado a 10 vacantes por turno
+    if (count >= 10) {
         return res.status(400).json({ message: 'Turno completo' });
     }
 
-    // 🛡️ Doble verificación para mitigar condición de carrera
-    // (Idealmente usaríamos transacciones, pero esto reduce la ventana de riesgo)
     const doubleCheck = await Audit.countDocuments({
         scheduledAt: { $gte: slotStart, $lt: slotEnd }
     });
@@ -224,10 +401,8 @@ exports.createAudit = async (req, res) => {
         return res.status(400).json({ message: 'Turno completo (verificación final)' });
     }
 
-    // ✅ FIX: Si viene supervisor ID, buscar usuario y construir supervisorSnapshot
     let supervisorSnapshotData = null;
-    
-    // Priorizar supervisorSnapshot de Independiente si existe
+
     if (supervisorSnapshotForIndependiente) {
         supervisorSnapshotData = supervisorSnapshotForIndependiente;
     } else if (req.body.supervisor) {
@@ -244,33 +419,34 @@ exports.createAudit = async (req, res) => {
 
     const audit = new Audit({
         nombre,
-        cuil,
+        cuil: cuil ? String(cuil).trim() : cuil,
+        cuilNormalized,
         telefono: normalizedTelefono,
         tipoVenta,
         obraSocialAnterior,
         obraSocialVendida,
         scheduledAt: sched,
-        asesor: finalAsesor || req.user._id, // ✅ Usar finalAsesor (auto-asignado para Independiente)
-        validador: validador || null, // ✅ Usuario que valida la venta
+        asesor: finalAsesor || req.user._id,
+        validador: validador || null,
         createdBy: req.user._id,
         groupId: req.user.groupId,
         auditor: null,
         datosExtra: req.body.datosExtra || "",
-        // ✅ FIX: Incluir supervisorSnapshot si se proporcionó supervisor o es Independiente
         supervisorSnapshot: supervisorSnapshotData,
-        isReferido: isReferidoFlag, // ✅ Usar flag (true para Independiente)
-        telefonoHistory: [buildTelefonoHistoryEntry({
-            previousValue: null,
-            newValue: normalizedTelefono,
-            user: req.user,
-            endpoint: "POST /api/audits",
-            sourceComponent: req.body?.sourceComponent || "audit-create",
-            requestId: getRequestId(req),
-            reason: "Audit created",
-            source: "request.body.telefono",
-            eventType: "created",
-        })]
+        isReferido: isReferidoFlag
     });
+
+    audit.telefonoHistory.push(buildTelefonoHistoryEntry({
+        previousValue: null,
+        newValue: normalizedTelefono,
+        user: req.user,
+        endpoint: "POST /api/audits",
+        sourceComponent: req.body._sourceComponent || req.body._sourceInterface || "audit-create",
+        requestId: getRequestId(req),
+        reason: "Audit created",
+        source: "request.body.telefono",
+        eventType: "created",
+    }));
 
     if (typeof req.body.datosExtra === 'string' && req.body.datosExtra.trim().length) {
         audit.datosExtraHistory.push({
@@ -291,14 +467,13 @@ exports.createAudit = async (req, res) => {
 
     await audit.save();
 
-    /* Poblar datos para notificación */
     await audit.populate('createdBy', 'nombre email role numeroEquipo');
     await audit.populate('datosExtraHistory.updatedBy', 'nombre name username email role');
     await audit.populate('statusHistory.updatedBy', 'nombre name username email role');
+    await audit.populate('telefonoHistory.changedBy', 'nombre name username email role');
 
     try { emitNewAudit(audit); } catch (e) { logger.error("socket emit error", e); }
 
-    // 🔔 Notificar a auditores sobre nueva auditoría
     try {
         await notifyAuditCreated({
             audit: {
@@ -341,7 +516,8 @@ exports.getAuditsByDate = async (req, res) => {
             administrador,
             ignoreDate,
             dateField,
-            userId
+            userId,
+            assignedAuditorOnly
         } = req.query;
 
         let filter = {};
@@ -452,11 +628,15 @@ exports.getAuditsByDate = async (req, res) => {
                 const uniqueStatuses = [...new Set(statusFilterValues)];
 
                 if (uniqueStatuses.length) {
-                    // ✅ Buscar en ambos campos: status y statusAdministrativo (EXACT MATCH con $in)
-                    const statusOrCondition = [
-                        { status: { $in: uniqueStatuses } },
-                        { statusAdministrativo: { $in: uniqueStatuses } }
-                    ];
+                    // ✅ Buscar SOLO en campo status para filtrado de interfaces preciso
+                    // El campo statusAdministrativo es para uso administrativo interno,
+                    // no para determinar en qué interfaz aparece un registro
+
+                    // ✅ Normalize status values to handle backward compatibility
+                    // This ensures records with legacy "Aprobada, pero no reconoce clave"
+                    // are also matched when filtering for canonical "Aprobada pero no reconoce clave"
+                    const normalizedStatuses = normalizeStatusFilter(uniqueStatuses);
+                    const statusCondition = { status: { $in: normalizedStatuses } };
 
                     // ✅ Si ya existe un $or (ej. por userId), combinar con $and
                     if (filter.$or) {
@@ -464,9 +644,9 @@ exports.getAuditsByDate = async (req, res) => {
                         delete filter.$or;
                         filter.$and = filter.$and || [];
                         filter.$and.push({ $or: existingOr });
-                        filter.$and.push({ $or: statusOrCondition });
+                        filter.$and.push(statusCondition);
                     } else {
-                        filter.$or = statusOrCondition;
+                        filter.status = { $in: normalizedStatuses };
                     }
                 }
             }
@@ -499,6 +679,18 @@ exports.getAuditsByDate = async (req, res) => {
             } else {
                 // Si no hay $or, simplemente agregamos el filtro de asesor
                 filter.$or = asesorFilter.$or;
+            }
+        } else if (expRole === 'auditor' && assignedAuditorOnly === 'true') {
+            const auditorFilter = { auditor: req.user._id };
+            if (filter.$or || filter.$and) {
+                filter = {
+                    $and: [
+                        filter,
+                        auditorFilter
+                    ]
+                };
+            } else {
+                filter.auditor = req.user._id;
             }
         } else if (expRole === 'supervisor' || expRole === 'encargado') {
             /* Supervisores/Encargados ven TODAS las auditorías
@@ -534,6 +726,7 @@ exports.getAuditsByDate = async (req, res) => {
             .populate('administradorHistory.previousAdmin', 'nombre name')
             .populate('administradorHistory.newAdmin', 'nombre name')
             .populate('administradorHistory.changedBy', 'nombre name')
+            .populate('telefonoHistory.changedBy', 'nombre name username email role')
             .sort({ scheduledAt: 1 })
             .lean();
 
@@ -750,16 +943,7 @@ exports.getAuditsByDate = async (req, res) => {
             }
         }
 
-        const userRole = (req.user?.role || "").toLowerCase();
-        const currentUserId = req.user?._id?.toString();
-
-        if (userRole === "supervisor" && currentUserId && audits.length > 0) {
-            audits = audits.map(audit => {
-                const auditSupervisorId = audit.supervisorSnapshot?._id?.toString();
-                const existingCanViewPhone = !!auditSupervisorId && auditSupervisorId === currentUserId;
-                return maskAuditPhoneIfNeeded(audit, req.user, existingCanViewPhone);
-            });
-        }
+        audits = audits.map(audit => serializeAuditForUser(audit, req.user));
 
         res.json(audits);
     } catch (err) {
@@ -866,13 +1050,84 @@ exports.getSalesStats = async (req, res) => {
  */
 exports.updateStatus = async (req, res) => {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, statusAdministrativo } = req.body;
+    const sourceInterface = req.body._sourceInterface;
 
     const now = new Date();
-    const update = { status, statusUpdatedAt: now };
+
+    // ✅ STATUS SYNCHRONIZATION (Phase 1)
+    // Resolve status update based on source interface
+    let resolvedStatus = status;
+    let resolvedStatusAdministrativo = status;
+
+    if (sourceInterface) {
+        // For registro_ventas, use statusAdministrativo as the source of truth
+        // (it contains the administrative value like "Hacer QR")
+        // For seguimiento, use status directly (it contains the operational value)
+        const incomingStatus = (sourceInterface === "registro_ventas" && statusAdministrativo)
+            ? statusAdministrativo
+            : status;
+
+        const resolution = resolveStatusUpdate({
+            sourceInterface,
+            incomingStatus
+        });
+
+        if (resolution.warning) {
+            logger.warn(`[StatusSync] updateStatus ${id}: ${resolution.warning}`);
+        }
+
+        // Reject non-assignable statuses from Seguimiento
+        if (!resolution.isValid && resolution.syncType === "rejected_non_assignable") {
+            return res.status(400).json({
+                message: resolution.warning || "Invalid status assignment"
+            });
+        }
+
+        resolvedStatus = resolution.status;
+        resolvedStatusAdministrativo = resolution.statusAdministrativo;
+
+        logger.info(`[StatusSync] updateStatus ${id}: ${resolution.syncType} (${sourceInterface} -> status=${resolvedStatus}, admin=${resolvedStatusAdministrativo})`);
+    }
+
+    if (resolvedStatus === "QR hecho") {
+        const currentAudit = await Audit.findById(id).select("cuil cuilNormalized nombre").lean();
+        if (!currentAudit) {
+            return res.status(404).json({ message: "Auditoría no encontrada" });
+        }
+        const qrCuilNormalized = currentAudit.cuilNormalized || normalizeAuditCuil(currentAudit.cuil);
+        if (qrCuilNormalized && isValidNormalizedCuil(qrCuilNormalized)) {
+            const duplicate = await findBlockingAuditByCuilNormalized(qrCuilNormalized, id);
+            if (duplicate) {
+                return res.status(409).json(buildDuplicateCuilResponse(duplicate));
+            }
+        }
+    }
+
+    const update = {
+        status: resolvedStatus,
+        statusAdministrativo: resolvedStatusAdministrativo,
+        statusUpdatedAt: now
+    };
+    const previousAudit = await Audit.findById(id).select("status completeHistory cuil cuilNormalized nombre").lean();
+    if (!previousAudit) {
+        return res.status(404).json({ message: "Auditoría no encontrada" });
+    }
+    const enteredCompletion = shouldTrackCompletionForAuditorLiquidation(previousAudit?.status, resolvedStatus);
+    const completeDate = enteredCompletion ? getArgentinaDateKey(now) : null;
+    let completeHistoryEntry = null;
+
+    update.isComplete = resolvedStatus === "Completa";  // Keep tied only to "Completa"
+    if (enteredCompletion) {
+        update.completeDate = completeDate;
+        const monthKey = completeDate.slice(0, 7);
+        if (shouldCreditAuditorCompletion(previousAudit, monthKey, req.user)) {
+            completeHistoryEntry = buildCompleteHistoryEntry(completeDate, req.user);
+        }
+    }
 
     // ✅ ACTUALIZAR FECHA CUANDO CAMBIA A "QR hecho"
-    if (status === 'QR hecho') {
+    if (resolvedStatus === 'QR hecho') {
         update.scheduledAt = now;
         update.fechaCreacionQR = now; // ✅ Nuevo campo
         logger.info(`updateStatus: Auditoría ${id} cambió a QR hecho. Fecha actualizada a: ${update.scheduledAt}`);
@@ -882,7 +1137,7 @@ exports.updateStatus = async (req, res) => {
     const userRole = req.user?.role?.toLowerCase();
     if (userRole === 'admin' || userRole === 'administrativo') {
         update.scheduledAt = now;
-        logger.info(`updateStatus: Admin/Administrativo cambió estado de auditoría ${id} a "${status}". Fecha actualizada a: ${update.scheduledAt}`);
+        logger.info(`updateStatus: Admin/Administrativo cambió estado de auditoría ${id} a "${resolvedStatus}". Fecha actualizada a: ${update.scheduledAt}`);
     }
 
     const recoveryStates = [
@@ -896,7 +1151,7 @@ exports.updateStatus = async (req, res) => {
         "Cortó"
     ];
 
-    if (recoveryStates.includes(status)) {
+    if (recoveryStates.includes(resolvedStatus)) {
         update.recoveryEligibleAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
         // Resetear flag de notificación para que pueda enviar nueva notificación después de 12h
         update.followUpNotificationSent = false;
@@ -905,20 +1160,54 @@ exports.updateStatus = async (req, res) => {
         // Resetear flag cuando sale del estado problemático
         update.followUpNotificationSent = false;
     }
-    const audit = await Audit.findByIdAndUpdate(id, update, { new: true });
+    const updateDoc = { $set: update };
+    if (completeHistoryEntry) {
+        updateDoc.$push = { completeHistory: completeHistoryEntry };
+    }
+
+    const audit = await Audit.findByIdAndUpdate(id, updateDoc, { new: true, runValidators: true });
 
     if (audit) {
         try {
             // ✅ Incluir updatedBy para evitar notificaciones al propio usuario
-            emitAuditUpdate(audit._id, { status, updatedBy: req.user._id });
+            // ✅ Incluir ambos campos de estado para sincronización
+            emitAuditUpdate(audit._id, {
+                status: resolvedStatus,
+                statusAdministrativo: resolvedStatusAdministrativo,
+                updatedBy: req.user._id
+            });
 
             // ✅ Enviar notificación interna al asesor si no fue él quien hizo el cambio
         } catch (e) {
             logger.error("emitAuditUpdate error", e);
         }
+        if (enteredCompletion && audit.status === "Completa") {
+            await maybeCreateDocumentProcessingCase(audit, req.user);
+        }
+
+        // 🔁 RECOMPUTE CanSell when status changes to/from "QR hecho"
+        // This affects availability for the Affiliate with this CUIL
+        const previousStatus = previousAudit?.status;
+        const newStatus = resolvedStatus;
+
+        if (previousStatus !== newStatus && (previousStatus === "QR hecho" || newStatus === "QR hecho") && audit.cuil) {
+            try {
+                await recomputeCanSellByCuil(audit.cuil, {
+                    action: "updateStatus",
+                    auditId: id,
+                    previousStatus,
+                    newStatus
+                });
+            } catch (canSellErr) {
+                logger.error(
+                    `[AUDIT-QR-HECHO] CanSell recomputation failed | auditId=${id} | ` +
+                    `cuil=${audit.cuil} | error=${canSellErr.message}`
+                );
+            }
+        }
     }
 
-    res.json(audit);
+    res.json(serializeAuditForUser(audit, req.user));
 };
 
 /**
@@ -927,12 +1216,13 @@ exports.updateStatus = async (req, res) => {
 exports.updateAudit = async (req, res) => {
     try {
         const { id } = req.params;
-        const updates = req.body;
-
-        const protectedField = hasProtectedAuditField(updates);
+        const protectedField = hasProtectedAuditField(req.body);
         if (protectedField) {
-            return res.status(400).json({ message: `${protectedField} no puede modificarse desde la edicion general; use el endpoint dedicado de telefono` });
+            return res.status(400).json({
+                message: `${protectedField} no puede modificarse desde este endpoint. Use la operación dedicada de teléfono.`
+            });
         }
+        const updates = pickAuditUpdates(req.body);
 
         // Solo administrativo/auditor/supervisor/gerencia/RR.HH/recuperador pueden editar
         const userRole = (req.user.role || '').toLowerCase();
@@ -951,13 +1241,206 @@ exports.updateAudit = async (req, res) => {
 
         const oldStatus = oldAudit.status;
 
+        // ✅ FIELD RESTRICTION for Auditor/Supervisor in recovery states (Falta clave, Rechazada, Pendiente, etc.)
+        // These roles can ONLY update: datosExtra, scheduledAt (fecha/hora), and status (limited options)
+        const recoveryStates = [
+            "Falta clave",
+            "Falta documentación",
+            "Falta clave y documentación",
+            "Pendiente",
+            "Rechazada"
+        ];
+
+        const isLimitedRole = userRole === 'auditor' || userRole === 'supervisor';
+        const isRecoveryState = recoveryStates.includes(oldAudit.status);
+
+        if (isLimitedRole && isRecoveryState) {
+            // Define allowed fields for limited editing. Status is allowed only when
+            // explicitly changed to a valid Seguimiento status and the auditor is assigned.
+            const allowedFields = ['datosExtra', 'scheduledAt'];
+            const requestedStatusChange = Object.prototype.hasOwnProperty.call(updates, 'status') &&
+                typeof updates.status === 'string' &&
+                updates.status !== oldStatus;
+
+            if (requestedStatusChange) {
+                const incomingStatus = (updates._sourceInterface === 'registro_ventas' && updates.statusAdministrativo)
+                    ? updates.statusAdministrativo
+                    : updates.status;
+                const resolution = resolveStatusUpdate({
+                    sourceInterface: updates._sourceInterface || 'seguimiento',
+                    incomingStatus
+                });
+
+                if (!resolution.isValid) {
+                    return res.status(400).json({
+                        success: false,
+                        message: resolution.warning || 'No se puede asignar ese estado desde Seguimiento.'
+                    });
+                }
+
+                if (userRole === 'auditor') {
+                    const currentUserId = req.user?._id?.toString();
+                    const oldAuditorIdForStatus = oldAudit.auditor?.toString() || null;
+                    const requestedAuditorIdForStatus = updates.auditor ? updates.auditor.toString() : null;
+                    const isAssignedAuditor = oldAuditorIdForStatus === currentUserId;
+                    const isAssigningSelf = !oldAuditorIdForStatus && requestedAuditorIdForStatus === currentUserId;
+
+                    if (!isAssignedAuditor && !isAssigningSelf) {
+                        return res.status(403).json({
+                            success: false,
+                            message: 'No tenés permisos para cambiar el estado de esta auditoría.'
+                        });
+                    }
+
+                    if (isAssigningSelf) {
+                        allowedFields.push('auditor');
+                    }
+                }
+
+                allowedFields.push('status', 'statusAdministrativo', '_sourceInterface');
+            }
+
+            // Check if any non-allowed fields are being modified
+            const requestedFields = Object.keys(updates);
+            const nonAllowedFields = requestedFields.filter(field => !allowedFields.includes(field));
+
+            if (nonAllowedFields.length > 0) {
+                logger.warn(`[updateAudit] Usuario ${req.user.nombre} (${userRole}) intentó modificar campos no permitidos: ${nonAllowedFields.join(', ')}. Estado: ${oldAudit.status}`);
+
+                // Remove non-allowed fields from updates (preserve original values).
+                // Never silently remove an explicitly requested status change.
+                nonAllowedFields.forEach(field => {
+                    delete updates[field];
+                });
+
+                // If no valid fields remain, return error
+                if (Object.keys(updates).length === 0) {
+                    return res.status(403).json({
+                        success: false,
+                        message: requestedStatusChange
+                            ? 'No tenés permisos para cambiar el estado de esta auditoría.'
+                            : 'No tienes permiso para modificar esos campos. Solo puedes editar: Datos Extra/Notas y Reprogramar turno (Fecha/Hora).'
+                    });
+                }
+            }
+        }
+
+        if (Object.prototype.hasOwnProperty.call(updates, 'cuil')) {
+            const incomingCuil = updates.cuil;
+            const incomingCuilNormalized = normalizeAuditCuil(incomingCuil);
+            if (incomingCuil && String(incomingCuil).trim() && !isValidNormalizedCuil(incomingCuilNormalized)) {
+                return res.status(400).json({ message: "CUIL inválido. Debe tener 11 dígitos." });
+            }
+
+            if (incomingCuilNormalized) {
+                const duplicate = await findBlockingAuditByCuilNormalized(incomingCuilNormalized, id);
+                if (duplicate) {
+                    return res.status(409).json(buildDuplicateCuilResponse(duplicate));
+                }
+            }
+
+            updates.cuil = incomingCuil ? String(incomingCuil).trim() : incomingCuil;
+            updates.cuilNormalized = incomingCuilNormalized;
+        }
+
+        // 🔒 AUDITOR ASSIGNMENT LOCK: Prevent users from hoarding multiple audits
+        // Check if the auditor field is being changed to a new non-empty value
+        const oldAuditorId = oldAudit.auditor?.toString() || null;
+        const newAuditorId = updates.auditor || null;
+        const isAuditorBeingChanged = newAuditorId !== undefined && newAuditorId !== oldAuditorId;
+
+        if (isAuditorBeingChanged && newAuditorId) {
+            const { hasBlocking, blockingAudit } = await checkAuditorBlockingAssignment(
+                id,
+                newAuditorId,
+                updates.scheduledAt || oldAudit.scheduledAt
+            );
+
+            if (hasBlocking) {
+                logger.warn(`[AuditorLock] Bloqueada asignación de auditor ${newAuditorId} a auditoría ${id}. Ya tiene auditoría bloqueante: ${blockingAudit?._id} (${blockingAudit?.status})`);
+                return res.status(409).json({
+                    message: "Este auditor ya tiene una auditoría pendiente hoy. Debe finalizarla antes de tomar otra.",
+                    blockingAudit: blockingAudit ? {
+                        _id: blockingAudit._id,
+                        affiliateName: blockingAudit.nombre,
+                        status: blockingAudit.status
+                    } : null
+                });
+            }
+        }
+
+        if ('completeHistory' in updates) delete updates.completeHistory;
+        if ('completeDate' in updates) delete updates.completeDate;
+        if ('isComplete' in updates) delete updates.isComplete;
+
+        // ✅ STATUS SYNCHRONIZATION (Phase 1)
+        // Resolve status update based on source interface
+        if (typeof updates.status === 'string' && updates.status !== oldStatus) {
+            const sourceInterface = updates._sourceInterface;
+            // For registro_ventas, use statusAdministrativo as the source of truth
+            // (it contains the administrative value like "Hacer QR")
+            // For seguimiento, use status directly (it contains the operational value)
+            const incomingStatus = (sourceInterface === "registro_ventas" && updates.statusAdministrativo)
+                ? updates.statusAdministrativo
+                : updates.status;
+
+            const resolution = resolveStatusUpdate({
+                sourceInterface,
+                incomingStatus
+            });
+
+            // Log any warnings
+            if (resolution.warning) {
+                logger.warn(`[StatusSync] Audit ${id}: ${resolution.warning}`);
+            }
+
+            // Reject non-assignable statuses from Seguimiento
+            if (!resolution.isValid && resolution.syncType === "rejected_non_assignable") {
+                return res.status(400).json({
+                    message: resolution.warning || "Invalid status assignment from Seguimiento"
+                });
+            }
+
+            // Apply resolved values
+            updates.status = resolution.status;
+            updates.statusAdministrativo = resolution.statusAdministrativo;
+
+            logger.info(`[StatusSync] Audit ${id}: ${resolution.syncType} (${sourceInterface || 'unknown'} -> status=${resolution.status}, admin=${resolution.statusAdministrativo})`);
+
+            // Remove source flag before saving
+            delete updates._sourceInterface;
+        }
+
+        if (updates.status === "QR hecho") {
+            const qrCuilNormalized = updates.cuilNormalized || oldAudit.cuilNormalized || normalizeAuditCuil(updates.cuil || oldAudit.cuil);
+            if (qrCuilNormalized && isValidNormalizedCuil(qrCuilNormalized)) {
+                const duplicate = await findBlockingAuditByCuilNormalized(qrCuilNormalized, id);
+                if (duplicate) {
+                    return res.status(409).json(buildDuplicateCuilResponse(duplicate));
+                }
+            }
+        }
+
         // Si se está cambiando el estado, resetear flag de notificación de seguimiento
         let statusHistoryEntry = null;
+        let completeHistoryEntry = null;
+        let adminHistoryEntry = null;
         if (typeof updates.status === 'string' && updates.status !== oldStatus) {
             updates.statusUpdatedAt = new Date();
             updates.followUpNotificationSent = false;
+            updates.isComplete = updates.status === "Completa";  // Keep tied only to "Completa"
 
-            // 
+            const enteredCompletion = shouldTrackCompletionForAuditorLiquidation(oldStatus, updates.status);
+            if (enteredCompletion) {
+                const completeDate = getArgentinaDateKey(updates.statusUpdatedAt);
+                updates.completeDate = completeDate;
+                const monthKey = completeDate.slice(0, 7);
+                if (shouldCreditAuditorCompletion(oldAudit, monthKey, req.user)) {
+                    completeHistoryEntry = buildCompleteHistoryEntry(completeDate, req.user);
+                }
+            }
+
+            //
             if (updates.status === 'QR hecho' || updates.status === 'QR hecho pero pendiente de aprobación') {
                 updates.scheduledAt = new Date();
                 // ✅ Solo asignar fechaCreacionQR automáticamente si NO viene del frontend
@@ -969,14 +1452,14 @@ exports.updateAudit = async (req, res) => {
                 logger.info(`Auditoría ${id} cambió a ${updates.status}. Fecha actualizada a: ${updates.scheduledAt}`);
             }
 
-            // 
+            //
             const userRole = req.user?.role?.toLowerCase();
             if (userRole === 'admin' || userRole === 'administrativo') {
                 updates.scheduledAt = new Date();
                 logger.info(`updateAudit: Admin/Administrativo cambió estado de auditoría ${id} a "${updates.status}". Fecha actualizada a: ${updates.scheduledAt}`);
             }
 
-            // 
+            //
             const recoveryStates = [
                 "Falta clave",
                 "Falta documentación",
@@ -1031,81 +1514,76 @@ exports.updateAudit = async (req, res) => {
             };
         }
 
-        let adminHistoryEntry = null;
-        if ('administrador' in updates) {
-            // Normalizar ambos valores a string de ObjectId o null
-            const oldAdminId = oldAudit.administrador ? oldAudit.administrador.toString() : null;
-            const newAdminId = updates.administrador ? updates.administrador.toString() : null;
+        // Normalizar ambos valores a string de ObjectId o null
+        const oldAdminId = oldAudit.administrador ? oldAudit.administrador.toString() : null;
+        const newAdminId = updates.administrador ? updates.administrador.toString() : null;
 
-            if (oldAdminId !== newAdminId) {
-                adminHistoryEntry = {
-                    previousAdmin: oldAudit.administrador || null,
-                    newAdmin: updates.administrador || null,
-                    changedBy: req.user._id,
-                    changedAt: new Date()
-                };
-                logger.info(`[updateAudit] Historial admin: ${oldAdminId || 'null'} → ${newAdminId || 'null'} por ${req.user.nombre}`);
-            }
+    if (Object.prototype.hasOwnProperty.call(updates, 'administrador') && oldAdminId !== newAdminId) {
+        adminHistoryEntry = {
+            previousAdmin: oldAudit.administrador || null,
+            newAdmin: updates.administrador || null,
+            changedBy: req.user._id,
+            changedAt: new Date()
+        };
+        logger.info(`[updateAudit] Historial admin: ${oldAdminId || 'null'} → ${newAdminId || 'null'} por ${req.user.nombre}`);
+    }
+
+    // ✅ MANEJO DE SUPERVISOR (Manual vs Automático)
+    // 1. Si viene 'supervisor' (ID manual), lo usamos para actualizar el snapshot
+    if (updates.supervisor) {
+        const User = require('../models/User');
+        const supervisorUser = await User.findById(updates.supervisor).select('nombre name email numeroEquipo').lean();
+        if (supervisorUser) {
+            updates.supervisorSnapshot = {
+                _id: supervisorUser._id,
+                nombre: supervisorUser.nombre || supervisorUser.name,
+                numeroEquipo: supervisorUser.numeroEquipo
+            };
         }
+        // Eliminamos 'supervisor' del objeto updates para que no intente guardarlo como campo root (si no existe en schema)
+        delete updates.supervisor;
+    }
+    // 2. Si NO viene supervisor manual, pero cambió el asesor o el grupo, recalculamos
+    // ✅ FIX: Si el grupo se establece explícitamente a NULL (updates.numeroEquipo === null),
+    // significa que queremos "desvincular" del equipo y mantener el supervisor actual (manual).
+    // En ese caso, NO recalculamos el snapshot.
+    else if (updates.asesor || updates.groupId !== undefined || updates.numeroEquipo !== undefined) {
+        // Verificar si es referido (ya sea en updates o en oldAudit)
+        const isReferido = updates.isReferido !== undefined ? updates.isReferido : oldAudit.isReferido;
 
-        // ✅ MANEJO DE SUPERVISOR (Manual vs Automático)
-        // 1. Si viene 'supervisor' (ID manual), lo usamos para actualizar el snapshot
-        if (updates.supervisor) {
+        // Si es referido, NO recalcular automáticamente por equipo (protege supervisor asignado manualmente)
+        if (isReferido) {
+            logger.info(`[updateAudit] Audit ${id} es Referido. Omitiendo recálculo automático de supervisor por equipo.`);
+        }
+        // Si numeroEquipo viene como null explícito, NO recalcular snapshot
+        else if (updates.numeroEquipo === null || updates.groupId === null) {
+            logger.info(`[updateAudit] Grupo/Equipo establecido a NULL para audit ${id}. Manteniendo supervisor actual.`);
+        } else {
+            // Necesitamos el asesor completo para el helper
             const User = require('../models/User');
-            const supervisorUser = await User.findById(updates.supervisor).select('nombre name email numeroEquipo').lean();
-            if (supervisorUser) {
-                updates.supervisorSnapshot = {
-                    _id: supervisorUser._id,
-                    nombre: supervisorUser.nombre || supervisorUser.name,
-                    numeroEquipo: supervisorUser.numeroEquipo
-                };
+            const { getSupervisorSnapshotForAudit } = require('../utils/supervisorHelper');
+
+            // Construir objeto temporal para el cálculo
+            const tempAudit = {
+                ...oldAudit.toObject(),
+                ...updates,
+                // Asegurar que groupId sea objeto o ID según lo que espera el helper
+                groupId: updates.groupId || oldAudit.groupId
+            };
+
+            let asesorObj = null;
+            if (updates.asesor) {
+                asesorObj = await User.findById(updates.asesor).lean();
+            } else if (oldAudit.asesor) {
+                asesorObj = await User.findById(oldAudit.asesor).lean();
             }
-            // Eliminamos 'supervisor' del objeto updates para que no intente guardarlo como campo root (si no existe en schema)
-            delete updates.supervisor;
-        }
-        // 2. Si NO viene supervisor manual, pero cambió el asesor o el grupo, recalculamos
-        // ✅ FIX: Si el grupo se establece explícitamente a NULL (updates.numeroEquipo === null),
-        // significa que queremos "desvincular" del equipo y mantener el supervisor actual (manual).
-        // En ese caso, NO recalculamos el snapshot.
-        else if (updates.asesor || updates.groupId !== undefined || updates.numeroEquipo !== undefined) {
-            // Verificar si es referido (ya sea en updates o en oldAudit)
-            const isReferido = updates.isReferido !== undefined ? updates.isReferido : oldAudit.isReferido;
 
-            // Si es referido, NO recalcular automáticamente por equipo (protege supervisor asignado manualmente)
-            if (isReferido) {
-                const logger = require('../utils/logger');
-                logger.info(`[updateAudit] Audit ${id} es Referido. Omitiendo recálculo automático de supervisor por equipo.`);
-            }
-            // Si numeroEquipo viene como null explícito, NO recalcular snapshot
-            else if (updates.numeroEquipo === null || updates.groupId === null) {
-                const logger = require('../utils/logger');
-                logger.info(`[updateAudit] Grupo/Equipo establecido a NULL para audit ${id}. Manteniendo supervisor actual.`);
-            } else {
-                // Necesitamos el asesor completo para el helper
-                const User = require('../models/User');
-                const { getSupervisorSnapshotForAudit } = require('../utils/supervisorHelper');
-
-                // Construir objeto temporal para el cálculo
-                const tempAudit = {
-                    ...oldAudit.toObject(),
-                    ...updates,
-                    // Asegurar que groupId sea objeto o ID según lo que espera el helper
-                    groupId: updates.groupId || oldAudit.groupId
-                };
-
-                let asesorObj = null;
-                if (updates.asesor) {
-                    asesorObj = await User.findById(updates.asesor).lean();
-                } else if (oldAudit.asesor) {
-                    asesorObj = await User.findById(oldAudit.asesor).lean();
-                }
-
-                const snapshot = await getSupervisorSnapshotForAudit(tempAudit, asesorObj);
-                if (snapshot) {
-                    updates.supervisorSnapshot = snapshot;
-                }
+            const snapshot = await getSupervisorSnapshotForAudit(tempAudit, asesorObj);
+            if (snapshot) {
+                updates.supervisorSnapshot = snapshot;
             }
         }
+    }
 
         // ✅ Registrar historial de fechaCreacionQR si cambió
         let fechaQRHistoryEntry = null;
@@ -1135,7 +1613,7 @@ exports.updateAudit = async (req, res) => {
         if (Object.keys(updates).length) {
             updateDoc.$set = updates;
         }
-        if (historyEntry || statusHistoryEntry || asesorHistoryEntry || fechaQRHistoryEntry) {
+        if (historyEntry || statusHistoryEntry || asesorHistoryEntry || fechaQRHistoryEntry || adminHistoryEntry || completeHistoryEntry) {
             updateDoc.$push = {};
             if (historyEntry) {
                 updateDoc.$push.datosExtraHistory = historyEntry;
@@ -1151,6 +1629,9 @@ exports.updateAudit = async (req, res) => {
             }
             if (adminHistoryEntry) {
                 updateDoc.$push.administradorHistory = adminHistoryEntry;
+            }
+            if (completeHistoryEntry) {
+                updateDoc.$push.completeHistory = completeHistoryEntry;
             }
         }
 
@@ -1169,9 +1650,9 @@ exports.updateAudit = async (req, res) => {
             await oldAudit.populate('createdBy', 'nombre name email numeroEquipo');
             await oldAudit.populate('groupId', 'nombre name');
             await oldAudit.populate('datosExtraHistory.updatedBy', 'nombre name username email role');
-            await oldAudit.populate('telefonoHistory.changedBy', 'nombre name username email role');
             await oldAudit.populate('statusHistory.updatedBy', 'nombre name username email role');
             await oldAudit.populate('fechaQRHistory.updatedBy', 'nombre name username email role');
+            await oldAudit.populate('telefonoHistory.changedBy', 'nombre name username email role');
             await oldAudit.populate({
                 path: 'asesorHistory',
                 populate: [
@@ -1183,7 +1664,7 @@ exports.updateAudit = async (req, res) => {
             await oldAudit.populate('administradorHistory.previousAdmin', 'nombre name');
             await oldAudit.populate('administradorHistory.newAdmin', 'nombre name');
             await oldAudit.populate('administradorHistory.changedBy', 'nombre name');
-            return res.json(oldAudit);
+            return res.json(serializeAuditForUser(oldAudit, req.user));
         }
 
         // No sobreescribir auditor automáticamente. Solo cambiar si viene en el payload.
@@ -1191,7 +1672,7 @@ exports.updateAudit = async (req, res) => {
         const audit = await Audit.findByIdAndUpdate(
             id,
             updateDoc,
-            { new: true }
+            { new: true, runValidators: true }
         )
             .populate({
                 path: 'asesor',
@@ -1207,9 +1688,9 @@ exports.updateAudit = async (req, res) => {
             .populate('createdBy', 'nombre name email numeroEquipo')
             .populate('groupId', 'nombre name')
             .populate('datosExtraHistory.updatedBy', 'nombre name username email role')
-            .populate('telefonoHistory.changedBy', 'nombre name username email role')
             .populate('statusHistory.updatedBy', 'nombre name username email role')
             .populate('fechaQRHistory.updatedBy', 'nombre name username email role')
+            .populate('telefonoHistory.changedBy', 'nombre name username email role')
             .populate({
                 path: 'asesorHistory',
                 populate: [
@@ -1262,6 +1743,7 @@ exports.updateAudit = async (req, res) => {
             } catch (e) {
                 logger.error("Error enviando notificación de auditoría completa:", e);
             }
+            await maybeCreateDocumentProcessingCase(audit, req.user);
         }
 
         // Notificar cuando pasa a "QR hecho" (case-insensitive)
@@ -1297,7 +1779,30 @@ exports.updateAudit = async (req, res) => {
             }
         }
 
-        res.json(audit);
+        const cuilChanged = normalizeCuil(oldAudit.cuil) !== normalizeCuil(audit.cuil);
+        const qrRelevantStatusChange = oldStatus !== newStatus && (oldStatus === "QR hecho" || newStatus === "QR hecho");
+        const qrRelevantCuilChange = cuilChanged && (oldStatus === "QR hecho" || newStatus === "QR hecho");
+
+        if (qrRelevantStatusChange || qrRelevantCuilChange) {
+            const cuilsToRecompute = new Set([oldAudit.cuil, audit.cuil].filter(Boolean));
+            for (const cuil of cuilsToRecompute) {
+                try {
+                    await recomputeCanSellByCuil(cuil, {
+                        action: "updateAudit",
+                        auditId: id,
+                        previousStatus: oldStatus,
+                        newStatus
+                    });
+                } catch (canSellErr) {
+                    logger.error(
+                        `[AUDIT-QR-HECHO] CanSell recomputation failed | auditId=${id} | ` +
+                        `cuil=${cuil} | error=${canSellErr.message}`
+                    );
+                }
+            }
+        }
+
+        res.json(serializeAuditForUser(audit, req.user));
     } catch (err) {
         logger.error("Error actualizando auditoría:", err);
 
@@ -1321,15 +1826,15 @@ exports.updateAudit = async (req, res) => {
 };
 
 /**
- * Actualizar telefono de auditoria con historial atomico.
- * PATCH /api/audits/:id/telefono
+ * Actualizar telefono de auditoría con historial atómico.
+ * PATCH /audits/:id/telefono
  */
 exports.updateAuditTelefono = async (req, res) => {
     try {
         const { id } = req.params;
         const userRole = normalizeAuditPhoneRole(req.user?.role);
         if (!["gerencia", "desarrollador"].includes(userRole)) {
-            return res.status(403).json({ message: "No autorizado para modificar telefono" });
+            return res.status(403).json({ message: "No autorizado para modificar teléfono" });
         }
 
         const protectedTelefonoUpdateFields = [
@@ -1361,29 +1866,20 @@ exports.updateAuditTelefono = async (req, res) => {
         const submittedSource = typeof req.body?.source === "string" ? req.body.source.trim() : "";
         if (eventType === "recovered") {
             if (!submittedReason) {
-                return res.status(400).json({ message: "reason es requerido para recuperaciones de telefono" });
+                return res.status(400).json({ message: "reason es requerido para recuperaciones de teléfono" });
             }
             if (!submittedSource) {
-                return res.status(400).json({ message: "source es requerido para recuperaciones de telefono" });
+                return res.status(400).json({ message: "source es requerido para recuperaciones de teléfono" });
             }
         }
 
         const oldAudit = await Audit.findById(id).select("telefono").lean();
         if (!oldAudit) {
-            return res.status(404).json({ message: "Auditoria no encontrada" });
+            return res.status(404).json({ message: "Auditoría no encontrada" });
         }
 
         if (oldAudit.telefono === normalizedTelefono) {
             const unchanged = await Audit.findById(id)
-                .populate({
-                    path: 'asesor',
-                    select: 'nombre name email numeroEquipo supervisor',
-                    populate: {
-                        path: 'supervisor',
-                        select: 'nombre name email numeroEquipo'
-                    }
-                })
-                .populate('auditor', 'nombre name email')
                 .populate('createdBy', 'nombre name email numeroEquipo')
                 .populate('telefonoHistory.changedBy', 'nombre name username email role');
             return res.json(unchanged);
@@ -1422,7 +1918,7 @@ exports.updateAuditTelefono = async (req, res) => {
             .populate('telefonoHistory.changedBy', 'nombre name username email role');
 
         if (!audit) {
-            return res.status(409).json({ message: "El telefono fue modificado por otra operacion. Recargue e intente nuevamente." });
+            return res.status(409).json({ message: "El teléfono fue modificado por otra operación. Recargue e intente nuevamente." });
         }
 
         try {
@@ -1432,17 +1928,13 @@ exports.updateAuditTelefono = async (req, res) => {
             logger.error("emitAuditUpdate telefono error", e);
         }
 
-        return res.json(audit);
+        res.json(serializeAuditForUser(audit, req.user));
     } catch (err) {
-        logger.error("Error actualizando telefono de auditoria:", err);
-        if (err.name === 'ValidationError') {
-            const messages = Object.values(err.errors).map(e => e.message);
-            return res.status(400).json({ message: messages.join(', ') });
-        }
+        logger.error("Error actualizando teléfono de auditoría:", err);
         if (err.name === 'CastError') {
-            return res.status(400).json({ message: `ID invalido para el campo ${err.path}` });
+            return res.status(400).json({ message: `ID inválido para el campo ${err.path}` });
         }
-        return res.status(500).json({ message: "Error al actualizar telefono", error: err.message });
+        res.status(500).json({ message: "Error al actualizar teléfono: " + err.message });
     }
 };
 
@@ -1454,10 +1946,19 @@ exports.getAuditByCuil = async (req, res) => {
         const { cuil } = req.params;
         if (!cuil) return res.status(400).json({ message: "CUIL requerido" });
 
-        const audit = await Audit.findOne({ cuil: cuil.trim() }).lean();
+        const cuilNormalized = normalizeAuditCuil(cuil);
+        const looseRegex = buildCuilLooseRegex(cuilNormalized);
+        const audit = await Audit.findOne({
+            $or: [
+                { cuilNormalized },
+                { cuil: cuil.trim() },
+                { cuil: cuilNormalized },
+                ...(looseRegex ? [{ cuil: looseRegex }] : [])
+            ]
+        }).lean();
         if (!audit) return res.status(404).json({ message: "No se encontró auditoría para ese CUIL" });
 
-        res.json(audit);
+        res.json(serializeAuditForUser(audit, req.user));
     } catch (err) {
         logger.error("getAuditByCuil error", err);
         res.status(500).json({ message: "Error interno al buscar por CUIL" });
@@ -1522,7 +2023,16 @@ exports.uploadMultimedia = async (req, res) => {
 
         // Si se completó justo ahora, actualizar estado y notificar
         if (wasIncomplete && isNowComplete && audit.status !== "Completa") {
+            const completeDate = getArgentinaDateKey(new Date());
             audit.status = "Completa";
+            audit.statusUpdatedAt = new Date();
+            audit.isComplete = true;
+            audit.completeDate = completeDate;
+            const monthKey = completeDate.slice(0, 7);
+            if (shouldCreditAuditorCompletion(audit, monthKey, req.user)) {
+                if (!Array.isArray(audit.completeHistory)) audit.completeHistory = [];
+                audit.completeHistory.push(buildCompleteHistoryEntry(completeDate, req.user));
+            }
         }
 
         await audit.save();
@@ -1553,6 +2063,7 @@ exports.uploadMultimedia = async (req, res) => {
             } catch (e) {
                 logger.error("Error enviando notificación de auditoría completa:", e);
             }
+            await maybeCreateDocumentProcessingCase(audit, req.user);
         }
 
         res.json(audit);
@@ -1624,7 +2135,25 @@ exports.deleteAudit = async (req, res) => {
         logger.error("Error enviando notificación de auditoría eliminada:", e);
     }
 
+    const deletedAuditCuil = audit.cuil;
+    const deletedAuditStatus = audit.status;
     await Audit.findByIdAndDelete(id);
+
+    if (deletedAuditStatus === "QR hecho" && deletedAuditCuil) {
+        try {
+            await recomputeCanSellByCuil(deletedAuditCuil, {
+                action: "deleteAudit",
+                auditId: id,
+                previousStatus: deletedAuditStatus,
+                newStatus: null
+            });
+        } catch (canSellErr) {
+            logger.error(
+                `[AUDIT-QR-HECHO] CanSell recomputation failed after delete | auditId=${id} | ` +
+                `cuil=${deletedAuditCuil} | error=${canSellErr.message}`
+            );
+        }
+    }
 
     // ✅ Emitir evento de eliminación para actualización en tiempo real
     try {
@@ -1642,6 +2171,13 @@ exports.deleteAudit = async (req, res) => {
  */
 exports.exportByDate = async (req, res) => {
     try {
+        const role = (req.user?.role || '').toLowerCase();
+        // Only Gerencia and Desarrollador can export from restricted Audit interfaces
+        // Encargado is explicitly excluded from export permissions
+        if (!['gerencia', 'desarrollador'].includes(role)) {
+            return res.status(403).json({ message: 'No tienes permisos para exportar esta información.' });
+        }
+
         const {
             date,
             dateFrom,
@@ -2067,6 +2603,8 @@ exports.bulkImportAudits = async (req, res) => {
             success: [],
             errors: []
         };
+        const qrHechoCuilsToRecompute = new Set();
+        const seenNormalizedCuils = new Set();
 
         const allUsers = await User.find({ active: { $ne: false } }).select('_id nombre email role numeroEquipo').lean();
 
@@ -2092,7 +2630,7 @@ exports.bulkImportAudits = async (req, res) => {
         const validStatuses = [
             "QR hecho", "QR hecho (Temporal)", "QR hecho pero pendiente de aprobación",
             "Hacer QR", "Aprobada", "Pendiente", "Cargada", "Falta clave", "AFIP",
-            "Rechazada", "Padrón", "Remuneración no válida", "Autovinculación",
+            "Rechazada", "Remuneración no válida", "Autovinculación",
             "En revisión", "Caída", "Completa"
         ];
         const validStatusesLower = validStatuses.map(s => s.toLowerCase());
@@ -2101,13 +2639,20 @@ exports.bulkImportAudits = async (req, res) => {
             const record = records[i];
             const rowNum = i + 2;
             const errors = [];
+            let normalizedTelefono = null;
 
             if (!record.nombre || !record.nombre.trim()) {
                 errors.push('Nombre es requerido');
             }
 
-            if (!record.telefono || !record.telefono.trim()) {
-                errors.push('Teléfono es requerido');
+            try {
+                normalizedTelefono = normalizeAuditPhone(record.telefono);
+            } catch (err) {
+                if (err instanceof AuditPhoneValidationError) {
+                    errors.push(err.message);
+                } else {
+                    throw err;
+                }
             }
 
             if (!record.obraSocialVendida || !record.obraSocialVendida.trim()) {
@@ -2153,10 +2698,21 @@ exports.bulkImportAudits = async (req, res) => {
                 }
             }
 
-            if (record.cuil && record.cuil.trim()) {
-                const existingAudit = await Audit.findOne({ cuil: record.cuil.trim(), status: { $ne: 'Rechazada' } });
+            const rowCuilNormalized = normalizeAuditCuil(record.cuil);
+            if (record.cuil && String(record.cuil).trim() && !isValidNormalizedCuil(rowCuilNormalized)) {
+                errors.push('CUIL inválido. Debe tener 11 dígitos.');
+            }
+
+            if (rowCuilNormalized) {
+                if (seenNormalizedCuils.has(rowCuilNormalized)) {
+                    errors.push('CUIL duplicado dentro del archivo importado.');
+                } else {
+                    seenNormalizedCuils.add(rowCuilNormalized);
+                }
+
+                const existingAudit = await findBlockingAuditByCuilNormalized(rowCuilNormalized);
                 if (existingAudit) {
-                    errors.push(`CUIL "${record.cuil}" ya existe en el sistema`);
+                    errors.push('CUIL duplicado: ya existe una venta/auditoría activa con este CUIL.');
                 }
             }
 
@@ -2179,8 +2735,9 @@ exports.bulkImportAudits = async (req, res) => {
 
             const auditData = {
                 nombre: (record.nombre || '').trim(),
-                cuil: (record.cuil || '').trim() || undefined,
-                telefono: (record.telefono || '').trim(),
+                cuil: record.cuil ? String(record.cuil).trim() : undefined,
+                cuilNormalized: rowCuilNormalized || undefined,
+                telefono: normalizedTelefono,
                 tipoVenta: (record.tipoVenta || 'alta').trim(),
                 obraSocialAnterior: (record.obraSocialAnterior || '').trim() || undefined,
                 obraSocialVendida: (record.obraSocialVendida || '').trim(),
@@ -2199,7 +2756,18 @@ exports.bulkImportAudits = async (req, res) => {
                     value: status,
                     updatedBy: req.user._id,
                     updatedAt: new Date()
-                }]
+                }],
+                telefonoHistory: [buildTelefonoHistoryEntry({
+                    previousValue: null,
+                    newValue: normalizedTelefono,
+                    user: req.user,
+                    endpoint: "POST /api/audits/bulk-import",
+                    sourceComponent: "bulk-import",
+                    requestId: getRequestId(req),
+                    reason: `Bulk import row ${rowNum}`,
+                    source: "record.telefono",
+                    eventType: "created",
+                })]
             };
 
             if (asesorUser) {
@@ -2233,6 +2801,9 @@ exports.bulkImportAudits = async (req, res) => {
             try {
                 const newAudit = new Audit(auditData);
                 await newAudit.save();
+                if (status === "QR hecho" && auditData.cuil) {
+                    qrHechoCuilsToRecompute.add(auditData.cuil);
+                }
                 results.success.push({ row: rowNum, _id: newAudit._id });
             } catch (err) {
                 results.errors.push({
@@ -2240,6 +2811,22 @@ exports.bulkImportAudits = async (req, res) => {
                     data: record,
                     reasons: [err.message]
                 });
+            }
+        }
+
+        for (const cuil of qrHechoCuilsToRecompute) {
+            try {
+                await recomputeCanSellByCuil(cuil, {
+                    action: "bulkImportAudits",
+                    auditId: "bulk-import",
+                    previousStatus: null,
+                    newStatus: "QR hecho"
+                });
+            } catch (canSellErr) {
+                logger.error(
+                    `[AUDIT-QR-HECHO] CanSell recomputation failed after bulk import | ` +
+                    `cuil=${cuil} | error=${canSellErr.message}`
+                );
             }
         }
 
@@ -2276,7 +2863,7 @@ exports.markRevision = async (req, res) => {
             update.lista_para_reventa = lista_para_reventa;
         }
 
-        const audit = await Audit.findByIdAndUpdate(id, update, { new: true })
+        const audit = await Audit.findByIdAndUpdate(id, update, { new: true, runValidators: true })
             .populate('asesor', 'nombre username numeroEquipo role')
             .populate('auditor', 'nombre username')
             .populate('administrador', 'nombre username')
@@ -2292,7 +2879,7 @@ exports.markRevision = async (req, res) => {
             io.emit('audit:updated', audit);
         }
 
-        res.json(audit);
+        res.json(serializeAuditForUser(audit, req.user));
     } catch (err) {
         logger.error("Error en markRevision:", err);
         res.status(500).json({ message: "Error al marcar revisión: " + err.message });
@@ -2344,8 +2931,10 @@ exports.getReventa = async (req, res) => {
 exports.exportReventa = async (req, res) => {
     try {
         const role = (req.user?.role || '').toLowerCase();
-        if (role !== 'encargado' && role !== 'gerencia') {
-            return res.status(403).json({ message: 'No autorizado para exportar' });
+        // Only Gerencia and Desarrollador can export from restricted Audit interfaces
+        // Encargado is explicitly excluded from export permissions
+        if (role !== 'gerencia' && role !== 'desarrollador') {
+            return res.status(403).json({ message: 'No tienes permisos para exportar esta información.' });
         }
 
         const audits = await Audit.find({ lista_para_reventa: true })
@@ -2420,14 +3009,14 @@ exports.toggleEnProceso = async (req, res) => {
 
         // Verificar que el usuario sea el administrativo asignado
         if (!audit.administrador || audit.administrador.toString() !== userId.toString()) {
-            return res.status(403).json({ 
-                message: 'Solo el administrativo asignado puede marcar esta venta como en proceso' 
+            return res.status(403).json({
+                message: 'Solo el administrativo asignado puede marcar esta venta como en proceso'
             });
         }
 
         // Toggle del estado
         const nuevoEstado = !audit.enProceso.activo;
-        
+
         audit.enProceso = {
             activo: nuevoEstado,
             procesadoPor: nuevoEstado ? userId : null,
@@ -2449,8 +3038,8 @@ exports.toggleEnProceso = async (req, res) => {
 
         logger.info(`[TOGGLE_EN_PROCESO] Audit ${id} ${nuevoEstado ? 'marcada' : 'desmarcada'} como en proceso por ${req.user.nombre}`);
 
-        res.json({ 
-            ok: true, 
+        res.json({
+            ok: true,
             audit: auditPopulated,
             message: nuevoEstado ? 'Venta marcada como en proceso' : 'Venta desmarcada'
         });

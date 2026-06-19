@@ -9,6 +9,7 @@
 const Affiliate = require("../models/Affiliate");
 const Audit = require("../models/Audit");
 const AffiliateExportConfig = require("../models/AffiliateExportConfig");
+const AffiliateContribution = require("../models/AffiliateContribution");
 const User = require("../models/User");
 const InternalMessage = require("../models/InternalMessage");
 const logger = require("../utils/logger");
@@ -135,6 +136,31 @@ async function cleanupSupervisorUnusedData(supervisorId, batchId) {
     } catch (error) {
         logger.error(`❌ Error en cleanupSupervisorUnusedData para supervisor ${supervisorId}:`, error);
         return { freshReturned: 0, reusableReturned: 0, error: error.message };
+    }
+}
+
+function formatPadron(padron) {
+    if (!padron || !padron.status) return 'Pendiente';
+    switch (padron.status) {
+        case 'not_found':
+        case 'found_expired':
+            return 'No';
+        case 'found_active': {
+            if (padron.periodoDesde) {
+                const [mm, yyyy] = String(padron.periodoDesde).split('/');
+                if (mm && yyyy) {
+                    const d = new Date(parseInt(yyyy), parseInt(mm) - 1 + 12, 1);
+                    const rel = `${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+                    return `S\u00ed (${rel})`;
+                }
+            }
+            return 'S\u00ed';
+        }
+        case 'captcha_failed':
+        case 'error':
+            return 'Error';
+        default:
+            return 'Pendiente';
     }
 }
 
@@ -1162,23 +1188,49 @@ async function getAdvancedDistribution(obraSocialConfig, usedIds = new Set(), us
  * Generar archivo XLSX con afiliados
  */
 async function generateXLSXFile(supervisor, affiliates, uploadDir) {
-    const formattedData = affiliates.map(aff => ({
-        telefono: aff.telefono1,
-        nombre: aff.nombre,
-        cuil: aff.cuil,
-        obra_social: aff.obraSocial,
-        localidad: aff.localidad
-    }));
+    // Enrich with contribution data (trim pagos, last period, padron)
+    const contribMap = {};
+    const validIds = affiliates
+        .filter(a => a._id && mongoose.Types.ObjectId.isValid(String(a._id)))
+        .map(a => a._id);
+    if (validIds.length) {
+        const contribs = await AffiliateContribution.find(
+            { affiliateId: { $in: validIds } },
+            { affiliateId: 1, lastContributionPeriod: 1, last3ClosedMonthsPaidCount: 1, padron: 1 }
+        ).lean();
+        for (const c of contribs) { contribMap[String(c.affiliateId)] = c; }
+    }
+
+    const formattedData = affiliates.map(aff => {
+        const contrib = contribMap[String(aff._id)];
+        return {
+            nombre: aff.nombre || '-',
+            cuil: aff.cuil || '-',
+            obraSocial: aff.obraSocial || '-',
+            telefono1: aff.telefono1 || '-',
+            telefono2: aff.telefono2 || '-',
+            localidad: aff.localidad || '-',
+            edad: aff.edad || '-',
+            trimPagos: contrib?.last3ClosedMonthsPaidCount != null ? contrib.last3ClosedMonthsPaidCount : '-',
+            ultimoPeriodo: contrib?.lastContributionPeriod || '-',
+            padron: formatPadron(contrib?.padron),
+        };
+    });
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Afiliados');
 
     worksheet.columns = [
-        { header: 'telefono', key: 'telefono', width: 15 },
-        { header: 'nombre', key: 'nombre', width: 30 },
-        { header: 'cuil', key: 'cuil', width: 15 },
-        { header: 'obra_social', key: 'obra_social', width: 25 },
-        { header: 'localidad', key: 'localidad', width: 20 }
+        { header: 'Nombre', key: 'nombre', width: 30 },
+        { header: 'CUIL', key: 'cuil', width: 15 },
+        { header: 'Obra Social', key: 'obraSocial', width: 25 },
+        { header: 'Teléfono 1', key: 'telefono1', width: 15 },
+        { header: 'Teléfono 2', key: 'telefono2', width: 15 },
+        { header: 'Localidad', key: 'localidad', width: 20 },
+        { header: 'Edad', key: 'edad', width: 8 },
+        { header: 'Trim. pagos', key: 'trimPagos', width: 12 },
+        { header: 'Últ. Período Aporte', key: 'ultimoPeriodo', width: 20 },
+        { header: 'Padrón', key: 'padron', width: 18 },
     ];
 
     formattedData.forEach(row => worksheet.addRow(row));
@@ -1283,6 +1335,77 @@ async function generateAndSendAffiliateCSVs() {
                 if (config.filters.minAge) baseQuery.edad.$gte = config.filters.minAge;
                 if (config.filters.maxAge) baseQuery.edad.$lte = config.filters.maxAge;
             }
+        }
+
+        // ── TASK 2: Filtro lastContributionPeriod = mes anterior ─────────────
+        {
+            const now = new Date();
+            const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            const mm = String(prevMonth.getMonth() + 1).padStart(2, '0');
+            const yyyy = prevMonth.getFullYear();
+            const prevMonthStr = `${mm}/${yyyy}`;
+            logger.info(`📅 Filtro periodo anterior: ${prevMonthStr}`);
+
+            const prevMonthContribs = await AffiliateContribution.find(
+                { lastContributionPeriod: prevMonthStr },
+                { affiliateId: 1 }
+            ).lean();
+            const prevMonthIds = prevMonthContribs.map(c => c.affiliateId);
+            baseQuery._id = { $in: prevMonthIds };
+            logger.info(`📅 Afiliados con periodo anterior (${prevMonthStr}): ${prevMonthIds.length}`);
+        }
+
+        // ── Filtro Padrón: excluir afiliados activos en padrón SSSalud ─────
+        {
+            const foundActiveContribs = await AffiliateContribution.find(
+                { "padron.status": "found_active" },
+                { affiliateId: 1 }
+            ).lean();
+            if (foundActiveContribs.length > 0) {
+                const foundActiveIds = foundActiveContribs.map(c => c.affiliateId);
+                const existingIn = baseQuery._id?.$in;
+                if (existingIn) {
+                    const excludeSet = new Set(foundActiveIds.map(String));
+                    baseQuery._id.$in = existingIn.filter(id => !excludeSet.has(String(id)));
+                } else {
+                    baseQuery._id = { $nin: foundActiveIds };
+                }
+                logger.info(`🚫 Excluidos del export ${foundActiveContribs.length} afiliados con padrón activo`);
+            }
+        }
+
+        // ── TASK 5: Filtro por fecha de carga (createdAt) ────────────────────
+        if (config.createdAtFilter && config.createdAtFilter !== 'sin_filtro') {
+            const now = new Date();
+            switch (config.createdAtFilter) {
+                case 'hoy': {
+                    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+                    baseQuery.createdAt = { $gte: start };
+                    break;
+                }
+                case 'ultimos_7': {
+                    const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                    baseQuery.createdAt = { $gte: start };
+                    break;
+                }
+                case 'ultimos_30': {
+                    const start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                    baseQuery.createdAt = { $gte: start };
+                    break;
+                }
+                case 'mes_actual': {
+                    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+                    baseQuery.createdAt = { $gte: start };
+                    break;
+                }
+                case 'mes_anterior': {
+                    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                    const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+                    baseQuery.createdAt = { $gte: start, $lte: end };
+                    break;
+                }
+            }
+            logger.info(`📅 Filtro fecha carga aplicado: ${config.createdAtFilter}`);
         }
 
         // ========== ENVÍO MASIVO ==========

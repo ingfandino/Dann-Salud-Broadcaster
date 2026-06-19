@@ -415,57 +415,6 @@ Una auditoría que estaba en la pestaña de <strong>Recuperación</strong> ha si
     }
 }
 
-// 🔔 8. Notificación cuando se liberan ventas de Padrón (SOLO RECUPERADORES)
-async function notifyPadronRelease({ count, month }) {
-    try {
-        // Obtener usuarios con rol 'recuperador'
-        const recuperadorUsers = await User.find({ role: "recuperador", active: true }).select("_id");
-
-        if (recuperadorUsers.length === 0) {
-            logger.warn("⚠️ No hay recuperadores activos para notificar liberación de Padrón");
-            return;
-        }
-
-        const recipients = recuperadorUsers.map(u => u._id);
-
-        // Formatear mes para mostrar (ej: "2027-02" -> "Febrero 2027")
-        const [year, monthNum] = month.split('-');
-        const monthNames = [
-            "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-            "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-        ];
-        const formattedMonth = `${monthNames[parseInt(monthNum, 10) - 1]} ${year}`;
-
-        const content = `
-📋 LIBERACIÓN DE PADRÓN - ${formattedMonth.toUpperCase()}
-
-Se han liberado registros del padrón para este mes:
-
-📊 Resumen:
-• Cantidad de registros liberados: ${count}
-• Mes de liberación: ${formattedMonth}
-• Fecha de proceso: ${new Date().toLocaleString("es-AR")}
-
-🎯 ACCIÓN REQUERIDA:
-Los registros ahora están disponibles en la interfaz "AFIP y Padrón" para ser procesados.
-
-Por favor, revisa la lista y contacta a los afiliados para concretar las ventas.
-
-Esta notificación es automática y no requiere respuesta.
-        `.trim();
-
-        await sendInternalNotification({
-            toUserIds: recipients,
-            subject: `📋 Liberación de Padrón - ${count} registro(s) disponibles`,
-            content
-        });
-
-        logger.info(`✅ Notificación de liberación de Padrón enviada a ${recipients.length} recuperador(es)`);
-    } catch (error) {
-        logger.error("❌ Error en notifyPadronRelease:", error);
-    }
-}
-
 module.exports = {
     sendInternalNotification,
     notifyAuditDeleted,
@@ -475,5 +424,4 @@ module.exports = {
     notifyAuditRecovery,
     notifyAuditQRDone,
     notifyRecoveryAuditCompleted,
-    notifyPadronRelease // ✅ Nueva función para liberación de Padrón
 };

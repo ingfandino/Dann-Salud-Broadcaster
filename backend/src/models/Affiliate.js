@@ -156,6 +156,11 @@ const affiliateSchema = new mongoose.Schema(
             default: false,
             index: true
         },
+        /** Fecha del último envío a un supervisor (para priorización de reutilizables: null = nunca usado → mayor prioridad) */
+        ultimoUso: {
+            type: Date,
+            index: true
+        },
 
         /* ========== ORIGEN Y TRAZABILIDAD ========== */
 

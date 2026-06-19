@@ -16,6 +16,30 @@ logger.info(`🔧 WhatsApp Unified - Usando: ${USE_BAILEYS ? 'Baileys' : 'whatsa
 
 let implementation;
 
+function getActiveEngine() {
+  if (USE_BAILEYS) return 'baileys';
+  return USE_MULTI ? 'whatsapp-webjs' : 'single-webjs';
+}
+
+function createWhatsAppError(message, code, status = 'failed') {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  error.engine = getActiveEngine();
+  return error;
+}
+
+function normalizeSendResult(result) {
+  const engine = getActiveEngine();
+  return {
+    success: true,
+    status: 'accepted',
+    engine,
+    messageId: result?.messageId || result?.id?._serialized || result?.id || result?.key?.id || null,
+    to: result?.to || null,
+  };
+}
+
 if (USE_BAILEYS) {
   // Usar Baileys
   implementation = require('./baileys/baileysManager');
@@ -44,10 +68,10 @@ if (USE_BAILEYS) {
       },
       sendMessage: async (userId, to, content) => {
         const client = singleClient.getWhatsappClient();
-        if (!client) throw new Error('Cliente no está listo');
+        if (!client) throw createWhatsAppError('Cliente no está listo', 'WHATSAPP_NOT_CONNECTED', 'not_connected');
         
-        await client.sendMessage(to, content);
-        return { success: true };
+        const result = await client.sendMessage(to, content);
+        return normalizeSendResult({ ...result, to });
       },
       logoutUser: async () => {
         await singleClient.forceNewSessionSingle();
@@ -116,16 +140,35 @@ function getCurrentQR(userId = null) {
  * Enviar mensaje
  */
 async function sendMessage(userId, to, content) {
+  if (!implementation || typeof implementation.sendMessage !== 'function') {
+    throw createWhatsAppError(
+      'El adaptador de WhatsApp activo no tiene metodo de envio disponible',
+      'WHATSAPP_SEND_UNAVAILABLE',
+      'unavailable'
+    );
+  }
+
   if (!USE_MULTI) {
-    // Single session, ignorar userId
-    return await implementation.sendMessage(null, to, content);
+    try {
+      const result = await implementation.sendMessage(null, to, content);
+      return normalizeSendResult(result);
+    } catch (error) {
+      if (error.code && error.status) throw error;
+      throw createWhatsAppError(error.message || 'Error enviando mensaje', 'WHATSAPP_SEND_FAILED', 'failed');
+    }
   }
   
   if (!userId) {
-    throw new Error('userId es requerido en modo multi-sesión');
+    throw createWhatsAppError('userId es requerido en modo multi-sesion', 'WHATSAPP_USER_REQUIRED', 'failed');
   }
   
-  return await implementation.sendMessage(userId, to, content);
+  try {
+    const result = await implementation.sendMessage(userId, to, content);
+    return normalizeSendResult(result);
+  } catch (error) {
+    if (error.code && error.status) throw error;
+    throw createWhatsAppError(error.message || 'Error enviando mensaje', 'WHATSAPP_SEND_FAILED', 'failed');
+  }
 }
 
 /**
@@ -246,6 +289,7 @@ module.exports = {
   // Metadatos
   USE_BAILEYS,
   USE_MULTI,
+  getActiveEngine,
   
   // Funciones principales
   getOrInitClient,

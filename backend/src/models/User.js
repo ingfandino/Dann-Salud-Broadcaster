@@ -52,8 +52,12 @@ const userSchema = new mongoose.Schema(
         /** Rol del usuario que determina sus permisos en el sistema */
         role: {
             type: String,
-            enum: ["administrativo", "supervisor", "asesor", "auditor", "gerencia", "RR.HH", "recuperador", "encargado", "independiente", "desarrollador"],
+            enum: ["administrativo", "supervisor", "asesor", "auditor", "gerencia", "RR.HH", "recuperador", "encargado", "independiente", "desarrollador", "obra_social"],
             default: "asesor",
+        },
+        obraSocialId: {
+            type: mongoose.Schema.Types.ObjectId,
+            default: null,
         },
         /** Referencia al supervisor asignado (para asesores) */
         supervisor: {

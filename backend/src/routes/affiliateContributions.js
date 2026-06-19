@@ -9,6 +9,9 @@ router.use(requireAuth);
 // POST /api/affiliate-contributions/run — disparo manual (solo Gerencia)
 router.post("/run", permit("gerencia"), ctrl.runVerification);
 
+// GET /api/affiliate-contributions/active-task — tarea activa con progreso en vivo (solo Gerencia)
+router.get("/active-task", permit("gerencia"), ctrl.getActiveTask);
+
 // GET /api/affiliate-contributions/stats — resumen de estados (solo Gerencia)
 router.get("/stats", permit("gerencia"), ctrl.getStats);
 

@@ -25,12 +25,11 @@ const ESTADOS_ELEGIBLES_EVIDENCIA = [
     'AFIP',
     'Baja laboral con nueva alta',
     'Baja laboral sin nueva alta',
-    'Padrón',
     'En revisión',
     'Remuneración no válida',
     'Cargada',
     'Aprobada',
-    'Aprobada, pero no reconoce clave',
+    'Aprobada pero no reconoce clave', // ✅ Canonical: no comma
     'Rehacer vídeo',
     'Falta documentación',
     'Falta clave',

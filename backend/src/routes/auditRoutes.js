@@ -33,10 +33,10 @@ router.post('/bulk-import', requireAuth, permit('gerencia'), auditCtrl.bulkImpor
 // 📌 CRUD y listados
 router.post('/', requireAuth, auditCtrl.createAudit);
 router.get('/', requireAuth, auditCtrl.getAuditsByDate);
+router.patch('/:id/telefono', requireAuth, auditCtrl.updateAuditTelefono);
 router.patch('/:id/status', requireAuth, auditCtrl.updateStatus);
 router.patch('/:id/revision', requireAuth, auditCtrl.markRevision);
 router.patch('/:id/toggle-en-proceso', requireAuth, auditCtrl.toggleEnProceso);
-router.patch('/:id/telefono', requireAuth, auditCtrl.updateAuditTelefono);
 router.patch('/:id', requireAuth, auditCtrl.updateAudit);
 // ⚠️ DELETE: rol "encargado" explícitamente prohibido
 router.delete('/:id', requireAuth, (req, res, next) => {

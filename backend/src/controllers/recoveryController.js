@@ -10,6 +10,41 @@
 const Audit = require('../models/Audit');
 const { permit } = require('../middlewares/roleMiddleware');
 const logger = require('../utils/logger');
+const {
+    normalizeCuil,
+    isValidNormalizedCuil,
+    findBlockingAuditByCuilNormalized,
+    buildDuplicateCuilResponse,
+} = require('../utils/auditDuplicateUtils');
+const {
+    AuditPhoneValidationError,
+    normalizeAuditPhone,
+} = require('../utils/auditPhoneValidation');
+const { maskAuditPhoneIfNeeded } = require('../utils/auditPhoneVisibility');
+
+function serializeAuditForUser(audit, user) {
+    if (!audit) return audit;
+    const plainAudit = audit.toObject ? audit.toObject() : audit;
+    return maskAuditPhoneIfNeeded(plainAudit, user);
+}
+
+function buildTelefonoCreatedHistory(telefono, req) {
+    return {
+        previousValue: null,
+        newValue: telefono,
+        changedAt: new Date(),
+        changedBy: req.user?._id || null,
+        changedByName: req.user?.nombre || req.user?.name || req.user?.username || "",
+        changedByEmail: req.user?.email || req.user?.username || "",
+        changedByRole: req.user?.role || "",
+        endpoint: "POST /api/recovery",
+        sourceComponent: "recovery-create",
+        requestId: req.get?.("x-request-id") || req.id || "",
+        reason: "Recovery audit created",
+        source: "request.body.telefono",
+        eventType: "created",
+    };
+}
 
 /** Lista auditorías elegibles para recovery */
 exports.list = async (req, res) => {
@@ -87,7 +122,7 @@ exports.list = async (req, res) => {
             console.log('   - Supervisor numeroEquipo:', audits[0].asesor?.supervisor?.numeroEquipo);
         }
 
-        res.json(audits);
+        res.json(audits.map(audit => serializeAuditForUser(audit, req.user)));
     } catch (err) {
         logger.error('recovery.list error', err);
         res.status(500).json({ message: 'Error interno' });
@@ -101,11 +136,31 @@ exports.create = async (req, res) => {
         if (!nombre || !cuil || !telefono || !obraSocialVendida) {
             return res.status(400).json({ message: 'Campos requeridos: nombre, cuil, telefono, obraSocialVendida' });
         }
+        let normalizedTelefono;
+        try {
+            normalizedTelefono = normalizeAuditPhone(telefono);
+        } catch (err) {
+            if (err instanceof AuditPhoneValidationError) {
+                return res.status(400).json({ message: err.message });
+            }
+            throw err;
+        }
+
+        const cuilNormalized = normalizeCuil(cuil);
+        if (!isValidNormalizedCuil(cuilNormalized)) {
+            return res.status(400).json({ message: 'CUIL inválido. Debe tener 11 dígitos.' });
+        }
+
+        const duplicate = await findBlockingAuditByCuilNormalized(cuilNormalized);
+        if (duplicate) {
+            return res.status(409).json(buildDuplicateCuilResponse(duplicate));
+        }
 
         const audit = new Audit({
             nombre,
-            cuil,
-            telefono,
+            cuil: String(cuil).trim(),
+            cuilNormalized,
+            telefono: normalizedTelefono,
             obraSocialVendida,
             tipoVenta: 'alta',
             scheduledAt: new Date(),
@@ -115,14 +170,13 @@ exports.create = async (req, res) => {
             statusUpdatedAt: new Date(),
             recoveryEligibleAt: new Date(),
             isRecovery: true,
-            datosExtra: datosExtra || ''
+            datosExtra: datosExtra || '',
+            telefonoHistory: [buildTelefonoCreatedHistory(normalizedTelefono, req)]
         });
         await audit.save();
-        res.status(201).json(audit);
+        res.status(201).json(serializeAuditForUser(audit, req.user));
     } catch (err) {
         logger.error('recovery.create error', err);
         res.status(500).json({ message: 'Error interno' });
     }
 };
-
-

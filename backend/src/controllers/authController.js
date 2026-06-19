@@ -12,7 +12,7 @@
 const User = require("../models/User");
 const { envConfig } = require("../config");
 const { createUserValidator } = require("../validators/userValidator");
-const logger = require("../utils/logger");
+const logger = require("../utils/logger").getLogger("session");
 const { handleControllerError } = require("../utils/controllerUtils");
 const { signToken } = require("../utils/jwt");
 const crypto = require("crypto");
@@ -194,6 +194,7 @@ exports.login = async (req, res) => {
         email: user.email,
         role: user.role,
         numeroEquipo: user.numeroEquipo, // ✅ Agregar numeroEquipo
+        obraSocialId: user.obraSocialId || null,
         esResponsableDeReferidos: user.esResponsableDeReferidos || false,
         supervisor: user.supervisor || null,
         active: user.active,
@@ -230,6 +231,7 @@ exports.me = async (req, res) => {
         email: user.email,
         role: user.role,
         numeroEquipo: user.numeroEquipo, // ✅ Agregar numeroEquipo
+        obraSocialId: user.obraSocialId || null,
         esResponsableDeReferidos: user.esResponsableDeReferidos || false,
         supervisor: user.supervisor || null,
         active: user.active,

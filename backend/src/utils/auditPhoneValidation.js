@@ -30,7 +30,7 @@ function normalizeAuditPhone(value, options = {}) {
 
     const normalized = raw.replace(/\D/g, "");
     if (normalized.length !== 10) {
-        throw new AuditPhoneValidationError(`${fieldName} debe tener exactamente 10 digitos`);
+        throw new AuditPhoneValidationError(`${fieldName} debe tener exactamente 10 dígitos`);
     }
 
     return normalized;

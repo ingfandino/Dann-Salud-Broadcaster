@@ -43,11 +43,24 @@ function initSocket(server, app = null, allowedOrigins = []) {
     };
 
     ioInstance = new Server(server, {
-        pingTimeout: 45000,
+        pingTimeout: 60000,
         pingInterval: 25000,
+        // FIX: Explicit transports for better stability (WebSocket + polling fallback)
+        transports: ["websocket", "polling"],
+        // FIX: Allow upgrade failures to gracefully fall back to polling
+        allowUpgrades: true,
+        upgradeTimeout: 10000,
+        // FIX: CORS configuration with better null/undefined origin handling
         cors: {
             origin: (origin, cb) => {
+                // Permitir conexiones sin origen (Postman, curl, algunos proxies)
+                if (!origin) return cb(null, true);
                 if (matchOrigin(origin)) return cb(null, true);
+                // Log para debug pero permitir en desarrollo
+                if (process.env.NODE_ENV === "development") {
+                    logger.warn(`Socket.IO CORS: origen no permitido pero permitido en dev: ${origin}`);
+                    return cb(null, true);
+                }
                 cb(new Error("Socket.IO CORS: origin not allowed"));
             },
             methods: ["GET", "POST"],
@@ -334,9 +347,14 @@ function getIO() {
  */
 function safeEmit(room, event, payload) {
     try {
-        getIO().to(room).emit(event, payload);
+        // DIAGNOSTIC FIX: Check ioInstance directly before calling getIO()
+        if (!ioInstance) {
+            logger.debug(`[SOCKET] Skip emit to ${room}: Socket.IO not initialized`);
+            return;
+        }
+        ioInstance.to(room).emit(event, payload);
     } catch (err) {
-        logger.warn(`⚠️ No se pudo emitir a ${room}: ${err.message}`);
+        logger.warn(`⚠️ [SOCKET] No se pudo emitir a ${room}: ${err.message}`);
     }
 }
 

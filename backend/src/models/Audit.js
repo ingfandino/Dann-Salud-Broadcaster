@@ -16,6 +16,7 @@
 
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
+const { normalizeCuil } = require('../utils/cuilUtils');
 const { normalizeAuditPhone } = require('../utils/auditPhoneValidation');
 
 function setAuditTelefono(value) {
@@ -46,14 +47,16 @@ const AuditSchema = new Schema({
     nombre: { type: String, required: true },
     /** CUIL del afiliado (opcional) */
     cuil: { type: String, required: false },
-    /** Teléfono de contacto */
+    /** CUIL canonico solo digitos para validacion de duplicados */
+    cuilNormalized: { type: String, trim: true, index: true },
+    /** Telefono de contacto */
     telefono: {
         type: String,
         required: true,
         set: setAuditTelefono,
         validate: {
             validator: validateAuditTelefono,
-            message: 'telefono debe tener exactamente 10 digitos y no puede estar vacio ni enmascarado'
+            message: 'telefono debe tener exactamente 10 dígitos y no puede estar vacío ni enmascarado'
         }
     },
     /** Tipo de operación: alta nueva o cambio de obra social */
@@ -61,7 +64,7 @@ const AuditSchema = new Schema({
     /** Obra social de la que proviene (si es cambio) */
     obraSocialAnterior: { type: String },
     /** Obra social a la que se afilia */
-    obraSocialVendida: { type: String, enum: ['Binimed', 'Meplife', 'TURF'], required: true },
+    obraSocialVendida: { type: String, enum: ['Binimed', 'Meplife', 'TURF', 'MyC Salud'], required: true },
 
     /* ========== PROGRAMACIÓN Y ASIGNACIONES ========== */
 
@@ -88,6 +91,7 @@ const AuditSchema = new Schema({
     statusUpdatedAt: { type: Date, default: Date.now },
     /** Indica si la auditoría está completa */
     isComplete: { type: Boolean, default: false },
+    completeDate: { type: String, default: null },
     /** Fecha de creación del QR (si aplica) */
     fechaCreacionQR: { type: Date, default: null },
     /** Flag para notificaciones de seguimiento 12h */
@@ -107,7 +111,7 @@ const AuditSchema = new Schema({
     recoveryDeletedAt: { type: Date, default: null },
     /** Indica si fue recuperada exitosamente (solo Gerencia) */
     isRecuperada: { type: Boolean, default: false },
-    /** Indica si la venta está disponible para venta (usado en AFIP/Padrón) */
+    /** Indica si la venta está disponible para venta (usado en AFIP) */
     disponibleParaVenta: { type: Boolean, default: false },
     /** Indica si es venta referida (supervisor puede ser Gerencia) */
     isReferido: { type: Boolean, default: false },
@@ -120,6 +124,20 @@ const AuditSchema = new Schema({
     liquidacionMonth: { type: String, default: null },
     /** Fecha de eliminación lógica de liquidación */
     liquidacionDeletedAt: { type: Date, default: null },
+
+    /** 
+     * Excepción de liquidación para ventas Binimed en estado Cargada
+     * Permite incluir estas ventas en liquidación del último día laborable del mes
+     * y marca el período para prevenir doble liquidación
+     */
+    binimedLiquidationException: {
+        applied: { type: Boolean, default: false },
+        period: { type: String, default: null },
+        appliedAt: { type: Date, default: null },
+        appliedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+        source: { type: String, default: 'liquidation' },
+        reason: { type: String, default: 'BINIMED_MONTH_END_CARGADA' }
+    },
 
     /* ========== ARCHIVOS MULTIMEDIA ========== */
 
@@ -151,10 +169,10 @@ const AuditSchema = new Schema({
     observacionPrivada: { type: String, default: "" },
     /** Clave del afiliado */
     clave: { type: String, default: "" },
+    /** Indica si es autovinculación (excepción para clave en QR hecho) */
+    esAutovinculacion: { type: Boolean, default: false },
     /** Email del afiliado */
     email: { type: String, default: "" },
-    /** Mes de liberación del padrón (si estado es Padrón) */
-    mesPadron: { type: String, default: null },
     /** Estado específico de Registro de Ventas (sin mapear) */
     statusAdministrativo: { type: String, default: null },
     /** Indica si el registro está siendo procesado por un administrativo */
@@ -169,25 +187,6 @@ const AuditSchema = new Schema({
             value: { type: String, default: "" },
             updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
             updatedAt: { type: Date, default: Date.now }
-        }],
-        default: []
-    },
-    /** Historial controlado de cambios de telefono */
-    telefonoHistory: {
-        type: [{
-            previousValue: { type: String, default: null },
-            newValue: { type: String, default: null },
-            changedAt: { type: Date, default: Date.now },
-            changedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
-            changedByName: { type: String, default: "" },
-            changedByEmail: { type: String, default: "" },
-            changedByRole: { type: String, default: "" },
-            endpoint: { type: String, default: "" },
-            sourceComponent: { type: String, default: "" },
-            requestId: { type: String, default: "" },
-            reason: { type: String, default: "" },
-            source: { type: String, default: "" },
-            eventType: { type: String, enum: ['created', 'updated', 'recovered'], default: 'updated' }
         }],
         default: []
     },
@@ -235,6 +234,35 @@ const AuditSchema = new Schema({
         default: []
     },
 
+    completeHistory: {
+        type: [{
+            monthKey: { type: String, required: true },
+            completeDate: { type: String, required: true },
+            completedByUserId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+            completedByRole: { type: String, required: true }
+        }],
+        default: []
+    },
+
+    telefonoHistory: {
+        type: [{
+            previousValue: { type: String, default: null },
+            newValue: { type: String, default: null },
+            changedAt: { type: Date, default: Date.now },
+            changedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+            changedByName: { type: String, default: "" },
+            changedByEmail: { type: String, default: "" },
+            changedByRole: { type: String, default: "" },
+            endpoint: { type: String, default: "" },
+            sourceComponent: { type: String, default: "" },
+            requestId: { type: String, default: "" },
+            reason: { type: String, default: "" },
+            source: { type: String, default: "" },
+            eventType: { type: String, enum: ["created", "updated", "recovered"], default: "updated" }
+        }],
+        default: []
+    },
+
     /* ========== REVISIÓN Y REVENTA ========== */
 
     /** Fecha de la última revisión realizada */
@@ -257,6 +285,13 @@ const AuditSchema = new Schema({
 
     /** Fecha de creación del registro */
     createdAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+AuditSchema.pre('validate', function (next) {
+    if (this.isNew || this.isModified('telefono')) {
+        this.telefono = setAuditTelefono(this.telefono);
+    }
+    next();
 });
 
 /**
@@ -269,6 +304,10 @@ const AuditSchema = new Schema({
  */
 AuditSchema.pre('save', async function (next) {
     try {
+        if (this.isNew || this.isModified('cuil')) {
+            this.cuilNormalized = normalizeCuil(this.cuil);
+        }
+
         // ✅ FIX: Si es venta referida y ya tiene supervisorSnapshot, respetar la asignación manual
         if (this.isReferido && this.supervisorSnapshot && this.supervisorSnapshot._id) {
             const logger = require('../utils/logger');
@@ -317,5 +356,10 @@ AuditSchema.pre('save', async function (next) {
 });
 
 AuditSchema.index({ 'statusHistory.value': 1 });
+AuditSchema.index({ 'completeHistory.monthKey': 1, 'completeHistory.completedByUserId': 1 });
+// Futuro hardening luego de resolver duplicados existentes:
+// una constraint DB para "solo un CUIL activo" requiere un campo canonico booleano
+// (por ejemplo isActiveForCuilUniqueness), porque un partial index no puede
+// expresar con seguridad todas las transiciones de negocio basadas en status.
 
 module.exports = mongoose.model('Audit', AuditSchema);

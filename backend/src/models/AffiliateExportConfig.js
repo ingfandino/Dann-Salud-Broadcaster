@@ -110,6 +110,13 @@ const affiliateExportConfigSchema = new mongoose.Schema(
             skipDate: Date
         },
 
+        /** Filtro de fecha de carga (createdAt) para selección de afiliados */
+        createdAtFilter: {
+            type: String,
+            enum: ['sin_filtro', 'hoy', 'ultimos_7', 'ultimos_30', 'mes_actual', 'mes_anterior'],
+            default: 'sin_filtro'
+        },
+
         /** Estado activo de la configuración */
         active: { type: Boolean, default: true },
         /** Fecha de última ejecución */

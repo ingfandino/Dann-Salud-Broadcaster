@@ -81,7 +81,9 @@ describe("Phase 6E.4D micro-fixes", () => {
 
         test("unrelated supervisor remains masked", () => {
             const masked = maskAuditPhoneIfNeeded(sale, unrelatedSupervisor, false);
-            expect(masked.telefono).toBe("***");
+            expect(masked.telefono).toBeNull();
+            expect(masked.telefonoMasked).toBe("***");
+            expect(masked.canViewTelefono).toBe(false);
         });
 
         test("same display name is not enough without matching ID", () => {

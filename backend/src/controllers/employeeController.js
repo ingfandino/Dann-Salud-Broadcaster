@@ -755,3 +755,19 @@ exports.getEmployeeStats = async (req, res) => {
         res.status(500).json({ message: 'Error al obtener estadísticas del empleado' });
     }
 };
+
+/**
+ * Obtener fecha de ingreso de un empleado por userId (para Liquidación)
+ */
+exports.getIngresoByUserId = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const employee = await Employee.findOne({ userId }).select('fechaIngreso');
+
+        res.json({ fechaIngreso: employee?.fechaIngreso || null });
+    } catch (error) {
+        console.error('Error al obtener fecha de ingreso:', error);
+        res.status(500).json({ message: 'Error interno' });
+    }
+};

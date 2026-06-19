@@ -177,7 +177,8 @@ exports.deleteTemplate = async (req, res) => {
 exports.sendTemplate = async (req, res) => {
     try {
         const { id } = req.params;
-        const { contacts: contactIds, createdBy } = req.body;
+        const { contacts: contactIds } = req.body;
+        const senderUserId = req.user?._id;
 
         // 1. Buscar plantilla
         const template = await Template.findById(id);
@@ -202,11 +203,27 @@ exports.sendTemplate = async (req, res) => {
             rendered = parseSpintax(rendered);
 
             try {
-                const result = await sendSingleMessage(contact.telefono, rendered);
-                if (result.success) {
-                    results.push({ contact: contact._id, telefono: contact.telefono, status: "exitoso" });
+                const result = await sendSingleMessage(senderUserId, contact.telefono, rendered, {
+                    flow: 'template',
+                    sourceId: template._id
+                });
+                if (result.success && result.sendStatus === "accepted") {
+                    results.push({
+                        contact: contact._id,
+                        telefono: contact.telefono,
+                        status: "accepted",
+                        sendStatus: "accepted",
+                        engine: result.engine,
+                        messageId: result.messageId || null
+                    });
                 } else {
-                    results.push({ contact: contact._id, status: "fallido", error: result.error });
+                    results.push({
+                        contact: contact._id,
+                        status: "fallido",
+                        sendStatus: result.sendStatus || "failed",
+                        code: result.code || "WHATSAPP_SEND_FAILED",
+                        error: result.error || result.message
+                    });
                 }
             } catch (err) {
                 results.push({ contact: contact._id, status: "fallido", error: err.message });

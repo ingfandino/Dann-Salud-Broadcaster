@@ -19,13 +19,22 @@ function errorHandler(err, req, res, next) {
 
     const traceId = crypto.randomUUID();
 
-    logger.error(`[${new Date().toISOString()}] [${traceId}] Error:`, {
+    // DIAGNOSTIC: High-signal logging for cascade failure detection
+    const isMongoError = err.name === 'MongoServerError' || err.name === 'MongoNetworkError' || err.name === 'MongooseError';
+    const isFirst500InCascade = status === 500 && !res.headersSent;
+    
+    logger.error(`[DIAGNOSTIC] [${traceId}] ${isFirst500InCascade ? '[FIRST-500] ' : ''}${isMongoError ? '[MONGO-ERROR] ' : ''}Error:`, {
         message: err.message,
+        name: err.name,
+        code: err.code,
+        status,
         stack: err.stack,
         route: req.originalUrl,
         method: req.method,
         user: req.user ? (req.user.nombre || req.user.name || req.user.email || req.user._id) : 'no autenticado',
-        ip: req.ip
+        ip: req.ip,
+        headersSent: res.headersSent,
+        timestamp: new Date().toISOString()
     });
     
     // Errores de validación de express-validator

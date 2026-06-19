@@ -42,14 +42,23 @@ const evidenciaRoutes = require("./evidencias");
 const expenseRoutes = require("./expenses");
 const privilegeRoutes = require("./privilegeRoutes");
 const affiliateContributionRoutes = require("./affiliateContributions");
+const nativeBotRoutes = require("./nativeBot");
+const sssaludRoutes   = require("./sssalud");
+const dateasBotRoutes = require("./dateasBot");
+const documentProcessingRoutes = require("./documentProcessingRoutes");
+const documentProcessingCaseRoutes = require("./documentProcessingCaseRoutes");
+const obraSocialConfigRoutes = require("./obraSocialConfigRoutes");
+const dataCheckRoutes = require("./dataCheckRoutes");
+const adminCheckRoutes = require("./adminCheckRoutes");
 const videoAuditRoutes = require("./videoAuditRoutes");
 const socialHealthListRoutes = require("./socialHealthListRoutes");
 
 // 📌 Rutas públicas
 router.use("/auth", authRoutes);
 
-// VideoAudit has public room routes under /public/:token, so its router applies
-// authentication internally after those public endpoints.
+// 📌 Rutas con manejo mixto de auth (sub-router aplica requireAuth internamente)
+// video-audits tiene rutas públicas (/public/:token) que no requieren JWT,
+// por lo que se monta ANTES del middleware global de autenticación.
 router.use("/video-audits", videoAuditRoutes);
 
 // 📌 Middleware para proteger el resto
@@ -107,6 +116,14 @@ router.use("/evidencias", evidenciaRoutes);
 router.use("/expenses", expenseRoutes);
 router.use("/privileges", privilegeRoutes);
 router.use("/affiliate-contributions", affiliateContributionRoutes);
+router.use("/native-bot", nativeBotRoutes);
+router.use("/sssalud",    sssaludRoutes);
+router.use("/dateas-bot", dateasBotRoutes);
+router.use("/document-processing", documentProcessingRoutes);
+router.use("/document-processing", documentProcessingCaseRoutes);
+router.use("/obra-social-config", obraSocialConfigRoutes);
+router.use("/data-check", dataCheckRoutes);
+router.use("/admin-check", adminCheckRoutes);
 router.use("/social-health-list", socialHealthListRoutes);
 
 module.exports = router;

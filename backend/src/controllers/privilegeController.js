@@ -18,6 +18,7 @@ const PLATFORM_STRUCTURE = [
         label: "Herramientas de contacto",
         interfaces: [
             { id: "contactar-afiliados-administracion", label: "Administración de datos" },
+            { id: "chequeo-datos",                      label: "Chequeo de datos" },
             { id: "contactar-afiliados-datos-dia",      label: "Datos del día" },
             { id: "mensajeria-masiva",                  label: "Mensajería Masiva" },
             { id: "reportes-globales",                  label: "Reportes de Mensajería" },
@@ -47,7 +48,6 @@ const PLATFORM_STRUCTURE = [
             { id: "auditorias-rechazada",    label: "Rechazada" },
             { id: "auditorias-crear-turno",  label: "Crear turno" },
             { id: "auditorias-liquidacion",  label: "Liquidación" },
-            { id: "auditorias-afip-padron",  label: "AFIP y Padrón" },
             { id: "auditorias-reventa",      label: "Disponibles para reventa" },
         ],
     },
@@ -57,6 +57,14 @@ const PLATFORM_STRUCTURE = [
         interfaces: [
             { id: "administracion-registro-ventas", label: "Registro de ventas" },
             { id: "administracion-evidencias",      label: "Evidencias" },
+            { id: "procesamiento-documental",       label: "Procesamiento documental" },
+        ],
+    },
+    {
+        id: "obras-sociales",
+        label: "Obras Sociales",
+        interfaces: [
+            { id: "obras-sociales", label: "Obras Sociales" },
         ],
     },
     {
@@ -86,6 +94,7 @@ const PLATFORM_STRUCTURE = [
             { id: "configuracion-privilegios",     label: "Control de privilegios" },
             { id: "gestion-usuarios",              label: "Gestión de Usuarios" },
             { id: "palabras-prohibidas-mensajeria", label: "Palabras prohibidas" },
+            { id: "configuracion-procesamiento-documental", label: "Configuración del flujo documental" },
         ],
     },
 ];
@@ -101,6 +110,7 @@ const PLATFORM_ROLES = [
     "recuperador",
     "encargado",
     "independiente",
+    "obra_social",
 ];
 
 /** Devuelve la estructura completa de módulos e interfaces */
