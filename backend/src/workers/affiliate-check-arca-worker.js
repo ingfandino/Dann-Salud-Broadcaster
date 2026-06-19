@@ -2,6 +2,10 @@
 
 require("dotenv").config();
 
+if (!process.env.PLAYWRIGHT_HEADLESS) {
+    process.env.PLAYWRIGHT_HEADLESS = "true";
+}
+
 const connectDB = require("../config/db");
 const logger = require("../utils/logger").getLogger("affiliate-check-arca");
 const { BrowserSession } = require("../services/contributionScraper.service");

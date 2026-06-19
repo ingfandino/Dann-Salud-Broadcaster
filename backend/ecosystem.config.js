@@ -29,7 +29,8 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PM2_PROCESS_NAME: 'affiliate-check-arca-worker',
-        AFFILIATE_CHECK_ARCA_WORKER_ENABLED: 'true'
+        AFFILIATE_CHECK_ARCA_WORKER_ENABLED: 'true',
+        PLAYWRIGHT_HEADLESS: 'true'
       },
       error_file: './logs/affiliate-check-arca-err.log',
       out_file: './logs/affiliate-check-arca-out.log',
