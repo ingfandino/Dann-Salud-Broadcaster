@@ -19,6 +19,12 @@ import { useSocialHealthList } from "@/hooks/useSocialHealthList"
 import { SearchableSocialHealthSelect } from "./searchable-social-health-select"
 import { CelebrationAnimation } from "./celebration-animation"
 import { VideoAuditPanel } from "./video-audit-panel"
+const {
+    canEditExistingAuditPhone,
+    getEditableAuditPhoneInitialValue,
+    hasAuditPhoneChanged,
+    buildAuditGenericUpdatePayload,
+} = require("@/lib/auditPhonePermissions")
 
 /* Estados que disparan la animación de celebración */
 const CELEBRATION_STATUSES = ["Completa", "QR hecho"]
@@ -169,6 +175,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
     const isIndependiente = userRole === 'independiente'; // ✅ NUEVO: Rol Independiente
     const isQRHecho = audit.status?.toLowerCase() === 'qr hecho';
     const isLockedByQR = isQRHecho && !isAdmin && !isGerencia;
+    const canEditAuditPhone = canEditExistingAuditPhone(userRole);
 
     // ✅ Recuperador tiene acceso SOLO LECTURA
     // Independiente tiene permisos de edición como Auditor
@@ -248,7 +255,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
     const [form, setForm] = useState({
         nombre: audit.nombre || "",
         cuil: audit.cuil || "",
-        telefono: audit.telefono || "",
+        telefono: canEditAuditPhone ? getEditableAuditPhoneInitialValue(audit, userRole) : (audit.telefono || ""),
         obraSocialAnterior: audit.obraSocialAnterior || "",
         obraSocialVendida: audit.obraSocialVendida || "",
         status: audit.status || "",
@@ -532,11 +539,11 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
         try {
             setLoading(true)
 
-            const payload: any = {
+            const payload: any = buildAuditGenericUpdatePayload({
                 ...form,
                 scheduledAt: `${form.fecha}T${form.hora}:00`,
                 fechaCreacionQR: form.fechaCreacionQR ? new Date(form.fechaCreacionQR).toISOString() : null
-            }
+            })
 
             // Handle empty strings by converting to null
             if (!payload.asesor) payload.asesor = null
@@ -611,6 +618,16 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
             }
 
             const response = await api.audits.update(audit._id, payload)
+            let savedAudit = response.data
+            if (canEditAuditPhone && hasAuditPhoneChanged(audit, form.telefono)) {
+                const phoneResponse = await api.audits.updateTelefono(audit._id, {
+                    telefono: form.telefono,
+                    sourceComponent: "audit-edit-modal",
+                    reason: "Audit edit modal phone update",
+                    source: "form.telefono",
+                })
+                savedAudit = phoneResponse.data
+            }
 
             // ✅ Verificar si el estado cambió a uno de celebración
             const previousStatus = audit.status
@@ -627,12 +644,12 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                 console.log("[AuditEditModal] 🎉 Activando celebración!")
                 toast.success("🎉 ¡Excelente! Venta completada")
                 // Guardar referencia a los datos para usarlos después de la animación
-                pendingResponseRef.current = response.data
+                pendingResponseRef.current = savedAudit
                 setShowCelebration(true)
                 // NO llamar onSave/onClose aquí - se hará en onComplete de la animación
             } else {
                 toast.success("Auditoría actualizada")
-                onSave(response.data)
+                onSave(savedAudit)
                 onClose()
             }
         } catch (error: any) {
@@ -783,13 +800,14 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                         </label>
                                         <input
                                             name="telefono"
-                                            value={belongsToUserSupervisor ? form.telefono : displayPhone}
+                                            value={canEditAuditPhone ? form.telefono : displayPhone}
                                             onChange={handleChange}
-                                            readOnly={!belongsToUserSupervisor}
+                                            readOnly={!canEditAuditPhone}
+                                            disabled={!canEditAuditPhone}
                                             
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                !belongsToUserSupervisor && "text-gray-400 select-none cursor-not-allowed",
+                                                !canEditAuditPhone && "text-gray-400 select-none cursor-not-allowed",
                                                                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         />

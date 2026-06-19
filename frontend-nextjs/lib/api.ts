@@ -92,6 +92,7 @@ export const api = {
         getById: (id: string) => apiClient.get(`/audits/${id}`),
         create: (data: any) => apiClient.post('/audits', data),
         update: (id: string, data: any) => apiClient.patch(`/audits/${id}`, data),
+        updateTelefono: (id: string, data: any) => apiClient.patch(`/audits/${id}/telefono`, data),
         updateStatus: (id: string, data: any) => apiClient.patch(`/audits/${id}/status`, data),
         delete: (id: string) => apiClient.delete(`/audits/${id}`),
         uploadMultimedia: (id: string, formData: FormData) => apiClient.post(`/audits/${id}/multimedia`, formData),

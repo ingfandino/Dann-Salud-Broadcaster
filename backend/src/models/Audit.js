@@ -16,6 +16,28 @@
 
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
+const { normalizeAuditPhone } = require('../utils/auditPhoneValidation');
+
+function setAuditTelefono(value) {
+    if (value === null || value === undefined) return value;
+    try {
+        return normalizeAuditPhone(value);
+    } catch {
+        return value;
+    }
+}
+
+function validateAuditTelefono(value) {
+    if (!this?.isNew && typeof this?.isModified === 'function' && !this.isModified('telefono')) {
+        return true;
+    }
+    try {
+        normalizeAuditPhone(value);
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 const AuditSchema = new Schema({
     /* ========== DATOS DEL AFILIADO ========== */
@@ -25,7 +47,15 @@ const AuditSchema = new Schema({
     /** CUIL del afiliado (opcional) */
     cuil: { type: String, required: false },
     /** Teléfono de contacto */
-    telefono: { type: String, required: true },
+    telefono: {
+        type: String,
+        required: true,
+        set: setAuditTelefono,
+        validate: {
+            validator: validateAuditTelefono,
+            message: 'telefono debe tener exactamente 10 digitos y no puede estar vacio ni enmascarado'
+        }
+    },
     /** Tipo de operación: alta nueva o cambio de obra social */
     tipoVenta: { type: String, enum: ['alta', 'cambio'], default: 'alta' },
     /** Obra social de la que proviene (si es cambio) */
@@ -139,6 +169,25 @@ const AuditSchema = new Schema({
             value: { type: String, default: "" },
             updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
             updatedAt: { type: Date, default: Date.now }
+        }],
+        default: []
+    },
+    /** Historial controlado de cambios de telefono */
+    telefonoHistory: {
+        type: [{
+            previousValue: { type: String, default: null },
+            newValue: { type: String, default: null },
+            changedAt: { type: Date, default: Date.now },
+            changedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+            changedByName: { type: String, default: "" },
+            changedByEmail: { type: String, default: "" },
+            changedByRole: { type: String, default: "" },
+            endpoint: { type: String, default: "" },
+            sourceComponent: { type: String, default: "" },
+            requestId: { type: String, default: "" },
+            reason: { type: String, default: "" },
+            source: { type: String, default: "" },
+            eventType: { type: String, enum: ['created', 'updated', 'recovered'], default: 'updated' }
         }],
         default: []
     },

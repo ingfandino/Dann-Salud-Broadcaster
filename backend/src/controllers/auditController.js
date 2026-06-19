@@ -24,7 +24,14 @@ const {
 } = require("../config/socket");
 const { Parser } = require('json2csv');
 const logger = require("../utils/logger");
-const { maskAuditPhoneIfNeeded } = require("../utils/auditPhoneVisibility");
+const {
+    maskAuditPhoneIfNeeded,
+    normalizeAuditPhoneRole,
+} = require("../utils/auditPhoneVisibility");
+const {
+    AuditPhoneValidationError,
+    normalizeAuditPhone,
+} = require("../utils/auditPhoneValidation");
 const {
     notifyAuditDeleted,
     notifyAuditCreated,
@@ -33,6 +40,54 @@ const {
     notifyRecoveryAuditCompleted
 } = require("../services/notificationService");
 const { escapeRegex } = require("../utils/stringUtils");
+
+const CLIENT_PROTECTED_AUDIT_FIELDS = new Set([
+    "telefono",
+    "telefonoHistory",
+]);
+
+function hasProtectedAuditField(body = {}) {
+    return [...CLIENT_PROTECTED_AUDIT_FIELDS].find(field => Object.prototype.hasOwnProperty.call(body, field));
+}
+
+function getRequestId(req) {
+    return req.get?.("x-request-id") || req.id || "";
+}
+
+function buildTelefonoHistoryEntry({
+    previousValue = null,
+    newValue = null,
+    user,
+    endpoint,
+    sourceComponent = "",
+    requestId = "",
+    reason = "",
+    source = "",
+    eventType = "updated",
+}) {
+    return {
+        previousValue,
+        newValue,
+        changedAt: new Date(),
+        changedBy: user?._id || null,
+        changedByName: user?.nombre || user?.name || user?.username || "",
+        changedByEmail: user?.email || user?.username || "",
+        changedByRole: user?.role || "",
+        endpoint,
+        sourceComponent,
+        requestId,
+        reason,
+        source,
+        eventType,
+    };
+}
+
+function handleAuditPhoneValidationError(res, err) {
+    if (err instanceof AuditPhoneValidationError || err?.statusCode === 400) {
+        return res.status(400).json({ message: err.message });
+    }
+    throw err;
+}
 
 /**
  * Parsea un string tipo 'YYYY-MM-DDTHH:mm' a Date local
@@ -63,6 +118,13 @@ function parseLocalDate(dateStr) {
  */
 exports.createAudit = async (req, res) => {
     const { nombre, cuil, telefono, tipoVenta, obraSocialAnterior, obraSocialVendida, scheduledAt, asesor, validador } = req.body;
+
+    let normalizedTelefono;
+    try {
+        normalizedTelefono = normalizeAuditPhone(telefono);
+    } catch (err) {
+        return handleAuditPhoneValidationError(res, err);
+    }
 
     /* Parsear scheduledAt como Date - el frontend envía ISO string con timezone correcto */
     const sched = new Date(scheduledAt);
@@ -183,7 +245,7 @@ exports.createAudit = async (req, res) => {
     const audit = new Audit({
         nombre,
         cuil,
-        telefono,
+        telefono: normalizedTelefono,
         tipoVenta,
         obraSocialAnterior,
         obraSocialVendida,
@@ -196,7 +258,18 @@ exports.createAudit = async (req, res) => {
         datosExtra: req.body.datosExtra || "",
         // ✅ FIX: Incluir supervisorSnapshot si se proporcionó supervisor o es Independiente
         supervisorSnapshot: supervisorSnapshotData,
-        isReferido: isReferidoFlag // ✅ Usar flag (true para Independiente)
+        isReferido: isReferidoFlag, // ✅ Usar flag (true para Independiente)
+        telefonoHistory: [buildTelefonoHistoryEntry({
+            previousValue: null,
+            newValue: normalizedTelefono,
+            user: req.user,
+            endpoint: "POST /api/audits",
+            sourceComponent: req.body?.sourceComponent || "audit-create",
+            requestId: getRequestId(req),
+            reason: "Audit created",
+            source: "request.body.telefono",
+            eventType: "created",
+        })]
     });
 
     if (typeof req.body.datosExtra === 'string' && req.body.datosExtra.trim().length) {
@@ -856,6 +929,11 @@ exports.updateAudit = async (req, res) => {
         const { id } = req.params;
         const updates = req.body;
 
+        const protectedField = hasProtectedAuditField(updates);
+        if (protectedField) {
+            return res.status(400).json({ message: `${protectedField} no puede modificarse desde la edicion general; use el endpoint dedicado de telefono` });
+        }
+
         // Solo administrativo/auditor/supervisor/gerencia/RR.HH/recuperador pueden editar
         const userRole = (req.user.role || '').toLowerCase();
         logger.info(`[updateAudit] Usuario: ${req.user.nombre}, Rol original: "${req.user.role}", Rol normalizado: "${userRole}"`);
@@ -1091,6 +1169,7 @@ exports.updateAudit = async (req, res) => {
             await oldAudit.populate('createdBy', 'nombre name email numeroEquipo');
             await oldAudit.populate('groupId', 'nombre name');
             await oldAudit.populate('datosExtraHistory.updatedBy', 'nombre name username email role');
+            await oldAudit.populate('telefonoHistory.changedBy', 'nombre name username email role');
             await oldAudit.populate('statusHistory.updatedBy', 'nombre name username email role');
             await oldAudit.populate('fechaQRHistory.updatedBy', 'nombre name username email role');
             await oldAudit.populate({
@@ -1128,6 +1207,7 @@ exports.updateAudit = async (req, res) => {
             .populate('createdBy', 'nombre name email numeroEquipo')
             .populate('groupId', 'nombre name')
             .populate('datosExtraHistory.updatedBy', 'nombre name username email role')
+            .populate('telefonoHistory.changedBy', 'nombre name username email role')
             .populate('statusHistory.updatedBy', 'nombre name username email role')
             .populate('fechaQRHistory.updatedBy', 'nombre name username email role')
             .populate({
@@ -1237,6 +1317,132 @@ exports.updateAudit = async (req, res) => {
             message: 'Error al actualizar auditoría',
             error: err.message
         });
+    }
+};
+
+/**
+ * Actualizar telefono de auditoria con historial atomico.
+ * PATCH /api/audits/:id/telefono
+ */
+exports.updateAuditTelefono = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userRole = normalizeAuditPhoneRole(req.user?.role);
+        if (!["gerencia", "desarrollador"].includes(userRole)) {
+            return res.status(403).json({ message: "No autorizado para modificar telefono" });
+        }
+
+        const protectedTelefonoUpdateFields = [
+            "telefonoHistory",
+            "changedBy",
+            "changedByName",
+            "changedByEmail",
+            "changedByRole",
+            "previousValue",
+            "newValue",
+            "changedAt",
+        ];
+        const submittedProtectedField = protectedTelefonoUpdateFields.find(field =>
+            Object.prototype.hasOwnProperty.call(req.body || {}, field)
+        );
+        if (submittedProtectedField) {
+            return res.status(400).json({ message: `${submittedProtectedField} no puede modificarse desde el cliente` });
+        }
+
+        let normalizedTelefono;
+        try {
+            normalizedTelefono = normalizeAuditPhone(req.body?.telefono);
+        } catch (err) {
+            return handleAuditPhoneValidationError(res, err);
+        }
+
+        const eventType = req.body?.eventType === "recovered" ? "recovered" : "updated";
+        const submittedReason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+        const submittedSource = typeof req.body?.source === "string" ? req.body.source.trim() : "";
+        if (eventType === "recovered") {
+            if (!submittedReason) {
+                return res.status(400).json({ message: "reason es requerido para recuperaciones de telefono" });
+            }
+            if (!submittedSource) {
+                return res.status(400).json({ message: "source es requerido para recuperaciones de telefono" });
+            }
+        }
+
+        const oldAudit = await Audit.findById(id).select("telefono").lean();
+        if (!oldAudit) {
+            return res.status(404).json({ message: "Auditoria no encontrada" });
+        }
+
+        if (oldAudit.telefono === normalizedTelefono) {
+            const unchanged = await Audit.findById(id)
+                .populate({
+                    path: 'asesor',
+                    select: 'nombre name email numeroEquipo supervisor',
+                    populate: {
+                        path: 'supervisor',
+                        select: 'nombre name email numeroEquipo'
+                    }
+                })
+                .populate('auditor', 'nombre name email')
+                .populate('createdBy', 'nombre name email numeroEquipo')
+                .populate('telefonoHistory.changedBy', 'nombre name username email role');
+            return res.json(unchanged);
+        }
+
+        const historyEntry = buildTelefonoHistoryEntry({
+            previousValue: oldAudit.telefono || null,
+            newValue: normalizedTelefono,
+            user: req.user,
+            endpoint: "PATCH /api/audits/:id/telefono",
+            sourceComponent: req.body?.sourceComponent || "dedicated-phone-update",
+            requestId: getRequestId(req),
+            reason: submittedReason || "Dedicated phone update",
+            source: submittedSource || "request.body.telefono",
+            eventType,
+        });
+
+        const audit = await Audit.findOneAndUpdate(
+            { _id: id, telefono: oldAudit.telefono },
+            {
+                $set: { telefono: normalizedTelefono },
+                $push: { telefonoHistory: historyEntry },
+            },
+            { new: true, runValidators: true }
+        )
+            .populate({
+                path: 'asesor',
+                select: 'nombre name email numeroEquipo supervisor',
+                populate: {
+                    path: 'supervisor',
+                    select: 'nombre name email numeroEquipo'
+                }
+            })
+            .populate('auditor', 'nombre name email')
+            .populate('createdBy', 'nombre name email numeroEquipo')
+            .populate('telefonoHistory.changedBy', 'nombre name username email role');
+
+        if (!audit) {
+            return res.status(409).json({ message: "El telefono fue modificado por otra operacion. Recargue e intente nuevamente." });
+        }
+
+        try {
+            const payload = audit.toObject ? audit.toObject() : audit;
+            emitAuditUpdate(audit._id, { ...payload, updatedBy: req.user._id });
+        } catch (e) {
+            logger.error("emitAuditUpdate telefono error", e);
+        }
+
+        return res.json(audit);
+    } catch (err) {
+        logger.error("Error actualizando telefono de auditoria:", err);
+        if (err.name === 'ValidationError') {
+            const messages = Object.values(err.errors).map(e => e.message);
+            return res.status(400).json({ message: messages.join(', ') });
+        }
+        if (err.name === 'CastError') {
+            return res.status(400).json({ message: `ID invalido para el campo ${err.path}` });
+        }
+        return res.status(500).json({ message: "Error al actualizar telefono", error: err.message });
     }
 };
 
