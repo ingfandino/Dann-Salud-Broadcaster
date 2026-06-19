@@ -657,10 +657,17 @@ interface AffiliateCheckJob {
 }
 
 interface AffiliateCheckDashboardSummary {
+    quotaUnlimited?: boolean
+    activityScope?: "global" | "supervisor"
+    dailyActivity?: {
+        newAffiliatesCheckedToday?: number
+        reusableAffiliatesCheckedToday?: number
+        baseExtractionAffiliatesProcessedToday?: number
+    }
     quota?: {
-        extract?: { used?: number; limit?: number; remaining?: number }
-        checkNew?: { used?: number; limit?: number; remaining?: number }
-        checkReusable?: { used?: number; limit?: number; remaining?: number }
+        extract?: { quotaUnlimited?: boolean; used?: number; limit?: number | null; remaining?: number | null }
+        checkNew?: { quotaUnlimited?: boolean; used?: number; limit?: number | null; remaining?: number | null }
+        checkReusable?: { quotaUnlimited?: boolean; used?: number; limit?: number | null; remaining?: number | null }
     }
     summary?: {
         checksPerformedToday?: number
@@ -770,6 +777,7 @@ export function ChequeoDatos() {
     const canAccess = SUPPORTED_CHECK_ROLES.includes(role)
     const canSeeAllJobs = CHECK_MANAGER_ROLES.includes(role)
     const canProcessManually = CHECK_PROCESS_ROLES.includes(role)
+    const hasUnlimitedQuota = role === "gerencia" || role === "desarrollador"
 
     const [config, setConfig] = useState<AffiliateCheckConfig | null>(null)
     const [baseStatus, setBaseStatus] = useState<BaseStatus | null>(null)
@@ -809,6 +817,7 @@ export function ChequeoDatos() {
     const [configForm, setConfigForm] = useState({
         checkNew: "",
         checkReusable: "",
+        extractBase: "",
         ownershipDays: "",
         verificationExpiryDays: "",
     })
@@ -1019,6 +1028,7 @@ export function ChequeoDatos() {
         setConfigForm({
             checkNew: String(config?.dailyQuota?.checkNew ?? ""),
             checkReusable: String(config?.dailyQuota?.checkReusable ?? ""),
+            extractBase: String(config?.dailyQuota?.extractBase ?? ""),
             ownershipDays: String(config?.ownershipDays ?? ""),
             verificationExpiryDays: String(config?.verificationExpiryDays ?? ""),
         })
@@ -1034,10 +1044,11 @@ export function ChequeoDatos() {
     const saveOperationalConfig = async () => {
         const checkNew = parseConfigNumber(configForm.checkNew, 0)
         const checkReusable = parseConfigNumber(configForm.checkReusable, 0)
+        const extractBase = parseConfigNumber(configForm.extractBase, 0)
         const ownershipDays = parseConfigNumber(configForm.ownershipDays, 1)
         const verificationExpiryDays = parseConfigNumber(configForm.verificationExpiryDays, 1)
 
-        if (checkNew == null || checkReusable == null || ownershipDays == null || verificationExpiryDays == null) {
+        if (checkNew == null || checkReusable == null || extractBase == null || ownershipDays == null || verificationExpiryDays == null) {
             setConfigError("Ingresá números enteros válidos. Los días deben ser mayores a cero.")
             return
         }
@@ -1046,7 +1057,7 @@ export function ChequeoDatos() {
         setConfigError(null)
         try {
             const response = await api.affiliates.check.updateConfig({
-                dailyQuota: { checkNew, checkReusable },
+                dailyQuota: { checkNew, checkReusable, extractBase },
                 ownershipDays,
                 verificationExpiryDays,
             })
@@ -1210,9 +1221,9 @@ export function ChequeoDatos() {
                 distribution: createdJob.obraSocialSelection?.finalDistribution || [],
             } : null)
             if (res.data?.partialCreation) {
-                toast.success(res.data.partialMessage || "Trabajo creado con disponibilidad parcial")
+                toast.success(res.data.partialMessage || "Trabajo aceptado con selección parcial")
             } else {
-                toast.success("Trabajo creado correctamente")
+                toast.success("Trabajo aceptado. El procesamiento continuará por etapas.")
             }
             closeModal()
             await loadDashboard()
@@ -1273,10 +1284,69 @@ export function ChequeoDatos() {
 
                     <div className="flex flex-wrap items-center gap-2">
                         {CHECK_MANAGER_ROLES.includes(role) && (
-                            <button type="button" onClick={openConfigModal} className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">
-                                <Settings className="h-4 w-4" />
-                                Configuración
-                            </button>
+                            <Popover
+                                open={configModalOpen}
+                                onOpenChange={(open) => {
+                                    if (open) openConfigModal()
+                                    else setConfigModalOpen(false)
+                                }}
+                            >
+                                <PopoverTrigger asChild>
+                                    <button type="button" className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">
+                                        <Settings className="h-4 w-4" />
+                                        Configuración
+                                    </button>
+                                </PopoverTrigger>
+                                <PopoverContent align="end" sideOffset={10} collisionPadding={16} className="z-50 w-[min(calc(100vw-2rem),38rem)] rounded-2xl border border-slate-200 bg-white p-0 text-slate-900 shadow-xl">
+                                    <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                                        <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
+                                            <Settings className="h-4 w-4" />
+                                            Configuración operativa
+                                        </h2>
+                                        <button type="button" onClick={() => setConfigModalOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Cerrar configuración">
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                    <div className="space-y-4 px-5 py-4">
+                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                            <label className="text-sm font-semibold text-slate-700">
+                                                Cupo diario nuevos
+                                                <input type="number" min={0} step={1} value={configForm.checkNew} onChange={event => setConfigForm(prev => ({ ...prev, checkNew: event.target.value }))} className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
+                                            </label>
+                                            <label className="text-sm font-semibold text-slate-700">
+                                                Cupo diario reutilizables
+                                                <input type="number" min={0} step={1} value={configForm.checkReusable} onChange={event => setConfigForm(prev => ({ ...prev, checkReusable: event.target.value }))} className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
+                                            </label>
+                                            <label className="text-sm font-semibold text-slate-700">
+                                                Cupo extracción de base
+                                                <input type="number" min={0} step={1} value={configForm.extractBase} onChange={event => setConfigForm(prev => ({ ...prev, extractBase: event.target.value }))} className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+                                            </label>
+                                            <label className="text-sm font-semibold text-slate-700">
+                                                Días de propiedad
+                                                <input type="number" min={1} step={1} value={configForm.ownershipDays} onChange={event => setConfigForm(prev => ({ ...prev, ownershipDays: event.target.value }))} className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+                                            </label>
+                                            <label className="text-sm font-semibold text-slate-700">
+                                                Vigencia del chequeo
+                                                <input type="number" min={1} step={1} value={configForm.verificationExpiryDays} onChange={event => setConfigForm(prev => ({ ...prev, verificationExpiryDays: event.target.value }))} className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+                                            </label>
+                                        </div>
+                                        {configError && (
+                                            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                                                {configError}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
+                                        <button type="button" onClick={() => setConfigModalOpen(false)} className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                                            Cancelar
+                                        </button>
+                                        <button type="button" onClick={saveOperationalConfig} disabled={configSaving} className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
+                                            {configSaving && <RefreshCw className="h-4 w-4 animate-spin" />}
+                                            Guardar
+                                        </button>
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
                         )}
                         <button type="button" disabled className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
                             <FolderClock className="h-4 w-4" />
@@ -1297,72 +1367,30 @@ export function ChequeoDatos() {
                 </div>
             )}
 
-            {configModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
-                    <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
-                        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-                            <h2 className="flex items-center gap-2 text-base font-bold text-slate-900">
-                                <Settings className="h-4 w-4" />
-                                Configuración operativa
-                            </h2>
-                            <button type="button" onClick={() => setConfigModalOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Cerrar configuración">
-                                <X className="h-4 w-4" />
-                            </button>
-                        </div>
-                        <div className="space-y-4 px-5 py-4">
-                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                <label className="text-sm font-semibold text-slate-700">
-                                    Cupo diario nuevos
-                                    <input type="number" min={0} step={1} value={configForm.checkNew} onChange={event => setConfigForm(prev => ({ ...prev, checkNew: event.target.value }))} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100" />
-                                </label>
-                                <label className="text-sm font-semibold text-slate-700">
-                                    Cupo diario reutilizables
-                                    <input type="number" min={0} step={1} value={configForm.checkReusable} onChange={event => setConfigForm(prev => ({ ...prev, checkReusable: event.target.value }))} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" />
-                                </label>
-                                <label className="text-sm font-semibold text-slate-700">
-                                    Días de propiedad
-                                    <input type="number" min={1} step={1} value={configForm.ownershipDays} onChange={event => setConfigForm(prev => ({ ...prev, ownershipDays: event.target.value }))} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
-                                </label>
-                                <label className="text-sm font-semibold text-slate-700">
-                                    Vigencia del chequeo
-                                    <input type="number" min={1} step={1} value={configForm.verificationExpiryDays} onChange={event => setConfigForm(prev => ({ ...prev, verificationExpiryDays: event.target.value }))} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
-                                </label>
-                            </div>
-                            {configError && (
-                                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                                    {configError}
-                                </div>
-                            )}
-                        </div>
-                        <div className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4">
-                            <button type="button" onClick={() => setConfigModalOpen(false)} className="h-10 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50">
-                                Cancelar
-                            </button>
-                            <button type="button" onClick={saveOperationalConfig} disabled={configSaving} className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
-                                {configSaving && <RefreshCw className="h-4 w-4 animate-spin" />}
-                                Guardar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.65fr)_minmax(360px,1fr)]">
                 <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="mb-5 flex items-center justify-between gap-3">
                         <div>
-                            <h2 className="text-base font-bold text-slate-900">Cupos de hoy</h2>
+                            <h2 className="text-base font-bold text-slate-900">{hasUnlimitedQuota ? "Actividad global de hoy" : "Cupos de hoy"}</h2>
                             <p className="text-xs text-slate-500">
                                 Argentina · {new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" })}
                             </p>
                         </div>
-                        <button type="button" disabled className="text-xs font-semibold text-blue-500 disabled:opacity-50">Ver detalle de cupos</button>
+                        {!hasUnlimitedQuota && <button type="button" disabled className="text-xs font-semibold text-blue-500 disabled:opacity-50">Ver detalle de cupos</button>}
                     </div>
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                        <CupoProgressBar label="Chequear nuevos" color="emerald" quota={quotaSummary.checkNew?.limit ?? config?.dailyQuota?.checkNew} used={quotaSummary.checkNew?.used} remaining={quotaSummary.checkNew?.remaining} loading={loading} />
-                        <CupoProgressBar label="Chequear reutilizables" color="violet" quota={quotaSummary.checkReusable?.limit ?? config?.dailyQuota?.checkReusable} used={quotaSummary.checkReusable?.used} remaining={quotaSummary.checkReusable?.remaining} loading={loading} />
-                        <CupoProgressBar label="Extraer de base" color="blue" quota={quotaSummary.extract?.limit ?? config?.dailyQuota?.extractBase} used={quotaSummary.extract?.used} remaining={quotaSummary.extract?.remaining} loading={loading} />
-                    </div>
+                    {hasUnlimitedQuota ? (
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                            <ActivityMetricCard label="Nuevos chequeados hoy" value={dashboardSummary?.dailyActivity?.newAffiliatesCheckedToday} loading={loading} color="emerald" icon={<ClipboardCheck className="h-4 w-4" />} />
+                            <ActivityMetricCard label="Reutilizables chequeados hoy" value={dashboardSummary?.dailyActivity?.reusableAffiliatesCheckedToday} loading={loading} color="violet" icon={<RotateCcw className="h-4 w-4" />} />
+                            <ActivityMetricCard label="Datos extraídos de base hoy" value={dashboardSummary?.dailyActivity?.baseExtractionAffiliatesProcessedToday} loading={loading} color="blue" icon={<Database className="h-4 w-4" />} />
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                            <CupoProgressBar label="Chequear nuevos" color="emerald" quota={quotaSummary.checkNew?.limit ?? config?.dailyQuota?.checkNew} used={quotaSummary.checkNew?.used} remaining={quotaSummary.checkNew?.remaining ?? undefined} loading={loading} />
+                            <CupoProgressBar label="Chequear reutilizables" color="violet" quota={quotaSummary.checkReusable?.limit ?? config?.dailyQuota?.checkReusable} used={quotaSummary.checkReusable?.used} remaining={quotaSummary.checkReusable?.remaining ?? undefined} loading={loading} />
+                            <CupoProgressBar label="Extraer de base" color="blue" quota={quotaSummary.extract?.limit ?? config?.dailyQuota?.extractBase} used={quotaSummary.extract?.used} remaining={quotaSummary.extract?.remaining ?? undefined} loading={loading} />
+                        </div>
+                    )}
                 </div>
 
                 <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
@@ -1427,7 +1455,7 @@ export function ChequeoDatos() {
                                 setSelectedObrasSociales([])
                                 const quotaValue = Number(card.quota)
                                 const availableValue = Number(card.available)
-                                const safeQuota = Number.isFinite(quotaValue) && quotaValue > 0 ? quotaValue : undefined
+                                const safeQuota = !hasUnlimitedQuota && Number.isFinite(quotaValue) && quotaValue > 0 ? quotaValue : undefined
                                 const safeAvailable = Number.isFinite(availableValue) && availableValue > 0 ? availableValue : undefined
                                 const q = Math.min(100, safeQuota ?? 100, safeAvailable ?? 100)
                                 setRequestedCount(Math.max(1, q || 100))
@@ -1480,7 +1508,7 @@ export function ChequeoDatos() {
                                     }}
                                     className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                                 />
-                                <p className="mt-2 text-xs text-slate-500">Se ajustará al cupo y al stock apto.</p>
+                                <p className="mt-2 text-xs text-slate-500">{hasUnlimitedQuota ? "Se ajustará al stock apto disponible." : "Se validará contra tu cupo y el stock apto."}</p>
                             </div>
 
                             {modalMode === "extract_base" && CHECK_MANAGER_ROLES.includes(role) && (
@@ -1620,12 +1648,12 @@ export function ChequeoDatos() {
                                     {[
                                         ["Solicitados", previewResult.requestedCount],
                                         ["Aptos en base", previewResult.selectableCount],
-                                        ["Cupo disponible", previewResult.remaining],
+                                        [previewResult.quotaUnlimited ? "Cupo" : "Cupo disponible", previewResult.quotaUnlimited ? "Ilimitado" : previewResult.remaining],
                                         ["Total a procesar", previewResult.willSelectCount],
                                     ].map(([label, value]) => (
                                         <div key={String(label)} className="min-w-0">
                                             <p className="truncate text-xs text-slate-500">{label}</p>
-                                            <p className="mt-1 text-lg font-bold text-slate-900">{formatCheckNumber(value as number)}</p>
+                                            <p className="mt-1 text-lg font-bold text-slate-900">{typeof value === "string" ? value : formatCheckNumber(value as number)}</p>
                                         </div>
                                     ))}
                                 </div>
@@ -1734,6 +1762,23 @@ function CupoProgressBar({ label, color, quota, used, remaining, loading }: { la
                 <div className={cn("h-2 rounded-full transition-all duration-500", c.bar)} style={{ width: `${percent}%` }} />
             </div>
             <p className={cn("mt-2 text-xs font-medium", c.text)}>Restantes: {loading ? "—" : formatCheckNumber(remainingValue)}</p>
+        </div>
+    )
+}
+
+function ActivityMetricCard({ label, value, loading, color, icon }: { label: string; value?: number; loading: boolean; color: "emerald" | "violet" | "blue"; icon: React.ReactNode }) {
+    const colorMap = {
+        emerald: "border-emerald-100 bg-emerald-50/70 text-emerald-700",
+        violet: "border-violet-100 bg-violet-50/70 text-violet-700",
+        blue: "border-blue-100 bg-blue-50/70 text-blue-700",
+    }
+    return (
+        <div className={cn("rounded-2xl border p-4", colorMap[color])}>
+            <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/80">{icon}</span>
+            </div>
+            <p className="mt-3 text-2xl font-bold text-slate-950">{loading ? "—" : formatCheckNumber(value || 0)}</p>
         </div>
     )
 }
@@ -2068,7 +2113,7 @@ function ExternalExcelCheckCard({
             const payload: { requestedCount: number; supervisorId?: string } = { requestedCount: parsedRequestedCount }
             if (isManager && targetMode === "supervisor") payload.supervisorId = selectedSupervisor
             await api.affiliates.check.externalFile.createJob(importJobId, payload)
-            toast.success("Trabajo de chequeo externo creado correctamente")
+            toast.success("Trabajo de chequeo externo aceptado. El procesamiento continuará por etapas.")
             resetPanel()
             await onJobCreated()
         } catch (error: any) {
