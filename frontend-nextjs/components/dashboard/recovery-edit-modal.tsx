@@ -47,12 +47,13 @@ interface RecoveryEditModalProps {
 const STATUS_OPTIONS = [
     "Falta documentación", "Falta clave", "Falta clave y documentación",
     "Completa", "Rechazó", "QR hecho", "Aprobada",
-    "Aprobada, pero no reconoce clave",
+    "Aprobada pero no reconoce clave", // ✅ Canonical: no comma
     "Cortó", "Autovinculación", "Caída",
     "Pendiente", "Cargada", "Contactado"
 ]
 
-const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
+const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF", "MyC Salud"]
+const isMaskedPhoneValue = (value?: string | null) => typeof value === "string" && value.includes("*")
 
 export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalProps) {
     const { theme } = useTheme()
@@ -63,7 +64,7 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
     const [form, setForm] = useState({
         nombre: audit.nombre || "",
         cuil: audit.cuil || "",
-        telefono: audit.telefono || "",
+        telefono: isMaskedPhoneValue(audit.telefono) ? "Dato inválido" : audit.telefono || "",
         obraSocialVendida: audit.obraSocialVendida || "",
         status: audit.status || "Pendiente",
         administrador: typeof audit.administrador === 'object' ? audit.administrador?._id : audit.administrador || "",
@@ -90,7 +91,7 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
-        if (!form.nombre || !form.cuil || !form.telefono || !form.obraSocialVendida || !form.status) {
+        if (!form.nombre || !form.cuil || !form.obraSocialVendida || !form.status) {
             toast.error("Por favor complete todos los campos obligatorios")
             return
         }
@@ -98,6 +99,7 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
         setLoading(true)
         try {
             const payload: any = { ...form }
+            delete payload.telefono
 
             // Handle administrator assignment
             if (form.administrador === "" || form.administrador === "Seleccione") {
@@ -132,6 +134,9 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
             setDeleting(false)
         }
     }
+
+    // Telefono is display-only here. Dedicated audited phone update endpoint owns changes.
+    const isPhoneLocked = true;
 
     const [mounted, setMounted] = useState(false)
 
@@ -238,17 +243,24 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
                                 />
                             </div>
                             <div>
-                                <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>Teléfono *</label>
+                                <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>Teléfono</label>
                                 <input
                                     type="text"
                                     value={form.telefono}
                                     onChange={(e) => setForm({ ...form, telefono: e.target.value })}
+                                    disabled={isPhoneLocked}
+                                    readOnly={isPhoneLocked}
                                     className={cn(
                                         "w-full px-3 py-2 rounded-lg border text-sm",
+                                        isPhoneLocked && "bg-gray-100 text-gray-500 cursor-not-allowed",
                                         theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                     )}
-                                    required
                                 />
+                                {isMaskedPhoneValue(audit.telefono) && (
+                                    <p className={cn("text-xs mt-1", theme === "dark" ? "text-amber-400" : "text-amber-600")}>
+                                        Dato inválido: requiere recuperación auditada.
+                                    </p>
+                                )}
                             </div>
                         </div>
 
@@ -282,7 +294,7 @@ export function RecoveryEditModal({ audit, onClose, onSave }: RecoveryEditModalP
                                     required
                                 >
                                     {STATUS_OPTIONS.map(st => {
-                                        const isAprobadaDisabled = (st === "Aprobada" || st === "Aprobada, pero no reconoce clave") && !wasInCargadaStatus
+                                        const isAprobadaDisabled = (st === "Aprobada" || st === "Aprobada pero no reconoce clave") && !wasInCargadaStatus // ✅ Canonical: no comma
                                         return (
                                             <option key={st} value={st} disabled={isAprobadaDisabled}>
                                                 {st} {isAprobadaDisabled ? "(req. Cargada)" : ""}

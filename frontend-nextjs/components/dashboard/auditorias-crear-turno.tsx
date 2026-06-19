@@ -18,7 +18,9 @@ import { useAuth } from "@/lib/auth"
 import { useSocialHealthList } from "@/hooks/useSocialHealthList"
 import { SearchableSocialHealthSelect } from "./searchable-social-health-select"
 
-const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
+const normalizeAuditPhoneInput = (value: string) => value.replace(/\D/g, "")
+
+const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF", "MyC Salud"]
 const TIPO_VENTA = ["alta", "cambio"]
 
 export function AuditoriasCrearTurno() {
@@ -38,7 +40,7 @@ export function AuditoriasCrearTurno() {
   const isAuditorConEquipo = userRole === "auditor" && !!user?.numeroEquipo
   const isAsesor = userRole === "asesor" || isAuditorConEquipo || isRecuperador || isIndependiente // Independiente se comporta como asesor (autoasigna)
   const isGerenciaOrAuditorSinEquipo = userRole === "gerencia" || userRole === "encargado" || (userRole === "auditor" && !user?.numeroEquipo)
-  
+
   // ✅ Encargado con numeroEquipo se comporta como supervisor de su equipo
   const isEncargadoConEquipo = isEncargado && !!user?.numeroEquipo
   const isSupervisorLevel = isSupervisor || isEncargadoConEquipo
@@ -126,8 +128,8 @@ export function AuditoriasCrearTurno() {
   const loadElianaSoledadForIndependiente = async () => {
     try {
       const res = await api.users.list()
-      const eliana = res.data.find((u: any) => 
-        u.role?.toLowerCase() === 'gerencia' && 
+      const eliana = res.data.find((u: any) =>
+        u.role?.toLowerCase() === 'gerencia' &&
         u.nombre?.toLowerCase().includes('eliana') &&
         u.nombre?.toLowerCase().includes('soledad')
       )
@@ -220,11 +222,14 @@ export function AuditoriasCrearTurno() {
     if (prefillData) {
       try {
         const data = JSON.parse(prefillData)
+        const incomingTelefono = typeof data.telefono === "string" && !data.telefono.includes("*")
+          ? data.telefono
+          : ""
         setForm(prev => ({
           ...prev,
           nombre: data.nombre || "",
           cuil: data.cuil || "",
-          telefono: data.telefono || "",
+          telefono: incomingTelefono,
           obraSocialAnterior: data.obraSocialAnterior || "",
           datosExtra: data.localidad ? `Localidad: ${data.localidad}` : ""
         }))
@@ -535,7 +540,9 @@ export function AuditoriasCrearTurno() {
   const validate = () => {
     if (!form.nombre.trim()) return "Nombre es requerido"
     if (!/^\d{11}$/.test(form.cuil)) return "CUIL debe tener exactamente 11 dígitos"
-    if (form.telefono && !/^\d{10}$/.test(form.telefono.replace(/\D/g, '')))
+    if (!form.telefono.trim()) return "Teléfono es requerido"
+    if (form.telefono.includes("*")) return "Teléfono no puede estar enmascarado"
+    if (!/^\d{10}$/.test(normalizeAuditPhoneInput(form.telefono)))
       return "Teléfono debe tener 10 dígitos"
     if (!form.fecha) return "Fecha es requerida"
     if (!form.hora) return "Hora es requerida"
@@ -571,7 +578,7 @@ export function AuditoriasCrearTurno() {
       const payload: any = {
         nombre: form.nombre,
         cuil: form.cuil,
-        telefono: form.telefono,
+        telefono: normalizeAuditPhoneInput(form.telefono),
         tipoVenta: form.tipoVenta,
         obraSocialAnterior: form.obraSocialAnterior,
         obraSocialVendida: form.obraSocialVendida,

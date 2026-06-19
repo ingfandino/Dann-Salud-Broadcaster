@@ -167,7 +167,7 @@ export function RRHHEstadisticas() {
   }, [employees, selectedUserId])
 
   const AUDITOR_SUCCESS = ["completa", "aprobada", "cargada", "qr hecho"]
-  const AUDITOR_FAIL = ["falta clave", "falta documentación", "falta clave y documentación", "rechazada", "cortó", "caída", "rehacer vídeo", "aprobada, pero no reconoce clave"]
+  const AUDITOR_FAIL = ["falta clave", "falta documentación", "falta clave y documentación", "rechazada", "cortó", "caída", "rehacer vídeo", "aprobada pero no reconoce clave"] // ✅ Canonical: no comma
   const VENTAS_SUCCESS = ["aprobada", "qr hecho"]
   const VENTAS_FAIL = ["rechazada", "cortó", "caída", "no le llegan los mensajes", "no atendió", "tiene dudas"]
 

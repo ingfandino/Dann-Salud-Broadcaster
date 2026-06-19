@@ -97,7 +97,6 @@ const getStatusColor = (status: string, theme: string) => {
     "pendiente": { light: "bg-gray-200 text-gray-700", dark: "bg-gray-500/20 text-gray-400" },
     "falta documentación": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
     "afip": { light: "bg-blue-100 text-blue-800", dark: "bg-blue-500/20 text-blue-400" },
-    "padrón": { light: "bg-indigo-100 text-indigo-800", dark: "bg-indigo-500/20 text-indigo-400" },
     "completa": { light: "bg-lime-600 text-white", dark: "bg-lime-500/30 text-lime-300" },
     "reprogramada": { light: "bg-violet-100 text-violet-800", dark: "bg-violet-500/20 text-violet-400" },
     "caída": { light: "bg-red-600 text-white", dark: "bg-red-500/30 text-red-300" },
@@ -182,8 +181,11 @@ export function AuditoriasReventa() {
   const isGerencia = userRole === "gerencia"
   const isEncargado = userRole === "encargado"
   const isRecuperador = userRole === "recuperador"
+  const isDesarrollador = userRole === "desarrollador"
   const canEdit = isGerencia || isEncargado || isRecuperador
-  const canExport = isGerencia || isEncargado
+  // Only Gerencia and Desarrollador can export from restricted Audit interfaces
+  // Encargado is explicitly excluded from export permissions
+  const canExport = isGerencia || isDesarrollador
 
   /* Listas únicas derivadas de los datos cargados */
   const supervisorOptions = useMemo(() => {
@@ -299,6 +301,11 @@ export function AuditoriasReventa() {
   }
 
   const handleExportXLSX = () => {
+    if (!canExport) {
+      toast.error("No tienes permisos para exportar auditorías")
+      return
+    }
+
     if (!filteredAudits || filteredAudits.length === 0) {
       toast.info("No hay datos para exportar")
       return

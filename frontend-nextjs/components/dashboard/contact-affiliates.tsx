@@ -71,10 +71,13 @@ export function ContactAffiliates() {
                 const affiliate = affiliates.find(a => a._id === id)
                 if (affiliate) {
                     // Store in sessionStorage to pre-fill the form
+                    const telefono = typeof affiliate.telefono1 === "string" && !affiliate.telefono1.includes("*")
+                        ? affiliate.telefono1
+                        : ""
                     sessionStorage.setItem('prefillAudit', JSON.stringify({
                         nombre: affiliate.nombre,
                         cuil: affiliate.cuil,
-                        telefono: affiliate.telefono1,
+                        telefono,
                         obraSocialAnterior: affiliate.obraSocial,
                         localidad: affiliate.localidad
                     }))

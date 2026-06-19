@@ -14,8 +14,27 @@ test("only gerencia and desarrollador can edit an existing Audit phone", () => {
     assert.equal(canEditExistingAuditPhone("desarrollador"), true);
     assert.equal(canEditExistingAuditPhone("Desarrollador"), true);
 
-    for (const role of ["asesor", "supervisor", "auditor", "administrativo", "encargado", "recuperador", "independiente", "admin", "rr.hh", ""]) {
+    for (const role of [
+        "asesor",
+        "supervisor",
+        "auditor",
+        "administrativo",
+        "encargado",
+        "recuperador",
+        "independiente",
+        "admin",
+        "rr.hh",
+        "",
+    ]) {
         assert.equal(canEditExistingAuditPhone(role), false, `${role} must not edit existing Audit phone`);
+    }
+});
+
+test("unauthorized roles never receive an editable phone initial value", () => {
+    const audit = { telefono: "1123456789" };
+
+    for (const role of ["asesor", "supervisor", "auditor", "administrativo", "encargado"]) {
+        assert.equal(getEditableAuditPhoneInitialValue(audit, role), "");
     }
 });
 

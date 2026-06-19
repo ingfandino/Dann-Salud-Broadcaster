@@ -16,6 +16,7 @@ import { MobileHeader } from '@/components/dashboard/mobile-header';
 import { ThemeProvider } from '@/components/dashboard/theme-provider';
 import { Toaster } from '@/components/ui/sonner';
 import { connectSocket } from '@/lib/socket';
+import { DashboardContent } from '@/components/dashboard/dashboard-content';
 
 /** Layout principal del dashboard con navegación */
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -34,14 +35,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         'base-afiliados-estadistica': '/dashboard/affiliates/stats',
         'base-afiliados-exitosas': '/dashboard/affiliates/success',
         'base-afiliados-exportaciones': '/dashboard/affiliates/exports',
-        'base-afiliados-configuracion': '/dashboard/affiliates/config',
         'base-afiliados-lista': '/dashboard/affiliates/list',
         'base-afiliados-cargar': '/dashboard/affiliates/upload',
         'base-afiliados-frescos': '/dashboard/affiliates/fresh',
         'base-afiliados-reutilizables': '/dashboard/affiliates/reusable',
         'base-afiliados-fallidas': '/dashboard/affiliates/failed',
+        'base-afiliados-nativa': '/dashboard/affiliates/native',
         'herramientas-contacto': '/dashboard/contact/admin',
         'contactar-afiliados-administracion': '/dashboard/contact/admin',
+        'chequeo-datos': '/dashboard/contact/data-check',
         'contactar-afiliados-datos-dia': '/dashboard/contact/today',
         'palabras-prohibidas-mensajeria': '/dashboard/banned-words',
         'auditorias-seguimiento': '/dashboard/audits/follow-up',
@@ -50,7 +52,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         'auditorias-falta-clave': '/dashboard/audits/falta-clave',
         'auditorias-rechazada': '/dashboard/audits/rechazada',
         'auditorias-pendiente': '/dashboard/audits/pendiente',
-        'auditorias-afip-padron': '/dashboard/audits/afip-padron',
         'auditorias-reventa': '/dashboard/audits/reventa',
         'rrhh-estadisticas': '/dashboard/hr/stats',
         'rrhh-bajo-rendimiento': '/dashboard/hr/low-performance',
@@ -58,13 +59,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         'rrhh-bajas-liquidaciones': '/dashboard/hr/separations',
         'rrhh-inactivos': '/dashboard/hr/inactive',
         'rrhh-agregar': '/dashboard/hr/add',
-        'rrhh-telefonos': '/dashboard/hr/phones',
+        'rrhh-telefonos': '/dashboard/hr/telefonos',
         'administracion-registro-ventas': '/dashboard/admin/sales-record',
+        'administracion-chequeado': '/dashboard/admin/chequeado',
         'administracion-evidencias': '/dashboard/admin/evidencias',
         'gestion-usuarios': '/dashboard/users',
         'contabilidad': '/dashboard/contabilidad',
         'configuracion-privilegios': '/dashboard/config/privileges',
     };
+
+    const internalDashboardSections = new Set(['procesamiento-documental', 'obras-sociales']);
 
     /* Sincronizar activeSection con pathname */
     useEffect(() => {
@@ -120,7 +124,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                         onToggleSidebar={() => setIsMobileOpen(!isMobileOpen)}
                     />
                     <main className="flex-1 p-4 pt-20 lg:pt-8 lg:p-8 overflow-auto">
-                        {children}
+                        {internalDashboardSections.has(activeSection) ? (
+                            <DashboardContent activeSection={activeSection} onSectionChange={handleSectionChange} />
+                        ) : children}
                     </main>
                 </div>
             </div>

@@ -8,32 +8,31 @@
 
 "use client"
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { useTheme } from "./theme-provider"
 import { cn } from "@/lib/utils"
 import { X, Save, Clock, User, CheckCircle2, AlertCircle, Calendar as CalendarIcon, Users, MessageSquare } from "lucide-react"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
+import * as auditPhonePermissions from "@/lib/auditPhonePermissions"
 import { useSocialHealthList } from "@/hooks/useSocialHealthList"
 import { SearchableSocialHealthSelect } from "./searchable-social-health-select"
 import { CelebrationAnimation } from "./celebration-animation"
 import { VideoAuditPanel } from "./video-audit-panel"
-const {
-    canEditExistingAuditPhone,
-    getEditableAuditPhoneInitialValue,
-    hasAuditPhoneChanged,
-    buildAuditGenericUpdatePayload,
-} = require("@/lib/auditPhonePermissions")
 
 /* Estados que disparan la animación de celebración */
 const CELEBRATION_STATUSES = ["Completa", "QR hecho"]
+
+const isMaskedPhoneValue = auditPhonePermissions.isMaskedPhoneValue
 
 interface Audit {
     _id: string
     nombre: string
     cuil?: string
     telefono: string
+    telefonoMasked?: string | null
+    canViewTelefono?: boolean
     tipoVenta: string
     obraSocialAnterior?: string
     obraSocialVendida: string
@@ -95,6 +94,7 @@ interface AuditEditModalProps {
     audit: Audit
     onSave: (updatedAudit: Audit) => void
     isReadOnlyMode?: boolean
+    limitedEditingContext?: "falta-clave" | "rechazada" | "pendiente" | null
 }
 
 const STATUS_OPTIONS = [
@@ -121,12 +121,11 @@ const STATUS_OPTIONS = [
     "AFIP",
     "Baja laboral con nueva alta",
     "Baja laboral sin nueva alta",
-    "Padrón",
     "En revisión",
     "Remuneración no válida",
     "Cargada",
     "Aprobada",
-    "Aprobada, pero no reconoce clave",
+    "Aprobada pero no reconoce clave", // ✅ Canonical: no comma
     "Rehacer vídeo",
     "Rechazada",
     "Falta documentación",
@@ -135,7 +134,7 @@ const STATUS_OPTIONS = [
     "El afiliado cambió la clave"
 ]
 
-const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
+const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF", "MyC Salud"]
 const TIPO_VENTA = ["Alta", "Cambio"]
 
 // Helper to check roles
@@ -144,10 +143,22 @@ const checkRole = (userRole: string | undefined, allowedRoles: string[]) => {
     return allowedRoles.includes(userRole.toLowerCase());
 };
 
-export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode = false }: AuditEditModalProps) {
+export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode = false, limitedEditingContext = null }: AuditEditModalProps) {
     const { theme } = useTheme()
     const { user } = useAuth()
     const { options: obraSocialAnteriorOptions, loading: obrasLoading, getOptionsWithFallback } = useSocialHealthList()
+
+    // ✅ Limited editing mode: Auditor/Supervisor in Falta clave/Rechazada/Pendiente contexts
+    // Can only edit: datosExtra, reprogramar (and fecha/hora when reprogramar is enabled)
+    const isLimitedEditor = useMemo(() => {
+        const userRole = auditPhonePermissions.normalizeUserRole(user?.role);
+        const isAuditor = userRole === 'auditor';
+        const isSupervisor = userRole === 'supervisor';
+        const isTargetContext = limitedEditingContext === 'falta-clave' ||
+                                limitedEditingContext === 'rechazada' ||
+                                limitedEditingContext === 'pendiente';
+        return (isAuditor || isSupervisor) && isTargetContext;
+    }, [user?.role, limitedEditingContext]);
 
     const getLocalDateTime = (utcDateString: string) => {
         if (!utcDateString) return { fecha: "", hora: "" }
@@ -165,21 +176,78 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
 
     const localSchedule = getLocalDateTime(audit.scheduledAt)
 
-    const userRole = user?.role?.toLowerCase();
+    const userRole = auditPhonePermissions.normalizeUserRole(user?.role);
     const isAsesor = userRole === 'asesor';
     const isGerencia = userRole === 'gerencia';
+    const isDesarrollador = userRole === 'desarrollador';
+    const canEditAuditPhone = auditPhonePermissions.canEditExistingAuditPhone(userRole);
     const isAdmin = userRole === 'administrativo';
-    const isAuditorOrSupervisor = ['auditor', 'supervisor'].includes(userRole || '');
+    const isAuditorOrSupervisor = ['auditor', 'supervisor', 'rr.hh'].includes(userRole || '');
     const isRecuperador = userRole === 'recuperador';
     const isEncargado = userRole === 'encargado'; // ✅ NUEVO: Rol Encargado
     const isIndependiente = userRole === 'independiente'; // ✅ NUEVO: Rol Independiente
     const isQRHecho = audit.status?.toLowerCase() === 'qr hecho';
-    const isLockedByQR = isQRHecho && !isAdmin && !isGerencia;
-    const canEditAuditPhone = canEditExistingAuditPhone(userRole);
+    const isLockedByQR = isQRHecho && !isAdmin && !isGerencia && !isDesarrollador;
+    const canUseGenericAuditUpdate = ['administrativo', 'auditor', 'supervisor', 'gerencia', 'rr.hh', 'encargado', 'independiente', 'recuperador'].includes(userRole);
 
     // ✅ Recuperador tiene acceso SOLO LECTURA
     // Independiente tiene permisos de edición como Auditor
     const isReadOnly = isReadOnlyMode;
+
+    // ✅ STATE DECLARATIONS (must come before callbacks that use them)
+    const [form, setForm] = useState({
+        nombre: audit.nombre || "",
+        cuil: audit.cuil || "",
+        telefono: auditPhonePermissions.getEditableAuditPhoneInitialValue(audit, userRole),
+        obraSocialAnterior: audit.obraSocialAnterior || "",
+        obraSocialVendida: audit.obraSocialVendida || "",
+        status: audit.status || "",
+        tipoVenta: audit.tipoVenta || "Alta",
+        asesor: audit.asesor?._id || "",
+        grupo: audit.groupId?.nombre || audit.groupId?.name || audit.grupo || "",
+        numeroEquipo: audit.asesor?.numeroEquipo || audit.numeroEquipo || "",
+        auditor: audit.auditor?._id || "",
+        administrador: audit.administrador?._id || "",
+        fecha: localSchedule.fecha,
+        hora: localSchedule.hora,
+        datosExtra: audit.datosExtra || "",
+        isRecuperada: audit.isRecuperada || false,
+        isReferido: false, // ✅ NUEVO: Checkbox Referido
+        disponibleParaVenta: (audit as any).disponibleParaVenta || false,
+        fechaCreacionQR: audit.fechaCreacionQR ? audit.fechaCreacionQR.split('T')[0] : "",
+        supervisor: audit.supervisorSnapshot?._id || ""
+    })
+
+    const [loading, setLoading] = useState(false)
+    const [reprogramar, setReprogramar] = useState(false)
+    const [activeTab, setActiveTab] = useState<"details" | "history" | "video">("details")
+    const [showCelebration, setShowCelebration] = useState(false)
+    const pendingResponseRef = useRef<any>(null) // Guardar datos de respuesta para después de la animación
+
+    const [asesores, setAsesores] = useState<any[]>([])
+    const [grupos, setGrupos] = useState<any[]>([])
+    const [auditores, setAuditores] = useState<any[]>([])
+    const [supervisores, setSupervisores] = useState<any[]>([])
+    const [administradores, setAdministradores] = useState<any[]>([])
+    const [availableSlots, setAvailableSlots] = useState<any[]>([])
+
+    // ✅ Helper to determine field disabled state for limited editors
+    // Limited editors (Auditor/Supervisor in Falta clave/Rechazada/Pendiente) can only edit:
+    // - datosExtra (always)
+    // - reprogramar checkbox (always)
+    // - fecha/hora (only when reprogramar is enabled)
+    const isFieldDisabled = useCallback((fieldName: string) => {
+        if (fieldName === 'telefono') return !canEditAuditPhone;
+        if (isDesarrollador) return true;
+
+        if (!isLimitedEditor) return false; // Not limited - use default behavior
+        if (fieldName === 'datosExtra') return false; // Always editable
+        if (fieldName === 'reprogramar') return false; // Always editable (checkbox)
+        if (fieldName === 'fecha' || fieldName === 'hora') {
+            return !reprogramar; // Editable only when reprogramar is checked
+        }
+        return true; // All other fields disabled
+    }, [canEditAuditPhone, isDesarrollador, isLimitedEditor, reprogramar]);
 
     // ✅ Determinar si la venta pertenece al supervisor del usuario en sesión
     // Usado para enmascarar el teléfono cuando no corresponde al equipo del usuario
@@ -188,7 +256,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
         if (isGerencia || isAdmin || isEncargado) return true;
 
         // Auditores e Independientes ven todos los teléfonos (no están asignados a equipos específicos)
-        if (userRole === 'auditor' || userRole === 'independiente') return true;
+        if (userRole === 'auditor') {
+            return !!user?._id && !!audit.auditor?._id && String(audit.auditor._id) === String(user._id);
+        }
+        if (userRole === 'independiente') return true;
 
         // Para supervisores: verificar asignación directa como supervisor o asesor de la venta
         if (userRole === 'supervisor') {
@@ -202,19 +273,22 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
         const userTeam = user?.numeroEquipo;
 
         return auditTeam && userTeam && String(auditTeam) === String(userTeam);
-    }, [isGerencia, isAdmin, userRole, audit.supervisorSnapshot, audit.asesor, user]);
+    }, [isGerencia, isAdmin, isEncargado, userRole, audit.supervisorSnapshot, audit.asesor, audit.auditor, user]);
 
     // Valor a mostrar en el campo teléfono (enmascarado si no pertenece al supervisor)
-    const displayPhone = belongsToUserSupervisor ? audit.telefono : '•••••••••••';
+    const displayPhone = belongsToUserSupervisor
+        ? (isMaskedPhoneValue(audit.telefono) ? "Dato inválido" : audit.telefono)
+        : (audit.telefonoMasked || '•••••••••••');
 
     // Status options logic
     const getAvailableStatuses = () => {
         if (isAdmin) {
             return [
                 "Pendiente", "QR hecho", "AFIP", "Baja laboral con nueva alta",
-                "Baja laboral sin nueva alta", "Padrón", "En revisión",
+                "Baja laboral sin nueva alta", "En revisión",
                 "Remuneración no válida", "Cargada", "Aprobada",
-                "Aprobada, pero no reconoce clave", "Rehacer vídeo",
+                "Aprobada pero no reconoce clave", // ✅ Canonical: no comma
+                "Rehacer vídeo",
                 "Rechazada", "Falta documentación", "Falta clave",
                 "Falta clave y documentación", "El afiliado cambió la clave"
             ];
@@ -252,48 +326,12 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
 
     const availableStatuses = getAvailableStatuses();
 
-    const [form, setForm] = useState({
-        nombre: audit.nombre || "",
-        cuil: audit.cuil || "",
-        telefono: canEditAuditPhone ? getEditableAuditPhoneInitialValue(audit, userRole) : (audit.telefono || ""),
-        obraSocialAnterior: audit.obraSocialAnterior || "",
-        obraSocialVendida: audit.obraSocialVendida || "",
-        status: audit.status || "",
-        tipoVenta: audit.tipoVenta || "Alta",
-        asesor: audit.asesor?._id || "",
-        grupo: audit.groupId?.nombre || audit.groupId?.name || audit.grupo || "",
-        numeroEquipo: audit.asesor?.numeroEquipo || audit.numeroEquipo || "",
-        auditor: audit.auditor?._id || "",
-        administrador: audit.administrador?._id || "",
-        fecha: localSchedule.fecha,
-        hora: localSchedule.hora,
-        datosExtra: audit.datosExtra || "",
-        isRecuperada: audit.isRecuperada || false,
-        isReferido: false, // ✅ NUEVO: Checkbox Referido
-        disponibleParaVenta: (audit as any).disponibleParaVenta || false, // ✅ NUEVO: Check para AFIP/Padrón
-        fechaCreacionQR: audit.fechaCreacionQR ? audit.fechaCreacionQR.split('T')[0] : "",
-        supervisor: audit.supervisorSnapshot?._id || ""
-    })
-
-    const [loading, setLoading] = useState(false)
-    const [reprogramar, setReprogramar] = useState(false)
-    const [activeTab, setActiveTab] = useState<"details" | "history" | "video">("details")
-    const [showCelebration, setShowCelebration] = useState(false)
-    const pendingResponseRef = useRef<any>(null) // Guardar datos de respuesta para después de la animación
-
-    const [asesores, setAsesores] = useState<any[]>([])
-    const [grupos, setGrupos] = useState<any[]>([])
-    const [auditores, setAuditores] = useState<any[]>([])
-    const [supervisores, setSupervisores] = useState<any[]>([])
-    const [administradores, setAdministradores] = useState<any[]>([])
-    const [availableSlots, setAvailableSlots] = useState<any[]>([])
-
     useEffect(() => {
         if (isOpen) {
             setForm({
                 nombre: audit.nombre || "",
                 cuil: audit.cuil || "",
-                telefono: audit.telefono || "",
+                telefono: auditPhonePermissions.getEditableAuditPhoneInitialValue(audit, userRole),
                 obraSocialAnterior: audit.obraSocialAnterior || "",
                 obraSocialVendida: audit.obraSocialVendida || "",
                 status: audit.status || "",
@@ -314,7 +352,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
             })
             fetchFilterOptions()
         }
-    }, [isOpen, audit])
+    }, [isOpen, audit, userRole])
 
     useEffect(() => {
         if (form.fecha) fetchAvailableSlots(form.fecha)
@@ -331,8 +369,8 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
             // Store ALL active users for the asesor dropdown (will be filtered by grupo)
             setAsesores(users.filter((u: any) => u.active !== false))
 
-            // Filter for auditores dropdown: auditor, supervisor, gerencia, recuperador
-            const filteredAuditores = users.filter((u: any) => ['auditor', 'supervisor', 'gerencia', 'recuperador'].includes(u.role?.toLowerCase()) && u.active !== false)
+            // Filter for auditores dropdown: auditor, supervisor, gerencia, recuperador, independiente, encargado, rr.hh
+            const filteredAuditores = users.filter((u: any) => ['auditor', 'supervisor', 'gerencia', 'recuperador', 'independiente', 'encargado', 'rr.hh'].includes(u.role?.toLowerCase()) && u.active !== false)
             console.log("AuditEditModal: Filtered auditores:", filteredAuditores.length, filteredAuditores)
             setAuditores(filteredAuditores)
             // ✅ NOTA: supervisores se calcula dinámicamente en el useMemo según isReferido
@@ -400,9 +438,12 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
             })
         }
 
-        // Si el supervisor seleccionado es Gerencia (pero no Eliana), mostrar solo Gerencias
+        // Si el supervisor seleccionado es Gerencia (pero no Eliana), mostrar solo Gerencias, Supervisores, Independientes y Auditores
         if (selectedSupervisorIsGerencia) {
-            return asesores.filter((u: any) => u.role?.toLowerCase() === 'gerencia')
+            return asesores.filter((u: any) => {
+                const role = u.role?.toLowerCase()
+                return role === 'gerencia' || role === 'supervisor' || role === 'independiente' || role === 'auditor'
+            })
         }
 
         if (!form.numeroEquipo && !form.grupo) {
@@ -452,6 +493,12 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
     const timeOptions = getEnabledTimeOptions()
 
     if (!isOpen) return null
+
+    // ✅ Defensive check: ensure audit data is available
+    if (!audit || !audit._id) {
+        console.error("[AuditEditModal] Modal opened without valid audit data")
+        return null
+    }
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         const { name, value, type } = e.target
@@ -539,11 +586,13 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
         try {
             setLoading(true)
 
-            const payload: any = buildAuditGenericUpdatePayload({
-                ...form,
+            const payload: any = {
+                ...auditPhonePermissions.buildAuditGenericUpdatePayload(form),
                 scheduledAt: `${form.fecha}T${form.hora}:00`,
-                fechaCreacionQR: form.fechaCreacionQR ? new Date(form.fechaCreacionQR).toISOString() : null
-            })
+                fechaCreacionQR: form.fechaCreacionQR ? new Date(form.fechaCreacionQR).toISOString() : null,
+                _sourceInterface: "seguimiento"
+            }
+            const shouldUpdatePhone = canEditAuditPhone && auditPhonePermissions.hasAuditPhoneChanged(audit, form.telefono)
 
             // Handle empty strings by converting to null
             if (!payload.asesor) payload.asesor = null
@@ -617,44 +666,78 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                 }
             }
 
-            const response = await api.audits.update(audit._id, payload)
-            let savedAudit = response.data
-            if (canEditAuditPhone && hasAuditPhoneChanged(audit, form.telefono)) {
-                const phoneResponse = await api.audits.updateTelefono(audit._id, {
-                    telefono: form.telefono,
-                    sourceComponent: "audit-edit-modal",
-                    reason: "Audit edit modal phone update",
-                    source: "form.telefono",
-                })
-                savedAudit = phoneResponse.data
+            let persistedAudit: any = audit
+
+            if (canUseGenericAuditUpdate) {
+                const response = await api.audits.update(audit._id, payload)
+                persistedAudit = response.data
+            } else if (!shouldUpdatePhone) {
+                toast.error("No tienes permiso para modificar estos campos.")
+                return
             }
 
-            // ✅ Verificar si el estado cambió a uno de celebración
-            const previousStatus = audit.status
-            const newStatus = form.status
-            const shouldCelebrate =
-                CELEBRATION_STATUSES.includes(newStatus) &&
-                previousStatus !== newStatus
+            if (shouldUpdatePhone) {
+                const phoneUpdate = await api.audits.updateTelefono(audit._id, {
+                    telefono: form.telefono,
+                    eventType: isMaskedPhoneValue(audit.telefono) ? "recovered" : "updated",
+                    reason: isMaskedPhoneValue(audit.telefono)
+                        ? "Recuperación manual desde Seguimiento"
+                        : "Actualización manual desde Seguimiento",
+                    source: isMaskedPhoneValue(audit.telefono)
+                        ? "seguimiento.manual_recovery"
+                        : "seguimiento.manual_edit",
+                    sourceComponent: "audit-edit-modal",
+                })
+                persistedAudit = phoneUpdate.data
+            }
 
-            console.log("[AuditEditModal] Estado anterior:", previousStatus, "-> Nuevo estado:", newStatus)
+            // ✅ Verificar contra el estado realmente persistido por backend.
+            const previousStatus = audit.status
+            const intendedStatus = form.status
+            const persistedStatus = persistedAudit?.status
+            const attemptedStatusChange = intendedStatus !== previousStatus
+
+            if (attemptedStatusChange && persistedStatus !== intendedStatus) {
+                console.warn("[AuditEditModal] Estado no persistido:", {
+                    previousStatus,
+                    intendedStatus,
+                    persistedStatus
+                })
+                toast.error("El estado no se actualizó. Verificá permisos o intentá nuevamente.")
+                return
+            }
+
+            const shouldCelebrate =
+                CELEBRATION_STATUSES.includes(persistedStatus) &&
+                previousStatus !== persistedStatus
+
+            console.log("[AuditEditModal] Estado anterior:", previousStatus, "-> Estado persistido:", persistedStatus)
             console.log("[AuditEditModal] Debería celebrar?:", shouldCelebrate, "Estados de celebración:", CELEBRATION_STATUSES)
 
             if (shouldCelebrate) {
-                // Mostrar animación de celebración PRIMERO, luego guardar
+                // Mostrar animación después de confirmar persistencia en backend.
                 console.log("[AuditEditModal] 🎉 Activando celebración!")
                 toast.success("🎉 ¡Excelente! Venta completada")
-                // Guardar referencia a los datos para usarlos después de la animación
-                pendingResponseRef.current = savedAudit
+                // Guardar referencia a los datos persistidos para usarlos después de la animación
+                pendingResponseRef.current = persistedAudit
                 setShowCelebration(true)
                 // NO llamar onSave/onClose aquí - se hará en onComplete de la animación
             } else {
                 toast.success("Auditoría actualizada")
-                onSave(savedAudit)
+                onSave(persistedAudit)
                 onClose()
             }
         } catch (error: any) {
             console.error("Error updating audit:", error)
-            toast.error(error.response?.data?.message || "Error al actualizar auditoría")
+            const errorMessage = error.response?.data?.message || "Error al actualizar auditoría"
+            const blockingAudit = error.response?.data?.blockingAudit
+
+            // 🔒 AUDITOR ASSIGNMENT LOCK: Show more informative message if blocking audit info is available
+            if (error.response?.status === 409 && blockingAudit?.affiliateName) {
+                toast.error(`Este auditor ya tiene una auditoría pendiente hoy con ${blockingAudit.affiliateName}. Debe finalizarla antes de tomar otra.`)
+            } else {
+                toast.error(errorMessage)
+            }
         } finally {
             setLoading(false)
         }
@@ -730,6 +813,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                     >
                         Historial
                     </button>
+                    {/* Video tab visible only to assigned auditor to prevent cross-audits */}
                     {process.env.NEXT_PUBLIC_ENABLE_VIDEO_AUDIT_MVP === "true" && user?._id && audit.auditor?._id && String(user._id) === String(audit.auditor._id) && (
                         <button
                             onClick={() => setActiveTab("video")}
@@ -745,7 +829,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                     )}
                 </div>
 
-                {/* Contenido principal */}
+                {/* Contenido desplazable */}
                 <div className="flex-1 overflow-y-auto p-6">
                     {isLockedByQR && (
                         <div className={cn(
@@ -770,6 +854,17 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                             </p>
                         </div>
                     )}
+                    {/* ✅ Banner de edición limitada para Auditor/Supervisor en Falta clave/Rechazada/Pendiente */}
+                    {isLimitedEditor && (
+                        <div className={cn(
+                            "mb-4 p-3 rounded-lg border",
+                            theme === "dark" ? "bg-amber-500/10 border-amber-500/30" : "bg-amber-50 border-amber-200"
+                        )}>
+                            <p className={cn("text-sm font-medium", theme === "dark" ? "text-amber-400" : "text-amber-700")}>
+                                🔒 Edición limitada - Solo puedes modificar: Datos Extra/Notas, Reprogramar turno (y Fecha/Hora cuando esté habilitado).
+                            </p>
+                        </div>
+                    )}
                     {/* ✅ Recuperador tiene acceso SOLO LECTURA - deshabilitamos TODO el fieldset */}
                     {activeTab === "video" ? (
                         <VideoAuditPanel ventaId={audit._id} />
@@ -787,10 +882,11 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             name="nombre"
                                             value={form.nombre}
                                             onChange={handleChange}
-                                            
+                                            disabled={isFieldDisabled('nombre')}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                                                                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                                                isFieldDisabled('nombre') && "opacity-60 cursor-not-allowed",
+                                                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         />
                                     </div>
@@ -798,19 +894,35 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                         <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
                                             Teléfono
                                         </label>
-                                        <input
-                                            name="telefono"
-                                            value={canEditAuditPhone ? form.telefono : displayPhone}
-                                            onChange={handleChange}
-                                            readOnly={!canEditAuditPhone}
-                                            disabled={!canEditAuditPhone}
-                                            
-                                            className={cn(
-                                                "w-full px-3 py-2 rounded-lg border text-sm",
-                                                !canEditAuditPhone && "text-gray-400 select-none cursor-not-allowed",
-                                                                                                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
-                                            )}
-                                        />
+                                        {canEditAuditPhone ? (
+                                            <input
+                                                name="telefono"
+                                                value={form.telefono}
+                                                onChange={handleChange}
+                                                disabled={isFieldDisabled('telefono')}
+                                                placeholder={isMaskedPhoneValue(audit.telefono) ? "Ingresar teléfono válido" : undefined}
+                                                className={cn(
+                                                    "w-full px-3 py-2 rounded-lg border text-sm",
+                                                    isFieldDisabled('telefono') && "opacity-60 cursor-not-allowed",
+                                                    theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                                                )}
+                                            />
+                                        ) : (
+                                            <input
+                                                value={displayPhone}
+                                                readOnly
+                                                disabled
+                                                className={cn(
+                                                    "w-full px-3 py-2 rounded-lg border text-sm text-gray-400 select-none cursor-not-allowed",
+                                                    theme === "dark" ? "bg-white/5 border-white/10" : "bg-white border-gray-200"
+                                                )}
+                                            />
+                                        )}
+                                        {isMaskedPhoneValue(audit.telefono) && (
+                                            <p className={cn("text-xs mt-1", theme === "dark" ? "text-amber-400" : "text-amber-600")}>
+                                                Dato inválido: requiere recuperación auditada.
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
 
@@ -822,10 +934,11 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                         name="cuil"
                                         value={form.cuil}
                                         onChange={handleChange}
-                                        
+                                        disabled={isFieldDisabled('cuil')}
                                         className={cn(
                                             "w-full px-3 py-2 rounded-lg border text-sm",
-                                                                                        theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                                            isFieldDisabled('cuil') && "opacity-60 cursor-not-allowed",
+                                            theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                         )}
                                     />
                                 </div>
@@ -840,7 +953,7 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             value={form.obraSocialAnterior}
                                             onChange={(value) => setForm(prev => ({ ...prev, obraSocialAnterior: value }))}
                                             options={getOptionsWithFallback(form.obraSocialAnterior)}
-                                            disabled={obrasLoading}
+                                            disabled={isFieldDisabled('obraSocialAnterior') || obrasLoading}
                                             placeholder="-- Seleccionar --"
                                             theme={theme}
                                         />
@@ -853,10 +966,11 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             name="obraSocialVendida"
                                             value={form.obraSocialVendida}
                                             onChange={handleChange}
-                                            
+                                            disabled={isFieldDisabled('obraSocialVendida')}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                                                                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                                                isFieldDisabled('obraSocialVendida') && "opacity-60 cursor-not-allowed",
+                                                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
                                             {OBRAS_VENDIDAS.map(o => (
@@ -876,8 +990,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             name="status"
                                             value={form.status}
                                             onChange={handleChange}
+                                            disabled={isFieldDisabled('status')}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
+                                                isFieldDisabled('status') && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
@@ -892,8 +1008,8 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                                 </option>
                                             ))}
                                         </select>
-                                        {/* ✅ Checkbox "Disponible para venta" - Solo visible para AFIP o Padrón */}
-                                        {(form.status?.toLowerCase() === 'afip' || form.status?.toLowerCase() === 'padrón') && (
+                                        {/* Checkbox "Disponible para venta" - Solo visible para AFIP */}
+                                        {form.status?.toLowerCase() === 'afip' && (
                                             <div className="flex items-center gap-2 mt-2">
                                                 <input
                                                     type="checkbox"
@@ -916,10 +1032,11 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             name="tipoVenta"
                                             value={form.tipoVenta}
                                             onChange={handleChange}
-                                            
+                                            disabled={isFieldDisabled('tipoVenta')}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                                                                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                                                isFieldDisabled('tipoVenta') && "opacity-60 cursor-not-allowed",
+                                                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
                                             {TIPO_VENTA.map(t => (
@@ -939,10 +1056,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             name="asesor"
                                             value={form.asesor}
                                             onChange={handleChange}
-                                            disabled={!isGerencia && !isEncargado && !isRecuperador}
+                                            disabled={isFieldDisabled('asesor') || (!isGerencia && !isEncargado && !isRecuperador)}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                (!isGerencia && !isEncargado && !isRecuperador) && "opacity-60 cursor-not-allowed",
+                                                (isFieldDisabled('asesor') || (!isGerencia && !isEncargado && !isRecuperador)) && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
@@ -960,10 +1077,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             name="grupo"
                                             value={form.grupo}
                                             onChange={handleChange}
-                                            disabled={(!isGerencia && !isEncargado && !isRecuperador) || selectedSupervisorIsGerencia}
+                                            disabled={isFieldDisabled('grupo') || (!isGerencia && !isEncargado && !isRecuperador) || selectedSupervisorIsGerencia}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                ((!isGerencia && !isEncargado && !isRecuperador) || selectedSupervisorIsGerencia) && "opacity-60 cursor-not-allowed",
+                                                (isFieldDisabled('grupo') || (!isGerencia && !isEncargado && !isRecuperador) || selectedSupervisorIsGerencia) && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
@@ -986,10 +1103,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             name="supervisor"
                                             value={form.supervisor}
                                             onChange={handleChange}
-                                            disabled={!isGerencia && !isEncargado && !isRecuperador}
+                                            disabled={isFieldDisabled('supervisor') || (!isGerencia && !isEncargado && !isRecuperador)}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                (!isGerencia && !isEncargado && !isRecuperador) && "opacity-60 cursor-not-allowed",
+                                                (isFieldDisabled('supervisor') || (!isGerencia && !isEncargado && !isRecuperador)) && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
@@ -1009,9 +1126,11 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             name="auditor"
                                             value={form.auditor}
                                             onChange={handleChange}
-                                                                                        className={cn(
+                                            disabled={isFieldDisabled('auditor')}
+                                            className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                                                                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
+                                                isFieldDisabled('auditor') && "opacity-60 cursor-not-allowed",
+                                                theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
                                             <option value="">Seleccione</option>
@@ -1031,10 +1150,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                         name="administrador"
                                         value={form.administrador}
                                         onChange={handleChange}
-                                        disabled={!isGerencia && !isAdmin} // Recuperador no puede modificar
+                                        disabled={isFieldDisabled('administrador') || (!isGerencia && !isAdmin)} // Recuperador no puede modificar
                                         className={cn(
                                             "w-full px-3 py-2 rounded-lg border text-sm",
-                                            (!isGerencia && !isAdmin) && "opacity-60 cursor-not-allowed",
+                                            (isFieldDisabled('administrador') || (!isGerencia && !isAdmin)) && "opacity-60 cursor-not-allowed",
                                             theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                         )}
                                     >
@@ -1056,10 +1175,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             name="fecha"
                                             value={form.fecha}
                                             onChange={handleChange}
-                                            disabled={!reprogramar}
+                                            disabled={isFieldDisabled('fecha')}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                !reprogramar && "opacity-50 cursor-not-allowed",
+                                                isFieldDisabled('fecha') && "opacity-50 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         />
@@ -1072,10 +1191,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             name="hora"
                                             value={form.hora}
                                             onChange={handleChange}
-                                            disabled={!reprogramar}
+                                            disabled={isFieldDisabled('hora')}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
-                                                !reprogramar && "opacity-50 cursor-not-allowed",
+                                                isFieldDisabled('hora') && "opacity-50 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         >
@@ -1100,8 +1219,10 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                             name="fechaCreacionQR"
                                             value={form.fechaCreacionQR}
                                             onChange={handleChange}
+                                            disabled={isFieldDisabled('fechaCreacionQR')}
                                             className={cn(
                                                 "w-full px-3 py-2 rounded-lg border text-sm",
+                                                isFieldDisabled('fechaCreacionQR') && "opacity-60 cursor-not-allowed",
                                                 theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                                             )}
                                         />
@@ -1146,9 +1267,11 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                         name="isRecuperada"
                                         checked={form.isRecuperada}
                                         onChange={handleChange}
-                                                                                className={cn(
+                                        disabled={isFieldDisabled('isRecuperada')}
+                                        className={cn(
                                             "w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500",
-                                                                                    )}
+                                            isFieldDisabled('isRecuperada') && "opacity-60 cursor-not-allowed"
+                                        )}
                                     />
                                     <label className={cn("text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
                                         ¿Recuperada?
@@ -1168,7 +1291,11 @@ export function AuditEditModal({ isOpen, onClose, audit, onSave, isReadOnlyMode 
                                         name="isReferido"
                                             checked={form.isReferido}
                                             onChange={handleChange}
-                                            className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                                            disabled={isFieldDisabled('isReferido')}
+                                            className={cn(
+                                                "w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500",
+                                                isFieldDisabled('isReferido') && "opacity-60 cursor-not-allowed"
+                                            )}
                                         />
                                         <label className={cn("text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
                                             Referido

@@ -384,6 +384,11 @@
   animation: pulse-slow 3s ease-in-out infinite;
 }
 
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
 /* Fix for dropdown options - ensure text is always readable */
 select option {
   background-color: white !important;

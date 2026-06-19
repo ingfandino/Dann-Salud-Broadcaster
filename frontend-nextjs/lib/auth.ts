@@ -10,6 +10,9 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import * as auditPhonePermissions from './auditPhonePermissions';
+
+export const normalizeUserRole = auditPhonePermissions.normalizeUserRole;
 
 /** Estructura del usuario autenticado */
 interface User {
@@ -18,6 +21,7 @@ interface User {
     email: string;
     role: string;
     numeroEquipo?: string;
+    obraSocialId?: string | null;
     active?: boolean;
 }
 
@@ -140,19 +144,19 @@ export const useAuth = create<AuthState>()(
 // ✅ Helper para verificar si el usuario tiene nivel de supervisor (incluye encargado)
 export const isSupervisorLevel = (role?: string): boolean => {
     if (!role) return false;
-    const normalizedRole = role.toLowerCase();
+    const normalizedRole = normalizeUserRole(role);
     return normalizedRole === 'supervisor' || normalizedRole === 'encargado';
 };
 
 // ✅ Helper para verificar si el usuario puede editar auditorías (gerencia, auditor, supervisor, encargado)
 export const canEditAudits = (role?: string): boolean => {
     if (!role) return false;
-    const normalizedRole = role.toLowerCase();
+    const normalizedRole = normalizeUserRole(role);
     return ['gerencia', 'auditor', 'supervisor', 'encargado'].includes(normalizedRole);
 };
 
 // ✅ Helper para verificar si el usuario puede eliminar (solo gerencia)
 export const canDelete = (role?: string): boolean => {
     if (!role) return false;
-    return role.toLowerCase() === 'gerencia';
+    return normalizeUserRole(role) === 'gerencia';
 };

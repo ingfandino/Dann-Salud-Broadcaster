@@ -10,6 +10,8 @@ import { RefreshCw, Download, ChevronDown, CheckCircle2 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { connectSocket } from "@/lib/socket"
 import { MonthlyComparisonChart } from "./liquidacion-monthly-chart"
+import { MotivationalProgressBars } from "./motivational-progress-bars"
+import { LiquidacionSalaryPanel } from "./liquidacion-salary-panel"
 
 const OBRAS_SOCIALES = ["Binimed", "Meplife", "TURF"]
 
@@ -79,7 +81,7 @@ interface ColumnConfig {
 }
 
 interface Props {
-  tipoLiquidacion: 'supervisor' | 'auditor' | 'administrativo'
+  tipoLiquidacion: 'supervisor' | 'auditor' | 'administrativo' | 'asesor'
   accentColor: string
   columnas?: ColumnConfig[]
 }
@@ -118,6 +120,17 @@ const DEFAULT_COLUMNS_ADMIN: ColumnConfig[] = [
   { key: 'auditor', label: 'Auditor' },
 ]
 
+const DEFAULT_COLUMNS_ASESOR: ColumnConfig[] = [
+  { key: 'fecha', label: 'Fecha' },
+  { key: 'afiliado', label: 'Afiliado' },
+  { key: 'cuil', label: 'CUIL' },
+  { key: 'obraSocial', label: 'O.S. Ven' },
+  { key: 'estado', label: 'Estado' },
+  { key: 'asesor', label: 'Asesor' },
+  { key: 'supervisor', label: 'Supervisor' },
+  { key: 'auditor', label: 'Auditor' },
+]
+
 export function LiquidacionTableBase({ tipoLiquidacion, accentColor, columnas }: Props) {
   const { theme } = useTheme()
   const { user } = useAuth()
@@ -146,9 +159,11 @@ export function LiquidacionTableBase({ tipoLiquidacion, accentColor, columnas }:
   const [administradores, setAdministradores] = useState<any[]>([])
   const [isSupervisorDropdownOpen, setIsSupervisorDropdownOpen] = useState(false)
   const [isAsesorDropdownOpen, setIsAsesorDropdownOpen] = useState(false)
+  const [fechaIngreso, setFechaIngreso] = useState<string | null>(null)
 
   const cols = columnas || (
     tipoLiquidacion === 'supervisor' ? DEFAULT_COLUMNS_SUPERVISOR :
+    tipoLiquidacion === 'asesor' ? DEFAULT_COLUMNS_ASESOR :
     tipoLiquidacion === 'auditor' ? DEFAULT_COLUMNS_AUDITOR :
     DEFAULT_COLUMNS_ADMIN
   )
@@ -187,9 +202,17 @@ export function LiquidacionTableBase({ tipoLiquidacion, accentColor, columnas }:
     try {
       const { data } = await api.users.list()
       const users = Array.isArray(data) ? data : []
-      setAsesores(users.filter((u: any) => (u.role?.toLowerCase() === "asesor" || u.role?.toLowerCase() === "independiente") && u.active !== false))
+      // ✅ NUEVA LÓGICA: Asesores incluyen Asesor + Independiente + Auditor con numeroEquipo
+      setAsesores(users.filter((u: any) => (
+        (u.role?.toLowerCase() === "asesor" || 
+         u.role?.toLowerCase() === "independiente" ||
+         (u.role?.toLowerCase() === "auditor" && u.numeroEquipo)) && 
+        u.active !== false
+      )))
       setSupervisores(users.filter((u: any) => ((u.role?.toLowerCase() === "supervisor" || u.role?.toLowerCase() === "encargado") || u._id === "68f2688f549813490d3ee8ee") && u.active !== false))
-      setAuditores(users.filter((u: any) => (u.role?.toLowerCase() === "auditor" || u.role?.toLowerCase() === "independiente") && u.active !== false))
+      // Auditores: ALL role=auditor or RR.HH users (with or without numeroEquipo) for payroll summary.
+      // Auditor/RR.HH without numeroEquipo → regular pay. Auditor/RR.HH with numeroEquipo → hybrid: $4k/audit, no basic.
+      setAuditores(users.filter((u: any) => (u.role?.toLowerCase() === "auditor" || u.role?.toLowerCase() === "rr.hh") && u.active !== false))
       setAdministradores(users.filter((u: any) => u.role?.toLowerCase() === "administrativo" && u.active !== false))
     } catch (err) {
       console.error(err)
@@ -234,6 +257,41 @@ export function LiquidacionTableBase({ tipoLiquidacion, accentColor, columnas }:
     }
   }, [tipoLiquidacion])
 
+  // Fecha de ingreso (RR.HH.) - solo cuando un único usuario está seleccionado
+  useEffect(() => {
+    const fetchFechaIngreso = async () => {
+      let targetUser: any = null
+
+      if (tipoLiquidacion === 'supervisor' && selectedSupervisores.length === 1) {
+        targetUser = supervisores.find((s: any) => s.nombre === selectedSupervisores[0])
+      } else if (tipoLiquidacion === 'asesor' && selectedAsesores.length === 1) {
+        targetUser = asesores.find((a: any) => a.nombre === selectedAsesores[0])
+      }
+
+      if (!targetUser?._id) {
+        setFechaIngreso(null)
+        return
+      }
+
+      try {
+        const { data } = await api.employees.getIngreso(targetUser._id)
+        if (data?.fechaIngreso) {
+          const d = new Date(data.fechaIngreso)
+          const day = String(d.getDate()).padStart(2, '0')
+          const month = String(d.getMonth() + 1).padStart(2, '0')
+          const year = d.getFullYear()
+          setFechaIngreso(`${day}/${month}/${year}`)
+        } else {
+          setFechaIngreso('No registrada')
+        }
+      } catch {
+        setFechaIngreso('No registrada')
+      }
+    }
+
+    fetchFechaIngreso()
+  }, [tipoLiquidacion, selectedSupervisores, selectedAsesores, supervisores, asesores])
+
   // Week logic
   const getWeekStart = (date: Date) => {
     const d = new Date(date)
@@ -261,21 +319,22 @@ export function LiquidacionTableBase({ tipoLiquidacion, accentColor, columnas }:
   }
 
   const getStatusFilters = () => {
-    if (tipoLiquidacion === 'supervisor') return ["QR hecho", "Cargada", "Aprobada"]
+    // ✅ NUEVA LÓGICA: Supervisor y Asesor solo ven QR hecho (el backend filtra Binimed exception)
+    if (tipoLiquidacion === 'supervisor' || tipoLiquidacion === 'asesor') return ["QR hecho", "Cargada (Binimed excepción)"]
     if (tipoLiquidacion === 'auditor') return [
       'Rechazada', 'Completa', 'Pendiente', 'QR hecho',
       'QR hecho pero pendiente de aprobación', 'AFIP',
       'Baja laboral sin nueva alta', 'Baja laboral con nueva alta',
-      'Padrón', 'En revisión', 'Remuneración no válida',
-      'Cargada', 'Aprobada', 'Aprobada, pero no reconoce clave',
+      'En revisión', 'Remuneración no válida',
+      'Cargada', 'Aprobada', 'Aprobada pero no reconoce clave', // ✅ Canonical: no comma
       'El afiliado cambió la clave'
     ]
     if (tipoLiquidacion === 'administrativo') return [
       'QR hecho', 'QR hecho (Temporal)',
       'QR hecho pero pendiente de aprobación', 'AFIP',
-      'Padrón', 'Baja laboral sin nueva alta', 'Baja laboral con nueva alta',
+      'Baja laboral sin nueva alta', 'Baja laboral con nueva alta',
       'Remuneración no válida', 'Cargada', 'Aprobada',
-      'Aprobada, pero no reconoce clave', 'Rechazada'
+      'Aprobada pero no reconoce clave', 'Rechazada' // ✅ Canonical: no comma
     ]
     return []
   }
@@ -427,6 +486,79 @@ export function LiquidacionTableBase({ tipoLiquidacion, accentColor, columnas }:
     return administradores.map((a: any) => ({ _id: a._id, nombre: a.nombre }))
   }, [supervisores, auditores, administradores, tipoLiquidacion])
 
+  // --- Salary panel helpers ---
+
+  // Supervisors for salary summary: ONLY role=supervisor (exclude gerencia/encargado)
+  const supervisoresPayroll = useMemo(() =>
+    supervisores.filter((s: any) => s.role?.toLowerCase() === 'supervisor')
+  , [supervisores])
+
+  // Current labor week items from filteredItems (Fri–Thu, using the selected week)
+  const currentWeekFilteredItems = useMemo(() => {
+    if (!itemsByWeek[currentWeek - 1]) return []
+    const weekStart = itemsByWeek[currentWeek - 1].start
+    const weekStartDate = new Date(weekStart + 'T00:00:00')
+    // week ends Thursday (6 days after Friday start)
+    const weekEndDate = new Date(weekStartDate)
+    weekEndDate.setDate(weekEndDate.getDate() + 6)
+    weekEndDate.setHours(23, 59, 59, 999)
+    return filteredItems.filter(item => {
+      const dateField = item.fechaCreacionQR || item.scheduledAt
+      const d = parseUTCDate(dateField)
+      return d >= weekStartDate && d <= weekEndDate
+    })
+  }, [filteredItems, itemsByWeek, currentWeek])
+
+  // Weekly count for the individual user view (intersect filteredItems with selected week)
+  const ventasSemanalForPanel = useMemo(() => {
+    if (filters.dateFrom || filters.dateTo) return filteredItems.length
+    return currentWeekFilteredItems.length
+  }, [currentWeekFilteredItems, filteredItems, filters.dateFrom, filters.dateTo])
+
+  // Per-user sale counts from filteredItems (for global salary summary)
+  const userSaleCountsFromItems = useMemo(() => {
+    const map: Record<string, number> = {}
+    if (tipoLiquidacion === 'asesor' || tipoLiquidacion === 'supervisor') {
+      // Count by asesor._id (for both asesor and supervisor tabs)
+      filteredItems.forEach(item => {
+        const id = item.asesor?._id || item.asesor
+        if (id) map[String(id)] = (map[String(id)] || 0) + 1
+      })
+    } else if (tipoLiquidacion === 'auditor') {
+      // Count by auditor._id
+      filteredItems.forEach(item => {
+        const id = item.auditor?._id || item.auditor
+        if (id) map[String(id)] = (map[String(id)] || 0) + 1
+      })
+    }
+    return map
+  }, [filteredItems, tipoLiquidacion])
+
+  // Build userList with sale counts for global salary summary
+  const salaryPanelUserList = useMemo(() => {
+    if (tipoLiquidacion === 'asesor') {
+      return asesores.map((u: any) => ({ _id: u._id, nombre: u.nombre, ventasMensuales: userSaleCountsFromItems[String(u._id)] || 0, numeroEquipo: u.numeroEquipo || '' }))
+    }
+    if (tipoLiquidacion === 'supervisor') {
+      // For supervisor tab: aggregate by supervisor (sum all their team asesores' sales)
+      return supervisoresPayroll.map((u: any) => {
+        // Sum sales of all asesores whose supervisorSnapshot or asesor.supervisor matches this supervisor
+        const supItems = filteredItems.filter(item => getSupervisorName(item) === u.nombre)
+        return { _id: u._id, nombre: u.nombre, ventasMensuales: supItems.length, numeroEquipo: u.numeroEquipo || '' }
+      })
+    }
+    if (tipoLiquidacion === 'auditor') {
+      return auditores.map((u: any) => ({
+        _id: u._id,
+        nombre: u.nombre,
+        ventasMensuales: userSaleCountsFromItems[String(u._id)] || 0,
+        numeroEquipo: u.numeroEquipo || '',
+        role: u.role || 'auditor',
+      }))
+    }
+    return []
+  }, [tipoLiquidacion, asesores, supervisoresPayroll, auditores, userSaleCountsFromItems, filteredItems])
+
   const renderCellValue = (item: any, colKey: string) => {
     switch (colKey) {
       case 'fecha':
@@ -463,6 +595,49 @@ export function LiquidacionTableBase({ tipoLiquidacion, accentColor, columnas }:
         userList={chartUserList}
         accentColor={accentColor}
       />
+
+      {/* Motivational Progress Bars - Solo para Asesor y Supervisor en vista individual */}
+      {(tipoLiquidacion === 'asesor' || tipoLiquidacion === 'supervisor') && (
+        <MotivationalProgressBars
+          tipo={tipoLiquidacion as 'asesor' | 'supervisor'}
+          ventasMensuales={stats.total}
+          ventasSemanal={ventasSemanalForPanel}
+          isIndividualView={selectedAsesores.length === 1 || (tipoLiquidacion === 'supervisor' && isSupervisorRole && selectedSupervisores.length === 1)}
+        />
+      )}
+
+      {/* Panel de Cálculo de Sueldos - Para Asesores, Supervisores y Auditores */}
+      {(tipoLiquidacion === 'asesor' || tipoLiquidacion === 'supervisor' || tipoLiquidacion === 'auditor') && (
+        <LiquidacionSalaryPanel
+          tipo={tipoLiquidacion as 'asesor' | 'supervisor' | 'auditor'}
+          userId={
+            tipoLiquidacion === 'asesor' && selectedAsesores.length === 1
+              ? asesores.find((a: any) => a.nombre === selectedAsesores[0])?._id
+              : tipoLiquidacion === 'supervisor' && isSupervisorRole
+              ? user?._id
+              : undefined
+          }
+          userName={
+            tipoLiquidacion === 'asesor' && selectedAsesores.length === 1
+              ? selectedAsesores[0]
+              : tipoLiquidacion === 'supervisor' && isSupervisorRole
+              ? user?.nombre
+              : undefined
+          }
+          ventasMensuales={stats.total}
+          ventasSemanal={ventasSemanalForPanel}
+          isGlobalView={
+            tipoLiquidacion === 'asesor'
+              ? selectedAsesores.length !== 1
+              : tipoLiquidacion === 'supervisor'
+              ? isSupervisorRole ? false : selectedSupervisores.length !== 1
+              : true
+          }
+          userList={salaryPanelUserList}
+          dateFrom={filters.dateFrom}
+          dateTo={filters.dateTo}
+        />
+      )}
 
       {/* Header + Export */}
       <div className="flex flex-col md:flex-row justify-between gap-3">
@@ -606,6 +781,16 @@ export function LiquidacionTableBase({ tipoLiquidacion, accentColor, columnas }:
           Limpiar
         </button>
       </div>
+
+      {/* Fecha de ingreso (solo Supervisores / Asesores con 1 seleccionado) */}
+      {fechaIngreso !== null && (tipoLiquidacion === 'supervisor' || tipoLiquidacion === 'asesor') && (
+        <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium",
+          theme === "dark" ? "bg-white/5 border-white/10 text-gray-300" : "bg-gray-50 border-gray-200 text-gray-700"
+        )}>
+          <span className="opacity-70">Fecha de ingreso:</span>
+          <span className={cn(fechaIngreso === 'No registrada' ? "text-red-500" : "text-foreground")}>{fechaIngreso}</span>
+        </div>
+      )}
 
       {/* Table */}
       <div className={cn("rounded-xl border shadow-sm overflow-hidden", theme === "dark" ? "bg-white/5 border-white/10" : "bg-white border-gray-200")}>

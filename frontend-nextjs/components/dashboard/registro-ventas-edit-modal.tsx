@@ -7,6 +7,7 @@ import { X, Save, Calendar as CalendarIcon } from "lucide-react"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth"
+import { VideoAuditPanel } from "./video-audit-panel"
 
 const STATUS_OPTIONS = [
   "Pendiente",
@@ -17,12 +18,11 @@ const STATUS_OPTIONS = [
   "AFIP",
   "Baja laboral con nueva alta",
   "Baja laboral sin nueva alta",
-  "Padrón",
   "En revisión",
   "Remuneración no válida",
   "Cargada",
   "Aprobada",
-  "Aprobada, pero no reconoce clave",
+  "Aprobada pero no reconoce clave", // ✅ Canonical: no comma
   "Rehacer vídeo",
   "Rechazada",
   "Falta documentación",
@@ -32,6 +32,7 @@ const STATUS_OPTIONS = [
   "Autovinculación",
   "Caída",
   "Completa",
+  "Padron"
 ]
 
 const STATUS_MAP_TO_SEGUIMIENTO: Record<string, string> = {
@@ -39,7 +40,7 @@ const STATUS_MAP_TO_SEGUIMIENTO: Record<string, string> = {
   "QR hecho (Temporal)": "Baja laboral sin nueva alta",
 }
 
-const OBRAS_VENDIDAS = ["Binimed", "Meplife", "RAS", "TURF", "Medicenter"]
+const OBRAS_VENDIDAS = ["Binimed", "Meplife", "RAS", "TURF", "Medicenter", "MyC Salud"]
 
 interface Audit {
   _id: string
@@ -112,8 +113,8 @@ interface Audit {
   cuit?: string
   observacionPrivada?: string
   clave?: string
+  esAutovinculacion?: boolean
   email?: string
-  mesPadron?: string
   statusAdministrativo?: string
 }
 
@@ -170,18 +171,18 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
     aporte: audit.aporte?.toString() || "",
     observacionPrivada: audit.observacionPrivada || "",
     clave: audit.clave || "",
+    esAutovinculacion: audit.esAutovinculacion || false,
     email: audit.email || "",
     status: audit.statusAdministrativo || audit.status || "",
     administrador: audit.administrador?._id || "",
     supervisor: audit.supervisorSnapshot?._id || "",
     asesor: audit.asesor?._id || "",
     datosExtra: audit.datosExtra || "",
-    mesPadron: audit.mesPadron || "",
     disponibleParaVenta: (audit as any).disponibleParaVenta || false,
   })
 
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<"details" | "history">("details")
+  const [activeTab, setActiveTab] = useState<"details" | "history" | "video">("details")
 
   const [asesores, setAsesores] = useState<any[]>([])
   const [supervisores, setSupervisores] = useState<any[]>([])
@@ -197,13 +198,13 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
         aporte: audit.aporte?.toString() || "",
         observacionPrivada: audit.observacionPrivada || "",
         clave: audit.clave || "",
+        esAutovinculacion: audit.esAutovinculacion || false,
         email: audit.email || "",
         status: audit.statusAdministrativo || audit.status || "",
         administrador: audit.administrador?._id || "",
         supervisor: audit.supervisorSnapshot?._id || "",
         asesor: audit.asesor?._id || "",
         datosExtra: audit.datosExtra || "",
-        mesPadron: audit.mesPadron || "",
         disponibleParaVenta: (audit as any).disponibleParaVenta || false,
       })
       fetchFilterOptions()
@@ -254,6 +255,12 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
         supervisor: value,
         asesor: ''
       }))
+    } else if (name === 'esAutovinculacion') {
+      setForm(prev => ({
+        ...prev,
+        esAutovinculacion: checked,
+        clave: checked ? "" : prev.clave
+      }))
     } else {
       setForm(prev => ({
         ...prev,
@@ -263,15 +270,19 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
   }
 
   const handleSave = async () => {
-    if (form.status === "Padrón" && !form.mesPadron) {
-      toast.error("Debe indicar el mes de liberación del padrón")
-      return
-    }
-
     try {
       setLoading(true)
 
       const estadoParaSeguimiento = STATUS_MAP_TO_SEGUIMIENTO[form.status] || form.status
+
+      const requiresClave = form.status === "QR hecho" || form.status === "QR hecho (Temporal)"
+      const isDesarrollador = userRole === 'desarrollador'
+      if (requiresClave && !form.clave?.trim() && !form.esAutovinculacion && !isDesarrollador) {
+        toast.error("Debe ingresar la Clave para asignar este estado (excepto en autovinculación)")
+        return
+      }
+
+      setLoading(true)
 
       const payload: any = {
         cuil: form.cuil,
@@ -279,12 +290,13 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
         aporte: form.aporte ? parseFloat(form.aporte) : null,
         observacionPrivada: form.observacionPrivada,
         clave: form.clave,
+        esAutovinculacion: form.esAutovinculacion,
         email: form.email,
         status: estadoParaSeguimiento,
         statusAdministrativo: form.status,
+        _sourceInterface: "registro_ventas",
         datosExtra: form.datosExtra,
-        mesPadron: form.status === "Padrón" ? form.mesPadron : null,
-        disponibleParaVenta: (form.status?.toLowerCase() === 'afip' || form.status?.toLowerCase() === 'padrón')
+        disponibleParaVenta: form.status?.toLowerCase() === 'afip'
           ? form.disponibleParaVenta
           : false,
       }
@@ -414,10 +426,25 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
           >
             Historial
           </button>
+          {process.env.NEXT_PUBLIC_ENABLE_VIDEO_AUDIT_MVP === "true" && (
+            <button
+              onClick={() => setActiveTab("video")}
+              className={cn(
+                "flex-1 px-4 py-3 text-sm font-medium transition-colors border-b-2 flex items-center justify-center gap-2",
+                activeTab === "video"
+                  ? theme === "dark" ? "border-purple-500 text-purple-400" : "border-purple-600 text-purple-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              )}
+            >
+              Video
+            </button>
+          )}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6">
-          {activeTab === "details" ? (
+        <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
+          {activeTab === "video" ? (
+            <VideoAuditPanel ventaId={audit._id} mode="readonly" />
+          ) : activeTab === "details" ? (
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
@@ -511,11 +538,25 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
                     name="clave"
                     value={form.clave}
                     onChange={handleChange}
+                    disabled={form.esAutovinculacion}
                     className={cn(
                       "w-full px-3 py-2 rounded-lg border text-sm",
+                      form.esAutovinculacion && "opacity-50 cursor-not-allowed",
                       theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
                     )}
                   />
+                  <div className="flex items-center gap-2 mt-2">
+                    <input
+                      type="checkbox"
+                      name="esAutovinculacion"
+                      checked={form.esAutovinculacion}
+                      onChange={handleChange}
+                      className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                    />
+                    <label className={cn("text-sm", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                      Es autovinculación
+                    </label>
+                  </div>
                 </div>
                 <div>
                   <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -552,12 +593,25 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
                     {form.status && !STATUS_OPTIONS.includes(form.status) && (
                       <option value={form.status}>{form.status}</option>
                     )}
-                    {STATUS_OPTIONS.map(opt => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
+                    {STATUS_OPTIONS.map(opt => {
+                      const isRestrictedStatus = opt === "QR hecho" || opt === "QR hecho (Temporal)"
+                      const isDesarrollador = userRole === 'desarrollador'
+                      const isDisabled = isRestrictedStatus && !form.clave?.trim() && !form.esAutovinculacion && !isDesarrollador
+                      
+                      return (
+                        <option key={opt} value={opt} disabled={isDisabled}>
+                          {opt} {isDisabled ? '(Requiere Clave)' : ''}
+                        </option>
+                      )
+                    })}
                   </select>
-                  {/* Checkbox "Disponible para venta" - Solo visible para AFIP o Padrón */}
-                  {(form.status?.toLowerCase() === 'afip' || form.status?.toLowerCase() === 'padrón') && (
+                  {(!form.clave?.trim() && !form.esAutovinculacion && userRole !== 'desarrollador') && (
+                    <p className={cn("text-xs mt-2", theme === "dark" ? "text-amber-400/80" : "text-amber-600/80")}>
+                      Los estados "QR hecho" requieren ingresar la Clave o marcar "Es autovinculación".
+                    </p>
+                  )}
+                  {/* Checkbox "Disponible para venta" - Solo visible para AFIP */}
+                  {form.status?.toLowerCase() === 'afip' && (
                     <div className="flex items-center gap-2 mt-2">
                       <input
                         type="checkbox"
@@ -592,64 +646,6 @@ export function RegistroVentasEditModal({ isOpen, onClose, audit, onSave }: Regi
                   </select>
                 </div>
               </div>
-
-              {form.status === "Padrón" && (
-                <div>
-                  <label className={cn("block text-sm font-medium mb-1", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
-                    Mes de Liberación del Padrón <span className="text-red-500">*</span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <select
-                      value={form.mesPadron ? form.mesPadron.split("-")[1] || "" : ""}
-                      onChange={(e) => {
-                        const year = form.mesPadron ? form.mesPadron.split("-")[0] : new Date().getFullYear().toString()
-                        const month = e.target.value
-                        if (month) {
-                          setForm(prev => ({ ...prev, mesPadron: `${year}-${month}` }))
-                        }
-                      }}
-                      className={cn(
-                        "w-full px-3 py-2 rounded-lg border text-sm",
-                        theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
-                      )}
-                    >
-                      <option value="">Mes</option>
-                      <option value="01">Enero</option>
-                      <option value="02">Febrero</option>
-                      <option value="03">Marzo</option>
-                      <option value="04">Abril</option>
-                      <option value="05">Mayo</option>
-                      <option value="06">Junio</option>
-                      <option value="07">Julio</option>
-                      <option value="08">Agosto</option>
-                      <option value="09">Septiembre</option>
-                      <option value="10">Octubre</option>
-                      <option value="11">Noviembre</option>
-                      <option value="12">Diciembre</option>
-                    </select>
-                    <select
-                      value={form.mesPadron ? form.mesPadron.split("-")[0] || "" : ""}
-                      onChange={(e) => {
-                        const month = form.mesPadron ? form.mesPadron.split("-")[1] : "01"
-                        const year = e.target.value
-                        if (year) {
-                          setForm(prev => ({ ...prev, mesPadron: `${year}-${month || "01"}` }))
-                        }
-                      }}
-                      className={cn(
-                        "w-full px-3 py-2 rounded-lg border text-sm",
-                        theme === "dark" ? "bg-white/5 border-white/10 text-white" : "bg-white border-gray-200 text-gray-800"
-                      )}
-                    >
-                      <option value="">Año</option>
-                      {Array.from({ length: 10 }, (_, i) => {
-                        const year = new Date().getFullYear() + i
-                        return <option key={year} value={year}>{year}</option>
-                      })}
-                    </select>
-                  </div>
-                </div>
-              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>

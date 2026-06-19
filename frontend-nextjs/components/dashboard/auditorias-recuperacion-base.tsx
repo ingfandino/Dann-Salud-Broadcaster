@@ -6,7 +6,6 @@
  * - Falta clave
  * - Rechazada
  * - Pendiente
- * - AFIP y Padrón
  * 
  * Permisos:
  * - Borrar → solo Gerencia
@@ -34,7 +33,6 @@ export type RecuperacionType =
   | "falta-clave" 
   | "rechazada" 
   | "pendiente" 
-  | "afip-padron"
 
 interface RecuperacionConfig {
   title: string
@@ -48,7 +46,15 @@ const INTERFACE_CONFIG: Record<RecuperacionType, RecuperacionConfig> = {
   "falta-clave": {
     title: "Falta Clave",
     description: "Ventas con problemas de clave",
-    statusFilters: ["Falta clave", "Falta clave (por ARCA)", "Aprobada, pero no reconoce clave", "El afiliado cambió la clave"],
+    // ✅ Canonical status list - exact matching only
+    // Uses "Aprobada pero no reconoce clave" (no comma) to avoid parsing issues
+    statusFilters: [
+      "Falta clave",
+      "El afiliado cambió la clave",
+      "Aprobada pero no reconoce clave",
+      "Falta documentación",
+      "Falta clave y documentación"
+    ],
     defaultSort: "asc", // más antiguas primero
   },
   "rechazada": {
@@ -62,13 +68,6 @@ const INTERFACE_CONFIG: Record<RecuperacionType, RecuperacionConfig> = {
     description: "Ventas con estado 'Pendiente' o 'Falta documentación'",
     statusFilters: ["Pendiente", "Falta documentación"],
     defaultSort: "desc",
-  },
-  "afip-padron": {
-    title: "AFIP y Padrón",
-    description: "Ventas con estado 'AFIP' o 'Padrón' disponibles para venta",
-    statusFilters: ["AFIP", "Padrón"],
-    defaultSort: "desc",
-    requireDisponibleParaVenta: true,
   },
 }
 
@@ -165,6 +164,16 @@ const formatDateTime = (value: string) => {
   return `${formattedDate} ${formattedTime}`
 }
 
+const formatDateOnly = (value: string) => {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  const day = String(date.getDate()).padStart(2, "0")
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const year = date.getFullYear()
+  return `${day}/${month}/${year}`
+}
+
 const getStatusColor = (status: string, theme: string) => {
   const statusLower = (status || "").toLowerCase()
   const colors: Record<string, { light: string; dark: string }> = {
@@ -174,7 +183,6 @@ const getStatusColor = (status: string, theme: string) => {
     "pendiente": { light: "bg-gray-200 text-gray-700", dark: "bg-gray-500/20 text-gray-400" },
     "falta documentación": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
     "afip": { light: "bg-blue-100 text-blue-800", dark: "bg-blue-500/20 text-blue-400" },
-    "padrón": { light: "bg-indigo-100 text-indigo-800", dark: "bg-indigo-500/20 text-indigo-400" },
     "completa": { light: "bg-lime-600 text-white", dark: "bg-lime-500/30 text-lime-300" },
     "reprogramada": { light: "bg-violet-100 text-violet-800", dark: "bg-violet-500/20 text-violet-400" },
     "caída": { light: "bg-red-600 text-white", dark: "bg-red-500/30 text-red-300" },
@@ -189,6 +197,7 @@ const getObraVendidaClass = (obra: string, theme: string) => {
   if (v === "binimed") return theme === "dark" ? "bg-blue-500/20 text-blue-400" : "bg-blue-100 text-blue-800"
   if (v === "meplife" || v === "meplife ") return theme === "dark" ? "bg-green-500/20 text-green-400" : "bg-green-200 text-green-800"
   if (v === "turf") return theme === "dark" ? "bg-purple-500/20 text-purple-400" : "bg-purple-100 text-purple-800"
+  if (v === "myc salud") return theme === "dark" ? "bg-orange-500/20 text-orange-400" : "bg-orange-100 text-orange-800"
   return theme === "dark" ? "bg-gray-500/20 text-gray-400" : "bg-gray-100 text-gray-700"
 }
 
@@ -251,7 +260,6 @@ const getRowBackgroundByStatus = (status: string, theme: string) => {
     "pendiente": { light: "bg-gray-100 hover:bg-gray-200", dark: "bg-gray-700/30 hover:bg-gray-700/40" },
     "falta documentación": { light: "bg-orange-50 hover:bg-orange-100", dark: "bg-orange-900/20 hover:bg-orange-900/30" },
     "afip": { light: "bg-blue-50 hover:bg-blue-100", dark: "bg-blue-900/20 hover:bg-blue-900/30" },
-    "padrón": { light: "bg-indigo-50 hover:bg-indigo-100", dark: "bg-indigo-900/20 hover:bg-indigo-900/30" },
   }
 
   const colors = colorMap[statusLower]
@@ -312,9 +320,17 @@ export function AuditoriasRecuperacionBase({ type }: AuditoriasRecuperacionBaseP
   const isSupervisor = userRole === 'supervisor'
   const isIndependiente = userRole === 'independiente'
   const isAdministrativo = userRole === 'administrativo'
+  const isAuditor = userRole === 'auditor'
+  const isDesarrollador = userRole === 'desarrollador'
   const canEdit = isGerencia || isRecuperador || isEncargado
   const canDelete = isGerencia
   const canMarkRevision = isGerencia || isRecuperador || isEncargado || isSupervisor || isIndependiente || isAdministrativo
+  // Only Gerencia and Desarrollador can export from restricted Audit interfaces
+  // Encargado is explicitly excluded from export permissions
+  const canExport = isGerencia || isDesarrollador
+  // ✅ Scoped permission: Auditor/Supervisor can open edit modal in Falta clave/Rechazada/Pendiente contexts
+  // This grants modal access only; field-level restrictions inside modal remain active
+  const canOpenRecoveryEditModal = isGerencia || isRecuperador || isEncargado || isSupervisor || isAuditor
 
   /* Filtrar asesores por supervisor seleccionado */
   const filteredAsesoresList = useMemo(() => {
@@ -355,6 +371,10 @@ export function AuditoriasRecuperacionBase({ type }: AuditoriasRecuperacionBaseP
     // ✅ CRÍTICO: Ignorar filtro de fecha por defecto para ver todo el historial
     // Las interfaces de Auditorías deben ver TODOS los registros con el estado correspondiente
     params.ignoreDate = 'true'
+
+    if (isAuditor) {
+      params.assignedAuditorOnly = 'true'
+    }
 
     if (selectedAsesores.length > 0) {
       params.asesor = selectedAsesores.map((a) => a.trim()).filter(Boolean).join(",")
@@ -464,26 +484,25 @@ export function AuditoriasRecuperacionBase({ type }: AuditoriasRecuperacionBaseP
   }
 
   const handleExportXLSX = () => {
+    if (!canExport) {
+      toast.error("No tienes permisos para exportar auditorías")
+      return
+    }
+
     if (!audits || audits.length === 0) {
       toast.info("No hay datos para exportar")
       return
     }
 
     const rows = audits.map((a) => ({
-      "Fecha de creación": formatDateTime(a.createdAt),
+      "Fecha de creación": formatDateOnly(a.createdAt),
       Afiliado: a.nombre || "-",
       CUIL: a.cuil || "-",
       Teléfono: a.telefono || "-",
       "Obra Social Vendida": a.obraSocialVendida || "-",
       Asesor: a.asesor?.nombre || "-",
       Supervisor: getSupervisorName(a),
-      Grupo: a.asesor?.numeroEquipo || "-",
-      Administrativo: a.administrador?.nombre || "-",
-      Estado: a.status || "-",
-      "Última rev.": a.ultima_revision
-        ? `${formatDateTime(a.ultima_revision)}${a.revisado_por?.nombre ? ` — ${a.revisado_por.nombre}` : ''}`
-        : "Sin revisión",
-      "Reventa": a.lista_para_reventa ? "Sí" : "No",
+      Motivo: a.datosExtra || "-",
     }))
 
     const ws = XLSX.utils.json_to_sheet(rows)
@@ -529,7 +548,7 @@ export function AuditoriasRecuperacionBase({ type }: AuditoriasRecuperacionBaseP
   }
 
   const openEditModal = (audit: Audit) => {
-    if (!canEdit) {
+    if (!canOpenRecoveryEditModal) {
       toast.error("No tienes permisos para editar auditorías")
       return
     }
@@ -814,18 +833,20 @@ export function AuditoriasRecuperacionBase({ type }: AuditoriasRecuperacionBaseP
             <RefreshCw className="w-4 h-4" />
             Actualizar
           </button>
-          <button
-            onClick={handleExportXLSX}
-            className={cn(
-              "flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
-              theme === "dark"
-                ? "bg-green-600 text-white hover:bg-green-700"
-                : "bg-green-500 text-white hover:bg-green-600",
-            )}
-          >
-            <Download className="w-4 h-4" />
-            Exportar Excel
-          </button>
+          {canExport && (
+            <button
+              onClick={handleExportXLSX}
+              className={cn(
+                "flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                theme === "dark"
+                  ? "bg-green-600 text-white hover:bg-green-700"
+                  : "bg-green-500 text-white hover:bg-green-600",
+              )}
+            >
+              <Download className="w-4 h-4" />
+              Exportar Excel
+            </button>
+          )}
           <button
             onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
             className={cn(
@@ -1033,7 +1054,7 @@ export function AuditoriasRecuperacionBase({ type }: AuditoriasRecuperacionBaseP
                             )}
                           </div>
                         )}
-                        {canEdit && (
+                        {canOpenRecoveryEditModal && (
                           <button
                             onClick={() => openEditModal(item)}
                             className="p-1 hover:bg-blue-100 text-blue-600 rounded dark:hover:bg-blue-900/30 dark:text-blue-400"
@@ -1075,6 +1096,7 @@ export function AuditoriasRecuperacionBase({ type }: AuditoriasRecuperacionBaseP
             setEditModalOpen(false)
             setSelectedAudit(null)
           }}
+          limitedEditingContext={type}
         />,
         document.body
       )}

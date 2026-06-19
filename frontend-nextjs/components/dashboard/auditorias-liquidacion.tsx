@@ -22,7 +22,7 @@ import { toast } from "sonner"
  * Configuración de secciones del acordeón
  * ============================================================ */
 interface CollapseSection {
-  id: 'supervisor' | 'auditor' | 'administrativo'
+  id: 'supervisor' | 'auditor' | 'administrativo' | 'asesor'
   label: string
   icon: typeof Users
   accentColor: string
@@ -35,7 +35,14 @@ const SECTIONS: CollapseSection[] = [
     label: 'Supervisores',
     icon: Users,
     accentColor: '#7C3AED',
-    description: 'QR Hecho / Cargada / Aprobada'
+    description: 'QR Hecho / Último día del mes: Binimed en Cargada'
+  },
+  {
+    id: 'asesor',
+    label: 'Asesores',
+    icon: Users,
+    accentColor: '#10B981',
+    description: 'QR Hecho / Escala Telemarketer'
   },
   {
     id: 'auditor',
@@ -54,14 +61,14 @@ const SECTIONS: CollapseSection[] = [
 ]
 
 const ALLOWED_SECTIONS_BY_ROLE: Record<string, string[]> = {
-  gerencia:           ['supervisor', 'auditor', 'administrativo'],
-  encargado:          ['supervisor', 'auditor', 'administrativo'],
+  gerencia:           ['supervisor', 'asesor', 'auditor', 'administrativo'],
+  encargado:          ['supervisor', 'asesor', 'auditor', 'administrativo'],
   supervisor:         ['supervisor'],
   supervisor_reventa: ['supervisor'],
-  asesor:             ['supervisor'],
-  auditor:            ['auditor'],
+  asesor:             ['asesor'],
+  auditor:            ['auditor', 'asesor'],
   administrativo:     ['administrativo'],
-  independiente:      ['supervisor', 'auditor'],
+  independiente:      ['asesor', 'auditor'],
   recuperador:        ['supervisor'],
 }
 

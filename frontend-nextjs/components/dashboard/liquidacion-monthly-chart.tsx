@@ -16,7 +16,7 @@ interface MonthlyData {
 }
 
 interface Props {
-  tipo: 'supervisor' | 'auditor' | 'administrativo'
+  tipo: 'supervisor' | 'auditor' | 'administrativo' | 'asesor'
   userList: { _id: string; nombre: string }[]
   accentColor: string
 }
@@ -57,7 +57,7 @@ export function MonthlyComparisonChart({ tipo, userList, accentColor }: Props) {
     ...(mode === 'individual' ? { individual: d.filtered } : {})
   }))
 
-  const tipoLabel = tipo === 'supervisor' ? 'Supervisores' : tipo === 'auditor' ? 'Auditores' : 'Administrativos'
+  const tipoLabel = tipo === 'supervisor' ? 'Supervisores' : tipo === 'asesor' ? 'Asesores' : tipo === 'auditor' ? 'Auditores' : 'Administrativos'
 
   return (
     <div className={cn(

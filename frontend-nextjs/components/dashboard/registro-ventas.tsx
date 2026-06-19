@@ -16,7 +16,7 @@ import * as XLSX from "xlsx"
 import { RegistroVentasEditModal } from "./registro-ventas-edit-modal"
 import { connectSocket } from "@/lib/socket"
 
-const OBRAS_VENDIDAS = ["Binimed", "Meplife", "RAS", "TURF", "Medicenter"]
+const OBRAS_VENDIDAS = ["Binimed", "Meplife", "RAS", "TURF", "Medicenter", "MyC Salud"]
 
 const STATUS_OPTIONS = [
   "Pendiente",
@@ -27,12 +27,11 @@ const STATUS_OPTIONS = [
   "AFIP",
   "Baja laboral con nueva alta",
   "Baja laboral sin nueva alta",
-  "Padrón",
   "En revisión",
   "Remuneración no válida",
   "Cargada",
   "Aprobada",
-  "Aprobada, pero no reconoce clave",
+  "Aprobada pero no reconoce clave", // ✅ Canonical: no comma
   "Rehacer vídeo",
   "Rechazada",
   "Falta documentación",
@@ -91,7 +90,6 @@ interface Audit {
   observacionPrivada?: string
   clave?: string
   email?: string
-  mesPadron?: string
   statusAdministrativo?: string
   enProceso?: {
     activo: boolean
@@ -240,10 +238,6 @@ const STATUS_COLORS: Record<string, {
     badge: { light: "bg-red-100 text-red-700", dark: "bg-red-500/30 text-red-300" },
     row: { light: "bg-red-50 hover:bg-red-100", dark: "bg-red-900/20 hover:bg-red-900/30" },
   },
-  "padrón": {
-    badge: { light: "bg-amber-100 text-amber-700", dark: "bg-amber-500/30 text-amber-300" },
-    row: { light: "bg-amber-50 hover:bg-amber-100", dark: "bg-amber-900/20 hover:bg-amber-900/30" },
-  },
   "remuneración no válida": {
     badge: { light: "bg-red-200 text-red-800", dark: "bg-red-700/30 text-red-400" },
     row: { light: "bg-red-100 hover:bg-red-200", dark: "bg-red-900/30 hover:bg-red-900/40" },
@@ -284,7 +278,11 @@ const STATUS_COLORS: Record<string, {
     badge: { light: "bg-slate-100 text-slate-800", dark: "bg-slate-500/20 text-slate-400" },
     row: { light: "bg-slate-50 hover:bg-slate-100", dark: "bg-slate-900/20 hover:bg-slate-900/30" },
   },
-  "aprobada, pero no reconoce clave": {
+  "aprobada, pero no reconoce clave": { // Legacy - kept for backward compatibility
+    badge: { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" },
+    row: { light: "bg-yellow-50 hover:bg-yellow-100", dark: "bg-yellow-900/20 hover:bg-yellow-900/30" },
+  },
+  "aprobada pero no reconoce clave": { // ✅ Canonical
     badge: { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" },
     row: { light: "bg-yellow-50 hover:bg-yellow-100", dark: "bg-yellow-900/20 hover:bg-yellow-900/30" },
   },
@@ -343,6 +341,7 @@ const getObraSocialVendidaColor = (obra: string, theme: string) => {
     "turf": { light: "bg-violet-100 text-violet-800", dark: "bg-violet-500/20 text-violet-400" },
     "ras": { light: "bg-red-100 text-red-800", dark: "bg-red-500/20 text-red-400" },
     "medicenter": { light: "bg-gray-100 text-gray-800", dark: "bg-gray-500/20 text-gray-400" },
+    "myc salud": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
   }
   const color = colors[obraLower] || { light: "bg-gray-100 text-gray-700", dark: "bg-gray-500/20 text-gray-400" }
   return theme === "dark" ? color.dark : color.light
@@ -977,7 +976,7 @@ export function RegistroVentas() {
 
     socket.emit("audits:subscribeAll")
 
-    const handleAuditUpdate = (updatedAudit: Audit) => {
+    const handleAuditUpdate = (updatedAudit: Audit & { statusAdministrativo?: string }) => {
       setAudits(prev => {
         const index = prev.findIndex(a => a._id === updatedAudit._id)
         if (index === -1) {
@@ -987,13 +986,31 @@ export function RegistroVentas() {
           return prev
         }
         const updated = [...prev]
-        updated[index] = { ...prev[index], ...updatedAudit }
+        const existing = prev[index]
+
+        // Preserve statusAdministrativo correctly:
+        // - If payload has explicit statusAdministrativo, use it
+        // - If payload only has status, preserve existing statusAdministrativo
+        // - Never fall back to status (that would overwrite admin values with mapped values)
+        updated[index] = {
+          ...existing,
+          ...updatedAudit,
+          statusAdministrativo: updatedAudit.statusAdministrativo !== undefined
+            ? updatedAudit.statusAdministrativo
+            : existing.statusAdministrativo
+        }
         return updated
       })
 
       setSelectedAudit(prev => {
         if (prev && prev._id === updatedAudit._id) {
-          return { ...prev, ...updatedAudit }
+          return {
+            ...prev,
+            ...updatedAudit,
+            statusAdministrativo: updatedAudit.statusAdministrativo !== undefined
+              ? updatedAudit.statusAdministrativo
+              : prev.statusAdministrativo
+          }
         }
         return prev
       })
@@ -1008,10 +1025,15 @@ export function RegistroVentas() {
       }
     }
 
+    // Listen to BOTH events for Socket.IO compatibility
+    // "audit:update" is the current backend event name
+    // "audit:updated" is the legacy event name
+    socket.on("audit:update", handleAuditUpdate)
     socket.on("audit:updated", handleAuditUpdate)
     socket.on("audit:deleted", handleAuditDeleted)
 
     return () => {
+      socket.off("audit:update", handleAuditUpdate)
       socket.off("audit:updated", handleAuditUpdate)
       socket.off("audit:deleted", handleAuditDeleted)
     }

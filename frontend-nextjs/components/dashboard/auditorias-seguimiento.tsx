@@ -25,7 +25,7 @@ import * as XLSX from "xlsx"
 import { AuditEditModal } from "./audit-edit-modal"
 import { connectSocket, getSocket } from "@/lib/socket"
 
-const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
+const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF", "MyC Salud"]
 
 const STATUS_OPTIONS = [
   "Sin estado",
@@ -53,13 +53,13 @@ const STATUS_OPTIONS = [
   "AFIP",
   "Baja laboral con nueva alta",
   "Baja laboral sin nueva alta",
-  "Padrón",
   "En revisión",
   "Remuneración no válida",
   "Cargada",
   "Aprobada",
-  "Aprobada, pero no reconoce clave",
-  "El afiliado cambió la clave"
+  "Aprobada pero no reconoce clave", // ✅ Canonical: no comma
+  "El afiliado cambió la clave",
+  "Padrón"
 ]
 
 const TIPO_VENTA = ["Alta", "Cambio"]
@@ -69,6 +69,8 @@ interface Audit {
   nombre: string
   cuil?: string
   telefono: string
+  telefonoMasked?: string | null
+  canViewTelefono?: boolean
   tipoVenta: string
   obraSocialAnterior?: string
   obraSocialVendida: string
@@ -195,11 +197,11 @@ const getStatusColor = (status: string, theme: string) => {
     "pendiente": { light: "bg-gray-200 text-gray-700", dark: "bg-gray-500/20 text-gray-400" },
     "rehacer vídeo": { light: "bg-red-300 text-red-900", dark: "bg-red-500/20 text-red-400" },
     "rechazada": { light: "bg-red-100 text-red-700", dark: "bg-red-500/20 text-red-400" },
-    "aprobada, pero no reconoce clave": { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" },
+    "aprobada, pero no reconoce clave": { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" }, // Legacy
+    "aprobada pero no reconoce clave": { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" }, // ✅ Canonical
     "afip": { light: "bg-indigo-600 text-white", dark: "bg-indigo-500/30 text-indigo-300" },
     "baja laboral con nueva alta": { light: "bg-blue-100 text-blue-800", dark: "bg-blue-500/20 text-blue-400" },
     "baja laboral sin nueva alta": { light: "bg-slate-100 text-slate-800", dark: "bg-slate-500/20 text-slate-400" },
-    "padrón": { light: "bg-fuchsia-100 text-fuchsia-800", dark: "bg-fuchsia-500/20 text-fuchsia-400" },
     "en revisión": { light: "bg-amber-100 text-amber-800", dark: "bg-amber-500/20 text-amber-400" },
     "remuneración no válida": { light: "bg-rose-100 text-rose-800", dark: "bg-rose-500/20 text-rose-400" },
     "el afiliado cambió la clave": { light: "bg-orange-200 text-orange-900", dark: "bg-orange-500/20 text-orange-400" },
@@ -214,6 +216,7 @@ const getObraVendidaClass = (obra: string, theme: string) => {
   if (v === "binimed") return theme === "dark" ? "bg-blue-500/20 text-blue-400" : "bg-blue-100 text-blue-800"
   if (v === "meplife" || v === "meplife ") return theme === "dark" ? "bg-green-500/20 text-green-400" : "bg-green-200 text-green-800"
   if (v === "turf") return theme === "dark" ? "bg-purple-500/20 text-purple-400" : "bg-purple-100 text-purple-800"
+  if (v === "myc salud") return theme === "dark" ? "bg-orange-500/20 text-orange-400" : "bg-orange-100 text-orange-800"
   return theme === "dark" ? "bg-gray-500/20 text-gray-400" : "bg-gray-100 text-gray-700"
 }
 
@@ -334,7 +337,8 @@ const getRowBackgroundByStatus = (status: string, theme: string) => {
     "completa": { light: "bg-lime-100 hover:bg-lime-200", dark: "bg-lime-900/30 hover:bg-lime-900/40" },
     "qr hecho": { light: "bg-green-100 hover:bg-green-200", dark: "bg-green-900/30 hover:bg-green-900/40" },
     "aprobada": { light: "bg-teal-100 hover:bg-teal-200", dark: "bg-teal-900/30 hover:bg-teal-900/40" },
-    "aprobada, pero no reconoce clave": { light: "bg-yellow-100 hover:bg-yellow-200", dark: "bg-yellow-900/30 hover:bg-yellow-900/40" },
+    "aprobada, pero no reconoce clave": { light: "bg-yellow-100 hover:bg-yellow-200", dark: "bg-yellow-900/30 hover:bg-yellow-900/40" }, // Legacy
+    "aprobada pero no reconoce clave": { light: "bg-yellow-100 hover:bg-yellow-200", dark: "bg-yellow-900/30 hover:bg-yellow-900/40" }, // ✅ Canonical
     "no atendió": { light: "bg-yellow-50 hover:bg-yellow-100", dark: "bg-yellow-900/20 hover:bg-yellow-900/30" },
     "tiene dudas": { light: "bg-pink-50 hover:bg-pink-100", dark: "bg-pink-900/20 hover:bg-pink-900/30" },
     "falta clave y documentación": { light: "bg-orange-50 hover:bg-orange-100", dark: "bg-orange-900/20 hover:bg-orange-900/30" },
@@ -453,7 +457,8 @@ export function AuditoriasSeguimiento() {
   }
 
   const currentRole = getCurrentUserRole()
-  const isSupervisor = currentRole === "supervisor" || currentRole === "Supervisor" || currentRole === "encargado" || currentRole === "Encargado"
+  // isSupervisor ONLY for supervisor role (NOT encargado) - encargado sees all phones like Gerencia
+  const isSupervisor = currentRole === "supervisor" || currentRole === "Supervisor"
   const isAdmin = currentRole === "admin" || currentRole === "Admin"
   const isGerencia = currentRole === "gerencia" || currentRole === "Gerencia"
   const isAuditor = currentRole === "auditor" || currentRole === "Auditor"
@@ -462,6 +467,46 @@ export function AuditoriasSeguimiento() {
   const isRecuperador = currentRole === "recuperador" || currentRole === "Recuperador"
   const isEncargado = currentRole === "encargado" || currentRole === "Encargado"
   const isIndependiente = currentRole === "independiente" || currentRole === "Independiente" // ✅ NUEVO: Rol Independiente
+  const isDesarrollador = currentRole === "desarrollador" || currentRole === "Desarrollador"
+  // Only Gerencia and Desarrollador can export from restricted Audit interfaces
+  // Encargado is explicitly excluded from export permissions
+  const canExport = isGerencia || isDesarrollador
+
+  const isAssignedAuditor = (audit: Audit) => {
+    return !!user?._id && !!audit.auditor?._id && String(audit.auditor._id) === String(user._id)
+  }
+
+  const getVisibleTelefono = (audit: Audit) => {
+    if (audit.telefono === "***") return "Dato inválido"
+    if (audit.canViewTelefono === false) return audit.telefonoMasked || "***"
+
+    // 🔒 Auditor: see phone if assigned as auditor, OR if has team and is assigned as asesor on this sale
+    if (isAuditor) {
+      const isAssignedAsAsesor = !!user?.numeroEquipo &&
+        !!audit.asesor?._id && !!user?._id &&
+        String(audit.asesor._id) === String(user._id)
+      if (!isAssignedAuditor(audit) && !isAssignedAsAsesor) return audit.telefonoMasked || "***"
+    }
+
+    // 🔒 SUPERVISOR PHONE LOCK: direct sale assignment by stable user ID
+    if (isSupervisor) {
+      const auditSupervisorId = audit.supervisorSnapshot?._id
+      const auditAsesorId = audit.asesor?._id
+      const myId = user?._id
+      const isAssignedSupervisor = !!auditSupervisorId && !!myId && String(auditSupervisorId) === String(myId)
+      const isAssignedAdvisor = !!auditAsesorId && !!myId && String(auditAsesorId) === String(myId)
+      if (!isAssignedSupervisor && !isAssignedAdvisor) return audit.telefonoMasked || "***"
+    }
+
+    // Asesor: only see phone on their own sales (by asesor._id)
+    if (isAsesor) {
+      const recordAsesorId = audit.asesor?._id
+      const myId = user?._id
+      if (!recordAsesorId || !myId || String(recordAsesorId) !== String(myId)) return audit.telefonoMasked || "***"
+    }
+
+    return audit.telefono || "-"
+  }
 
   /* Funciones auxiliares de selección */
   const toggleSelection = (value: string, setFn: React.Dispatch<React.SetStateAction<string[]>>) => {
@@ -622,7 +667,8 @@ export function AuditoriasSeguimiento() {
               role === "gerencia" ||
               role === "Gerencia" ||
               role === "supervisor" ||
-              role === "Supervisor") &&
+              role === "Supervisor" ||
+              role === "RR.HH") &&
             u.nombre
           )
         })
@@ -661,20 +707,18 @@ export function AuditoriasSeguimiento() {
   }
 
   const handleExportXLSX = () => {
+    if (!canExport) {
+      toast.error("No tienes permisos para exportar auditorías")
+      return
+    }
+
     if (!audits || audits.length === 0) {
       toast.info("No hay datos para exportar")
       return
     }
 
     const rows = audits.map((a) => {
-      let telefono = a.telefono || "-"
-      if (isSupervisor || isAsesor) {
-        const auditGrupo = a.asesor?.numeroEquipo
-        const myGrupo = user?.numeroEquipo
-        if (auditGrupo && myGrupo && auditGrupo !== myGrupo) {
-          telefono = "***"
-        }
-      }
+      const telefono = getVisibleTelefono(a)
 
       return {
         Fecha: a.scheduledAt ? new Date(a.scheduledAt).toLocaleDateString("es-AR") : "-",
@@ -903,16 +947,38 @@ export function AuditoriasSeguimiento() {
       }
     }
 
+    /* Manejador para notificación de afiliado en sala de videoauditoría */
+    const affiliateJoinedDebounceMap = new Map<string, number>();
+    const handleAffiliateJoined = (payload: { ventaId: string; joinedAt: string }) => {
+      const { ventaId } = payload;
+      if (!ventaId) return;
+      const now = Date.now();
+      const lastShown = affiliateJoinedDebounceMap.get(ventaId) || 0;
+      if (now - lastShown < 10000) return; // debounce 10s per ventaId
+      affiliateJoinedDebounceMap.set(ventaId, now);
+
+      // Find affiliate name from current audits list if available
+      const matchingAudit = audits.find(a => a._id === ventaId);
+      const affiliateName = matchingAudit?.nombre ? matchingAudit.nombre.split(' ')[0] : null;
+      const message = affiliateName
+        ? `${affiliateName} ingresó a la sala de videoauditoría.`
+        : 'El afiliado ingresó a la sala de videoauditoría. Ingresá a la videollamada cuando estés listo.';
+
+      toast.success(`¡Afiliado en sala! ${message}`, { duration: 8000 });
+    };
+
     /* Registrar listeners de eventos */
     socket.on("audits:new", handleNewAudit)
     socket.on("audit:update", handleAuditUpdate)
     socket.on("audit:deleted", handleAuditDeleted)
+    socket.on("videoaudit:affiliate_joined", handleAffiliateJoined)
 
     /* Limpiar al desmontar */
     return () => {
       socket.off("audits:new", handleNewAudit)
       socket.off("audit:update", handleAuditUpdate)
       socket.off("audit:deleted", handleAuditDeleted)
+      socket.off("videoaudit:affiliate_joined", handleAffiliateJoined)
       socket.emit("audits:unsubscribeAll")
       console.log("[Seguimiento] Unsubscribed from audits_all room")
     }
@@ -1183,7 +1249,7 @@ export function AuditoriasSeguimiento() {
           </div>
 
           {/* Filtro multi-selección de supervisor */}
-          {(isAuditor || isGerencia || isAdmin || isSupervisor || isAsesor || isAdministrativo) && (
+          {(isAuditor || isGerencia || isAdmin || isSupervisor || isAsesor || isAdministrativo || isEncargado) && (
             <div className="relative" ref={supervisorFilterRef}>
               <button
                 onClick={() => setIsSupervisorDropdownOpen(!isSupervisorDropdownOpen)}
@@ -1332,7 +1398,7 @@ export function AuditoriasSeguimiento() {
           >
             Limpiar
           </button>
-          {!['asesor', 'supervisor'].includes(user?.role?.toLowerCase() || '') && (
+          {canExport && (
             <button
               onClick={handleExportXLSX}
               className="px-4 py-2 rounded-lg text-sm font-medium transition-colors text-white flex items-center gap-2"
@@ -1492,7 +1558,7 @@ export function AuditoriasSeguimiento() {
                       {item.cuil || "-"}
                     </td>
                     <td className="px-2 py-1.5 text-center font-mono opacity-70 truncate">
-                      {(isSupervisor || isAsesor) && item.asesor?.numeroEquipo !== user?.numeroEquipo && !isEncargado ? "***" : item.telefono}
+                      {getVisibleTelefono(item)}
                     </td>
                     <td className="px-2 py-1.5 text-center truncate max-w-[80px]" title={item.obraSocialAnterior}>
                       {item.obraSocialAnterior || "-"}

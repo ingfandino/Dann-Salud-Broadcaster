@@ -22,7 +22,16 @@ import { useSocialHealthList } from "@/hooks/useSocialHealthList"
 import { SearchableSocialHealthSelect } from "./searchable-social-health-select"
 import * as XLSX from "xlsx"
 
-const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF"]
+const normalizeAuditPhoneInput = (value: unknown) => String(value || "").replace(/\D/g, "")
+const getAuditPhoneError = (value: unknown) => {
+    const raw = String(value || "").trim()
+    if (!raw) return "Teléfono es requerido"
+    if (raw.includes("*")) return "Teléfono no puede estar enmascarado"
+    if (normalizeAuditPhoneInput(raw).length !== 10) return "Teléfono debe tener 10 dígitos"
+    return null
+}
+
+const OBRAS_VENDIDAS = ["Binimed", "Meplife", "TURF", "MyC Salud"]
 
 interface User {
     _id: string
@@ -190,6 +199,11 @@ export function AuditoriasCargar() {
             toast.error("Por favor complete todos los campos obligatorios")
             return
         }
+        const phoneError = getAuditPhoneError(form.telefono)
+        if (phoneError) {
+            toast.error(phoneError)
+            return
+        }
 
         try {
             setLoading(true)
@@ -197,6 +211,7 @@ export function AuditoriasCargar() {
             // Construct payload based on role
             const payload: any = {
                 ...form,
+                telefono: normalizeAuditPhoneInput(form.telefono),
                 scheduledAt: `${form.fecha}T${form.hora}:00.000Z` // Simple ISO construction
             }
 
@@ -260,6 +275,9 @@ export function AuditoriasCargar() {
                 for (let i = 0; i < data.length; i++) {
                     try {
                         const row: any = data[i]
+                        const phoneError = getAuditPhoneError(row.telefono)
+                        if (phoneError) throw new Error(phoneError)
+                        row.telefono = normalizeAuditPhoneInput(row.telefono)
                         // Map row data to payload
                         // Implementation details omitted for brevity - would map fields here
                         await api.audits.create(row)

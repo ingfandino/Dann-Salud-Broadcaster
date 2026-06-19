@@ -190,6 +190,7 @@ const getObraVendidaClass = (obraSocial: string, theme: string | undefined) => {
     if (v === "binimed") return theme === "dark" ? "bg-blue-500/20 text-blue-400" : "bg-blue-100 text-blue-800"
     if (v === "meplife" || v === "meplife ") return theme === "dark" ? "bg-green-500/20 text-green-400" : "bg-green-200 text-green-800"
     if (v === "turf") return theme === "dark" ? "bg-purple-500/20 text-purple-400" : "bg-purple-100 text-purple-800"
+    if (v === "myc salud") return theme === "dark" ? "bg-orange-500/20 text-orange-400" : "bg-orange-100 text-orange-800"
     return theme === "dark" ? "bg-gray-500/20 text-gray-400" : "bg-gray-100 text-gray-700"
 }
 
@@ -384,6 +385,7 @@ export function BaseAfiliadosExitosas() {
         binimed: audits.filter(a => a.obraSocialVendida?.toLowerCase().trim() === "binimed").length,
         meplife: audits.filter(a => a.obraSocialVendida?.toLowerCase().trim().includes("meplife")).length,
         turf: audits.filter(a => a.obraSocialVendida?.toLowerCase().trim() === "turf").length,
+        mycSalud: audits.filter(a => a.obraSocialVendida?.toLowerCase().trim() === "myc salud").length,
     }
 
     return (
@@ -635,7 +637,7 @@ export function BaseAfiliadosExitosas() {
             </div>
 
             {/* Panel de resumen */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in-up" style={{ animationDelay: "0.1s" }}>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-fade-in-up" style={{ animationDelay: "0.1s" }}>
                 <div className={cn(
                     "p-4 rounded-2xl border flex items-center justify-between",
                     theme === "dark" ? "bg-blue-500/10 border-blue-500/20" : "bg-blue-50 border-blue-100"
@@ -656,6 +658,13 @@ export function BaseAfiliadosExitosas() {
                 )}>
                     <span className={cn("font-medium", theme === "dark" ? "text-purple-300" : "text-purple-700")}>TURF</span>
                     <span className={cn("text-2xl font-bold", theme === "dark" ? "text-purple-200" : "text-purple-800")}>{summaryCounts.turf}</span>
+                </div>
+                <div className={cn(
+                    "p-4 rounded-2xl border flex items-center justify-between",
+                    theme === "dark" ? "bg-orange-500/10 border-orange-500/20" : "bg-orange-50 border-orange-100"
+                )}>
+                    <span className={cn("font-medium", theme === "dark" ? "text-orange-300" : "text-orange-700")}>MyC Salud</span>
+                    <span className={cn("text-2xl font-bold", theme === "dark" ? "text-orange-200" : "text-orange-800")}>{summaryCounts.mycSalud}</span>
                 </div>
             </div>
 

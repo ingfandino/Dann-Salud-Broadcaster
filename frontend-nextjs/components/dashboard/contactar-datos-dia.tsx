@@ -25,6 +25,7 @@ interface Lead {
         cuil: string
         obraSocial: string
         localidad: string
+        last3ClosedMonthsPaidCount: number | null
     }
     status: string
     subStatus?: string
@@ -223,13 +224,32 @@ export function ContactarDatosDia() {
 
         setSendingWa(true)
         try {
-            await api.assignments.sendWhatsApp(selectedLead._id, { message: waMessage })
-            toast.success("Mensaje enviado correctamente")
+            const response = await api.assignments.sendWhatsApp(selectedLead._id, { message: waMessage })
+            const sendStatus = response.data?.sendStatus
+            if (sendStatus === "accepted") {
+                toast.success("Mensaje enviado a WhatsApp. Si no aparece en unos segundos, verificá la conversación.")
+            } else if (sendStatus === "not_connected") {
+                toast.error("Tu WhatsApp no está conectado. Vinculalo nuevamente.")
+                return
+            } else if (sendStatus === "unavailable") {
+                toast.error("El servicio de WhatsApp no está disponible para esta sesión.")
+                return
+            } else {
+                toast.error("No se pudo enviar el mensaje por WhatsApp.")
+                return
+            }
             setWaModalOpen(false)
             setLeads(leads.map(l => l._id === selectedLead._id ? { ...l, status: 'Llamando' } : l))
         } catch (error: any) {
             console.error("Error enviando WA:", error)
-            toast.error(error.response?.data?.error || "Error al enviar mensaje")
+            const sendStatus = error.response?.data?.sendStatus
+            if (sendStatus === "not_connected") {
+                toast.error("Tu WhatsApp no está conectado. Vinculalo nuevamente.")
+            } else if (sendStatus === "unavailable") {
+                toast.error("El servicio de WhatsApp no está disponible para esta sesión.")
+            } else {
+                toast.error(error.response?.data?.message || error.response?.data?.error || "No se pudo enviar el mensaje por WhatsApp.")
+            }
         } finally {
             setSendingWa(false)
         }
@@ -423,6 +443,9 @@ export function ContactarDatosDia() {
                                     Datos Contacto
                                 </th>
                                 <th className={cn("px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
+                                    Trim. pagos
+                                </th>
+                                <th className={cn("px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
                                     Estado
                                 </th>
                                 <th className={cn("px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider", theme === "dark" ? "text-gray-300" : "text-gray-700")}>
@@ -469,6 +492,22 @@ export function ContactarDatosDia() {
                                                 </span>
                                             </div>
                                         </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className={cn(
+                                            "text-sm font-medium px-2 py-0.5 rounded-full",
+                                            item.affiliate?.last3ClosedMonthsPaidCount == null
+                                                ? theme === "dark" ? "text-gray-500" : "text-gray-400"
+                                                : item.affiliate.last3ClosedMonthsPaidCount === 0
+                                                    ? theme === "dark" ? "bg-red-500/20 text-red-400" : "bg-red-100 text-red-600"
+                                                    : item.affiliate.last3ClosedMonthsPaidCount === 3
+                                                        ? theme === "dark" ? "bg-green-500/20 text-green-400" : "bg-green-100 text-green-600"
+                                                        : theme === "dark" ? "bg-yellow-500/20 text-yellow-400" : "bg-yellow-100 text-yellow-600"
+                                        )}>
+                                            {item.affiliate?.last3ClosedMonthsPaidCount != null
+                                                ? item.affiliate.last3ClosedMonthsPaidCount
+                                                : '-'}
+                                        </span>
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="flex flex-col gap-1">

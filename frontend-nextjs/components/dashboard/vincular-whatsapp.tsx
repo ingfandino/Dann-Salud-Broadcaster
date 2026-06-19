@@ -44,7 +44,9 @@ export function VincularWhatsApp() {
           /* Mostrar mensaje de éxito y redirigir después de 2 segundos */
           toast.success("🎉 ¡WhatsApp vinculado exitosamente!")
           setTimeout(() => {
-            router.push('/dashboard/contact/today')
+            const urlParams = new URLSearchParams(window.location.search);
+            const returnUrl = urlParams.get('returnUrl') || '/dashboard/contact/today';
+            router.push(returnUrl)
           }, 2000)
           return
         }

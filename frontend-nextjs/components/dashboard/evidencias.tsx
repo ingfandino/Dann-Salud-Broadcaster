@@ -66,7 +66,6 @@ const STATUS_VENTA_COLORS: Record<string, { light: string; dark: string }> = {
   "pendiente": { light: "bg-stone-100 text-stone-600", dark: "bg-stone-500/30 text-stone-300" },
   "cargada": { light: "bg-indigo-100 text-indigo-700", dark: "bg-indigo-500/30 text-indigo-300" },
   "rechazada": { light: "bg-red-100 text-red-700", dark: "bg-red-500/30 text-red-300" },
-  "padrón": { light: "bg-amber-100 text-amber-700", dark: "bg-amber-500/30 text-amber-300" },
   "remuneración no válida": { light: "bg-red-200 text-red-800", dark: "bg-red-700/30 text-red-400" },
   "autovinculación": { light: "bg-pink-100 text-pink-700", dark: "bg-pink-500/30 text-pink-300" },
   "caída": { light: "bg-rose-200 text-rose-800", dark: "bg-rose-800/40 text-rose-300" },
@@ -77,7 +76,8 @@ const STATUS_VENTA_COLORS: Record<string, { light: string; dark: string }> = {
   "qr hecho pero pendiente de aprobación": { light: "bg-emerald-100 text-emerald-800", dark: "bg-emerald-500/20 text-emerald-400" },
   "baja laboral con nueva alta": { light: "bg-blue-100 text-blue-800", dark: "bg-blue-500/20 text-blue-400" },
   "baja laboral sin nueva alta": { light: "bg-slate-100 text-slate-800", dark: "bg-slate-500/20 text-slate-400" },
-  "aprobada, pero no reconoce clave": { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" },
+  "aprobada, pero no reconoce clave": { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" }, // Legacy
+  "aprobada pero no reconoce clave": { light: "bg-yellow-100 text-yellow-800", dark: "bg-yellow-500/20 text-yellow-400" }, // ✅ Canonical
   "rehacer vídeo": { light: "bg-red-300 text-red-900", dark: "bg-red-500/20 text-red-400" },
   "falta documentación": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },
   "falta clave": { light: "bg-orange-100 text-orange-800", dark: "bg-orange-500/20 text-orange-400" },

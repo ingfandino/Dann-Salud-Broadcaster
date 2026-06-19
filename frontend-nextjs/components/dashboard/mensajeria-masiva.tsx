@@ -608,7 +608,7 @@ export function MensajeriaMasiva() {
 
       toast.success(isScheduled
         ? `Campaña programada para ${new Date(fechaEnvio).toLocaleString('es-AR')}`
-        : "Campaña iniciada exitosamente"
+        : "Campaña en cola de envío"
       )
 
 
