@@ -581,8 +581,18 @@ async function finalizeAffiliateCheckJobIfComplete({ jobId, now = new Date() }) 
         jobId,
         status: { $in: TERMINAL_ROW_STATUSES }
     });
+    const nonterminalRows = Math.max(0, totalRows - terminalRows);
     const selectedCount = Number(job.selectedCount || 0);
     const complete = totalRows === terminalRows && selectedCount === terminalRows;
+    logger.info("[AFFILIATE-CHECK-FINALIZER] finalizationDecision", {
+        jobId: String(jobId),
+        mode: job.mode,
+        selectedCount,
+        totalRows,
+        terminalRows,
+        nonterminalRows,
+        decision: complete ? "complete" : "wait"
+    });
     if (!complete) return AffiliateCheckJob.findById(jobId).lean();
 
     const status = counters.failedCount > 0 ? "completed_with_errors" : "completed";

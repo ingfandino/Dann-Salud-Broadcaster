@@ -6,7 +6,11 @@ const AffiliateCheckConfig = require("../models/AffiliateCheckConfig");
 const AffiliateCheckJob = require("../models/AffiliateCheckJob");
 const AffiliateCheckRow = require("../models/AffiliateCheckRow");
 const User = require("../models/User");
-const { AffiliateCheckError, getActiveCheckConfig } = require("./affiliateCheck.service");
+const {
+    AffiliateCheckError,
+    getActiveCheckConfig,
+    isUnlimitedAffiliateCheckRole
+} = require("./affiliateCheck.service");
 
 const ARGENTINA_TIME_ZONE = "America/Argentina/Buenos_Aires";
 const TERMINAL_ROW_STATUSES = ["eligible", "assigned", "rejected", "failed", "cancelled"];
@@ -72,26 +76,50 @@ async function resolveDashboardSupervisor({ user, supervisorId }) {
     return supervisor._id;
 }
 
+async function resolveDashboardScope({ user, supervisorId }) {
+    const role = normalizeRole(user);
+    const unlimited = isUnlimitedAffiliateCheckRole(user);
+    if (SUPERVISOR_ROLES.includes(role)) {
+        return { supervisorId: user._id, quotaUnlimited: false, globalActivity: false };
+    }
+    if (!TARGET_VIEW_ROLES.includes(role)) {
+        throw new AffiliateCheckError("No tiene permisos para consultar métricas de chequeo", 403, "DASHBOARD_FORBIDDEN");
+    }
+    if (supervisorId) {
+        return {
+            supervisorId: await resolveDashboardSupervisor({ user, supervisorId }),
+            quotaUnlimited: unlimited,
+            globalActivity: false
+        };
+    }
+    return {
+        supervisorId: unlimited ? null : user._id,
+        quotaUnlimited: unlimited,
+        globalActivity: unlimited
+    };
+}
+
 function emptyModeUsage() {
     return { extract_base: 0, check_new: 0, check_reusable: 0, check_import: 0 };
 }
 
 async function getDailyJobUsage({ supervisorId, start, end }) {
-    const subject = new mongoose.Types.ObjectId(supervisorId);
+    const subject = supervisorId ? new mongoose.Types.ObjectId(supervisorId) : null;
+    const match = {
+        createdAt: { $gte: start, $lt: end },
+        status: { $ne: "draft" },
+        isDeleted: { $ne: true },
+        mode: { $in: ["check_new", "check_reusable", "check_import"] }
+    };
+    if (subject) {
+        match.$or = [
+            { channelOwner: subject },
+            { "ownership.supervisorId": subject },
+            { requestedBy: subject }
+        ];
+    }
     const rows = await AffiliateCheckJob.aggregate([
-        {
-            $match: {
-                createdAt: { $gte: start, $lt: end },
-                status: { $ne: "draft" },
-                isDeleted: { $ne: true },
-                mode: { $in: ["check_new", "check_reusable", "check_import"] },
-                $or: [
-                    { channelOwner: subject },
-                    { "ownership.supervisorId": subject },
-                    { requestedBy: subject }
-                ]
-            }
-        },
+        { $match: match },
         { $group: { _id: "$mode", consumed: { $sum: { $ifNull: ["$quota.consumed", 0] } }, jobs: { $sum: 1 } } }
     ]);
     const byMode = emptyModeUsage();
@@ -105,11 +133,36 @@ async function getDailyJobUsage({ supervisorId, start, end }) {
 
 async function getDailyExtractionUsage({ supervisorId, start, end }) {
     return AffiliateAssignment.countDocuments({
-        supervisorId,
+        ...(supervisorId ? { supervisorId } : {}),
         source: "extract_base",
         status: { $ne: "cancelled" },
         assignedAt: { $gte: start, $lt: end }
     });
+}
+
+async function getGlobalDailyActivity({ start, end }) {
+    const rows = await AffiliateCheckRow.aggregate([
+        {
+            $match: {
+                mode: { $in: ["check_new", "check_reusable", "extract_base"] },
+                status: { $in: TERMINAL_ROW_STATUSES.filter(status => status !== "cancelled") },
+                $or: [
+                    { "stages.finalization.finalizedAt": { $gte: start, $lt: end } },
+                    { updatedAt: { $gte: start, $lt: end } }
+                ]
+            }
+        },
+        { $group: { _id: "$mode", count: { $sum: 1 } } }
+    ]);
+    const byMode = { check_new: 0, check_reusable: 0, extract_base: 0 };
+    for (const row of rows) {
+        if (Object.prototype.hasOwnProperty.call(byMode, row._id)) byMode[row._id] = row.count || 0;
+    }
+    return {
+        checkNewProcessedToday: byMode.check_new,
+        checkReusableProcessedToday: byMode.check_reusable,
+        extractBaseProcessedToday: byMode.extract_base
+    };
 }
 
 async function getDailyRowSummary({ supervisorId, start, end }) {
@@ -186,18 +239,22 @@ async function getDailyRowSummary({ supervisorId, start, end }) {
 }
 
 async function getAffiliateCheckDashboardSummary({ user, supervisorId, date, now = new Date() }) {
-    const subject = await resolveDashboardSupervisor({ user, supervisorId });
+    const scope = await resolveDashboardScope({ user, supervisorId });
+    const subject = scope.supervisorId;
     const range = argentinaDayRange(date, now);
     const config = await getActiveCheckConfig();
-    const [usage, extractUsed, rowSummary, activeAssignments] = await Promise.all([
+    const [usage, extractUsed, rowSummary, activeAssignments, globalActivity] = await Promise.all([
         getDailyJobUsage({ supervisorId: subject, start: range.start, end: range.end }),
         getDailyExtractionUsage({ supervisorId: subject, start: range.start, end: range.end }),
-        getDailyRowSummary({ supervisorId: subject, start: range.start, end: range.end }),
+        subject
+            ? getDailyRowSummary({ supervisorId: subject, start: range.start, end: range.end })
+            : Promise.resolve({ eligibleRowsToday: 0, assignedToStockToday: 0, generalStockToday: 0, errorsToday: 0 }),
         AffiliateAssignment.countDocuments({
-            supervisorId: subject,
+            ...(subject ? { supervisorId: subject } : {}),
             status: "active",
             expiresAt: { $gt: now }
-        })
+        }),
+        getGlobalDailyActivity({ start: range.start, end: range.end })
     ]);
 
     const limits = {
@@ -207,27 +264,28 @@ async function getAffiliateCheckDashboardSummary({ user, supervisorId, date, now
     };
     const used = usage.byMode;
     used.extract_base = extractUsed;
+    const quotaBucket = (mode, configuredLimit, usedValue) => ({
+        quotaUnlimited: scope.quotaUnlimited,
+        used: usedValue || 0,
+        limit: scope.quotaUnlimited ? null : configuredLimit,
+        remaining: scope.quotaUnlimited ? null : Math.max(0, configuredLimit - (usedValue || 0))
+    });
     return {
         success: true,
         date: range.date,
         timezone: range.timezone,
-        supervisorId: String(subject),
+        supervisorId: subject ? String(subject) : null,
+        quotaUnlimited: scope.quotaUnlimited,
+        activityScope: scope.globalActivity ? "global" : "supervisor",
+        dailyActivity: {
+            newAffiliatesCheckedToday: globalActivity.checkNewProcessedToday,
+            reusableAffiliatesCheckedToday: globalActivity.checkReusableProcessedToday,
+            baseExtractionAffiliatesProcessedToday: globalActivity.extractBaseProcessedToday
+        },
         quota: {
-            extract: {
-                used: used.extract_base || 0,
-                limit: limits.extract_base,
-                remaining: Math.max(0, limits.extract_base - (used.extract_base || 0))
-            },
-            checkNew: {
-                used: used.check_new || 0,
-                limit: limits.check_new,
-                remaining: Math.max(0, limits.check_new - (used.check_new || 0))
-            },
-            checkReusable: {
-                used: used.check_reusable || 0,
-                limit: limits.check_reusable,
-                remaining: Math.max(0, limits.check_reusable - (used.check_reusable || 0))
-            }
+            extract: quotaBucket("extract_base", limits.extract_base, scope.globalActivity ? globalActivity.extractBaseProcessedToday : used.extract_base),
+            checkNew: quotaBucket("check_new", limits.check_new, scope.globalActivity ? globalActivity.checkNewProcessedToday : used.check_new),
+            checkReusable: quotaBucket("check_reusable", limits.check_reusable, scope.globalActivity ? globalActivity.checkReusableProcessedToday : used.check_reusable)
         },
         summary: {
             checksPerformedToday: (used.check_new || 0) + (used.check_reusable || 0),

@@ -48,6 +48,7 @@ const DISABLED_MODE_ERRORS = {
     }
 };
 const MANAGER_ROLES = ["gerencia", "desarrollador", "admin", "encargado"];
+const UNLIMITED_AFFILIATE_CHECK_ROLES = ["gerencia", "desarrollador"];
 const INTERNAL_CHECK_ROLES = ["supervisor", "encargado", "gerencia", "desarrollador"];
 const INTERNAL_MODES = ["check_new", "check_reusable"];
 const EXTERNAL_MODES = ["check_import"];
@@ -107,6 +108,11 @@ class AffiliateCheckError extends Error {
 
 function normalizeRole(user) {
     return String(user?.role || "").trim().toLowerCase();
+}
+
+function isUnlimitedAffiliateCheckRole(userOrRole) {
+    const role = typeof userOrRole === "string" ? userOrRole.trim().toLowerCase() : normalizeRole(userOrRole);
+    return UNLIMITED_AFFILIATE_CHECK_ROLES.includes(role);
 }
 
 function normalizeRequestedCount(value) {
@@ -349,13 +355,11 @@ async function resolveQuota({ user, mode, requestedCount, date = new Date() }) {
     const dailyLimit = getDailyLimit(config, mode);
     const alreadyUsedToday = usage.byMode[mode] || 0;
 
-    const role = normalizeRole(user);
-    const BYPASS_ROLES = ["admin", "desarrollador", "gerencia"];
-    const isBypass = BYPASS_ROLES.includes(role);
+    const quotaUnlimited = isUnlimitedAffiliateCheckRole(user);
 
     const remaining = Math.max(0, dailyLimit - alreadyUsedToday);
 
-    if (!isBypass && remaining === 0) {
+    if (!quotaUnlimited && remaining === 0) {
         const MODE_LABELS = {
             check_import: "chequeo de archivos externos",
             check_new: "chequeo de datos nuevos",
@@ -369,14 +373,24 @@ async function resolveQuota({ user, mode, requestedCount, date = new Date() }) {
         throw new AffiliateCheckError(message, 429, "DAILY_QUOTA_EXHAUSTED");
     }
 
-    const effectiveRemaining = isBypass ? Math.max(count, remaining) : remaining;
+    if (!quotaUnlimited && count > remaining) {
+        throw new AffiliateCheckError(
+            `La cantidad solicitada (${count}) supera el cupo restante de hoy (${remaining}).`,
+            429,
+            "DAILY_QUOTA_EXCEEDED"
+        );
+    }
 
     return {
         config,
-        dailyLimit,
+        quotaUnlimited,
+        dailyLimit: quotaUnlimited ? null : dailyLimit,
+        quotaLimit: quotaUnlimited ? null : dailyLimit,
         alreadyUsedToday,
-        remaining: effectiveRemaining,
-        cappedCount: Math.min(count, effectiveRemaining)
+        quotaUsed: alreadyUsedToday,
+        remaining: quotaUnlimited ? null : remaining,
+        quotaRemaining: quotaUnlimited ? null : remaining,
+        cappedCount: count
     };
 }
 
@@ -432,6 +446,10 @@ async function previewAffiliateCheckSelection({
     return {
         mode,
         requestedCount: normalizedRequested,
+        quotaUnlimited: quota.quotaUnlimited,
+        quotaLimit: quota.quotaLimit,
+        quotaUsed: quota.quotaUsed,
+        quotaRemaining: quota.quotaRemaining,
         dailyLimit: quota.dailyLimit,
         alreadyUsedToday: quota.alreadyUsedToday,
         remaining: quota.remaining,
@@ -1365,6 +1383,7 @@ module.exports = {
     EXTERNAL_MODES,
     MANAGER_ROLES,
     MODES,
+    UNLIMITED_AFFILIATE_CHECK_ROLES,
     assertActiveChannelAvailable,
     assertAffiliateCheckRole,
     assignExtractedBaseAffiliates,
@@ -1378,6 +1397,7 @@ module.exports = {
     getAffiliateCheckObraSocialAvailability,
     getImportedAffiliateCheckAvailability,
     getSupervisorDailyUsage,
+    isUnlimitedAffiliateCheckRole,
     normalizeRole,
     previewAffiliateCheckSelection,
     releaseAffiliateCheckJobReservations,

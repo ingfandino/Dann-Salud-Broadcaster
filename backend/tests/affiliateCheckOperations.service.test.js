@@ -73,15 +73,67 @@ describe("affiliateCheckOperations.service", () => {
                 finalizer: { completed: 1, pending: 1 }
             }
         }, new Date("2026-06-15T12:10:00.000Z"));
-        expect(progress.percent).toBe(75);
+        expect(progress.percent).toBe(50);
         expect(progress.padronCompleted).toBe(2);
         expect(progress.activeStages).toEqual(["dateas"]);
         expect(progress.estimatedRemainingMs).toBeGreaterThan(0);
     });
 
+    test("100-row job reports terminal-row progress by selectedCount", () => {
+        const job = {
+            selectedCount: 100,
+            processedCount: 0,
+            status: "processing",
+            startedAt: new Date("2026-06-15T12:00:00.000Z"),
+            activeStartedAt: new Date("2026-06-15T12:00:00.000Z"),
+            createdAt: new Date("2026-06-15T12:00:00.000Z")
+        };
+
+        const firstCycle = formatProgressAggregate(job, {
+            rowCount: 100,
+            terminalRows: 10,
+            stages: {
+                arca: { completed: 10 },
+                dateas: { completed: 10 },
+                padron: { completed: 10 },
+                finalizer: { completed: 10 }
+            }
+        }, new Date("2026-06-15T12:05:00.000Z"));
+        expect(firstCycle.percent).toBe(10);
+        expect(firstCycle.processedCount).toBe(10);
+        expect(firstCycle.remainingCount).toBe(90);
+
+        const secondCycle = formatProgressAggregate(job, {
+            rowCount: 100,
+            terminalRows: 20,
+            stages: {
+                arca: { completed: 20 },
+                dateas: { completed: 20 },
+                padron: { completed: 20 },
+                finalizer: { completed: 20 }
+            }
+        }, new Date("2026-06-15T12:10:00.000Z"));
+        expect(secondCycle.percent).toBe(20);
+        expect(secondCycle.processedCount).toBe(20);
+        expect(secondCycle.remainingCount).toBe(80);
+
+        const done = formatProgressAggregate({ ...job, status: "completed" }, {
+            rowCount: 100,
+            terminalRows: 100,
+            stages: {
+                arca: { completed: 100 },
+                dateas: { completed: 100 },
+                padron: { completed: 100 },
+                finalizer: { completed: 100 }
+            }
+        }, new Date("2026-06-15T12:30:00.000Z"));
+        expect(done.percent).toBe(100);
+        expect(done.remainingCount).toBe(0);
+    });
+
     test("zero selected rows are safe and terminal jobs report 100 percent", () => {
         expect(formatProgressAggregate({ selectedCount: 0, status: "pending", createdAt: new Date() }, null).percent).toBe(0);
-        expect(formatProgressAggregate({ selectedCount: 1, status: "completed", createdAt: new Date() }, { rowCount: 1, stages: {} }).percent).toBe(100);
+        expect(formatProgressAggregate({ selectedCount: 1, status: "completed", createdAt: new Date() }, { rowCount: 1, terminalRows: 1, stages: {} }).percent).toBe(100);
     });
 
     test("pause drains in-flight work, then resume preserves the same job id", async () => {
@@ -103,6 +155,36 @@ describe("affiliateCheckOperations.service", () => {
         expect(resumed._id.toString()).toBe(job._id.toString());
         expect(resumed.status).toBe("processing");
         expect(resumed.resumeCount).toBe(1);
+    });
+
+    test("stage claims continue after an internal batch of ten rows", async () => {
+        const owner = user();
+        const job = await createJob({ requestedBy: owner._id, status: "processing", requestedCount: 100, selectedCount: 100 });
+        for (let index = 0; index < 100; index += 1) {
+            await createRow(job, {
+                cuilNormalized: String(20310000000 + index),
+                stages: {
+                    arca: { status: "pending" },
+                    dateas: { status: "pending" },
+                    padron: { status: "blocked" },
+                    finalization: { status: "pending" }
+                }
+            });
+        }
+
+        const firstCycleIds = [];
+        for (let index = 0; index < 10; index += 1) {
+            const claimed = await claimAffiliateCheckStage({ stage: "arca", workerId: `arca-${index}`, leaseMs: 60000 });
+            expect(claimed).toBeTruthy();
+            firstCycleIds.push(String(claimed._id));
+            await completeAffiliateCheckStage({ rowId: claimed._id, stage: "arca", workerId: `arca-${index}`, now: new Date("2026-06-15T12:01:00.000Z") });
+        }
+
+        const nextClaim = await claimAffiliateCheckStage({ stage: "arca", workerId: "arca-next", leaseMs: 60000 });
+        expect(nextClaim).toBeTruthy();
+        expect(firstCycleIds).not.toContain(String(nextClaim._id));
+        expect(await AffiliateCheckRow.countDocuments({ jobId: job._id, "stages.arca.status": "done" })).toBe(10);
+        expect(await AffiliateCheckRow.countDocuments({ jobId: job._id, "stages.arca.status": "pending" })).toBe(89);
     });
 
     test("retry reuses the job, preserves successful stages and reopens only failed work", async () => {

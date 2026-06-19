@@ -166,7 +166,7 @@ describe("affiliateCheck.service", () => {
         const preview = await previewAffiliateCheckSelection({
             user,
             mode: "check_new",
-            requestedCount: 5
+            requestedCount: 2
         });
 
         const updatedState = await AffiliateOperationalState.findById(state._id).lean();
@@ -766,7 +766,7 @@ describe("affiliateCheck.service", () => {
         await createImportRow(importJob._id, second.affiliateId, { rowNumber: 3 });
 
         const job = await createImportedAffiliateCheckJob({
-            user, importJobId: importJob._id, requestedCount: 2
+            user, importJobId: importJob._id, requestedCount: 1
         });
         expect(job.selectedCount).toBe(1);
         expect(job.ownership.supervisorId.toString()).toBe(user._id.toString());
@@ -1616,6 +1616,146 @@ describe("affiliateCheck.service", () => {
         expect(job._partialCreation).toBe(true);
         expect(job._partialMessage).toContain("1");
         expect(job._partialMessage).toContain("10");
+    });
+
+    test.each(["gerencia", "desarrollador"])("%s has unlimited quota for new, reusable, and extract_base modes", async role => {
+        const actor = userStub(role);
+        const supervisor = await User.create({
+            username: `target-${role}`,
+            nombre: `Target ${role}`,
+            email: `target-${role}@example.com`,
+            password: "password123",
+            role: "supervisor",
+            active: true
+        });
+        await AffiliateCheckConfig.updateOne(
+            { active: true },
+            {
+                $set: {
+                    "features.checkNewEnabled": true,
+                    "features.checkReusableEnabled": true,
+                    "features.extractBaseEnabled": true,
+                    "dailyQuota.checkNew": 0,
+                    "dailyQuota.checkReusable": 0,
+                    "dailyQuota.extractBase": 0
+                }
+            }
+        );
+        await createState({
+            freshness: "fresh",
+            verificationStatus: "unchecked",
+            usageStatus: "never_used",
+            saleStatus: "none",
+            availableForSale: false
+        });
+        await createState({
+            freshness: "reusable",
+            verificationStatus: "expired",
+            usageStatus: "available",
+            saleStatus: "none",
+            availableForSale: false
+        });
+        await createState({
+            verificationStatus: "checked",
+            canSell: true,
+            availableForSale: true,
+            saleStatus: "none"
+        });
+
+        const newPreview = await previewAffiliateCheckSelection({ user: actor, mode: "check_new", requestedCount: 1 });
+        expect(newPreview).toMatchObject({ quotaUnlimited: true, quotaLimit: null, quotaRemaining: null, quotaUsed: 0, willSelectCount: 1 });
+        const newJob = await createAffiliateCheckJob({ user: actor, mode: "check_new", requestedCount: 1 });
+        expect(newJob.selectedCount).toBe(1);
+        expect(newJob.quota.dailyLimit).toBeNull();
+        expect(newJob.quota.remainingBefore).toBeNull();
+
+        const reusablePreview = await previewAffiliateCheckSelection({ user: actor, mode: "check_reusable", requestedCount: 1 });
+        expect(reusablePreview).toMatchObject({ quotaUnlimited: true, quotaLimit: null, quotaRemaining: null, willSelectCount: 1 });
+        const reusableJob = await createAffiliateCheckJob({ user: actor, mode: "check_reusable", requestedCount: 1 });
+        expect(reusableJob.selectedCount).toBe(1);
+        expect(reusableJob.quota.dailyLimit).toBeNull();
+
+        const extractJob = await createAffiliateCheckJob({
+            user: actor,
+            mode: "extract_base",
+            requestedCount: 1,
+            supervisorId: supervisor._id
+        });
+        expect(extractJob.selectedCount).toBe(1);
+        expect(extractJob.assignedCount).toBe(1);
+        expect(extractJob.quota.dailyLimit).toBeNull();
+        expect(extractJob.quota.remainingBefore).toBeNull();
+    });
+
+    test("supervisor over-quota request is rejected instead of silently truncating to remaining quota", async () => {
+        const user = userStub("supervisor");
+        await AffiliateCheckConfig.updateOne(
+            { active: true },
+            { $set: { "features.checkNewEnabled": true, "dailyQuota.checkNew": 10 } }
+        );
+        for (let index = 0; index < 20; index += 1) {
+            await createState({
+                freshness: "fresh",
+                verificationStatus: "unchecked",
+                usageStatus: "never_used",
+                saleStatus: "none",
+                availableForSale: false
+            });
+        }
+
+        await expect(createAffiliateCheckJob({
+            user,
+            mode: "check_new",
+            requestedCount: 100
+        })).rejects.toMatchObject({ code: "DAILY_QUOTA_EXCEEDED", statusCode: 429 });
+        expect(await AffiliateCheckJob.countDocuments()).toBe(0);
+        expect(await AffiliateCheckRow.countDocuments()).toBe(0);
+    });
+
+    test("request 100 creates 100 durable rows when quota and inventory allow it", async () => {
+        const user = userStub("supervisor");
+        await AffiliateCheckConfig.updateOne(
+            { active: true },
+            { $set: { "features.checkNewEnabled": true, "dailyQuota.checkNew": 150 } }
+        );
+        for (let index = 0; index < 100; index += 1) {
+            await createState({
+                freshness: "fresh",
+                verificationStatus: "unchecked",
+                usageStatus: "never_used",
+                saleStatus: "none",
+                availableForSale: false
+            });
+        }
+
+        const job = await createAffiliateCheckJob({ user, mode: "check_new", requestedCount: 100 });
+        expect(job.requestedCount).toBe(100);
+        expect(job.selectedCount).toBe(100);
+        expect(await AffiliateCheckRow.countDocuments({ jobId: job._id })).toBe(100);
+        expect(job.quota.consumed).toBe(100);
+    });
+
+    test("request 100 with 73 available reports partial inventory selection and creates all 73 rows", async () => {
+        const user = userStub("supervisor");
+        await AffiliateCheckConfig.updateOne(
+            { active: true },
+            { $set: { "features.checkNewEnabled": true, "dailyQuota.checkNew": 150 } }
+        );
+        for (let index = 0; index < 73; index += 1) {
+            await createState({
+                freshness: "fresh",
+                verificationStatus: "unchecked",
+                usageStatus: "never_used",
+                saleStatus: "none",
+                availableForSale: false
+            });
+        }
+
+        const job = await createAffiliateCheckJob({ user, mode: "check_new", requestedCount: 100 });
+        expect(job.requestedCount).toBe(100);
+        expect(job.selectedCount).toBe(73);
+        expect(job._partialCreation).toBe(true);
+        expect(await AffiliateCheckRow.countDocuments({ jobId: job._id })).toBe(73);
     });
 
     test("create rejects when no selectable affiliates exist", async () => {

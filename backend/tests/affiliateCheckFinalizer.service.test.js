@@ -34,6 +34,7 @@ const {
     claimAffiliateCheckFinalization,
     completeAffiliateCheckFinalization,
     failAffiliateCheckFinalization,
+    finalizeAffiliateCheckJobIfComplete,
     finalizeClaimedAffiliateCheckRow,
     heartbeatAffiliateCheckFinalization,
     processNextAffiliateCheckFinalization,
@@ -409,6 +410,48 @@ describe("affiliateCheckFinalizer.service", () => {
         expect(result.job.eligibleCount).toBe(1);
         expect(result.job.rejectedCount).toBe(1);
         expect(result.job.failedCount).toBe(0);
+    });
+
+    test("finalizer refuses completion while selected rows remain nonterminal", async () => {
+        const { job } = await createCandidate({ selectedCount: 100 });
+        await AffiliateCheckRow.deleteMany({ jobId: job._id });
+        for (let index = 0; index < 10; index += 1) {
+            await AffiliateCheckRow.create({
+                jobId: job._id,
+                affiliateId: new mongoose.Types.ObjectId(),
+                cuilNormalized: String(20300000000 + index),
+                mode: "check_new",
+                status: "eligible",
+                canSell: true,
+                stages: {
+                    arca: { status: "done" },
+                    dateas: { status: "done" },
+                    padron: { status: "done" },
+                    finalization: { status: "done", finalizedAt: NOW }
+                }
+            });
+        }
+        for (let index = 10; index < 100; index += 1) {
+            await AffiliateCheckRow.create({
+                jobId: job._id,
+                affiliateId: new mongoose.Types.ObjectId(),
+                cuilNormalized: String(20300000000 + index),
+                mode: "check_new",
+                status: "queued",
+                stages: {
+                    arca: { status: "pending" },
+                    dateas: { status: "pending" },
+                    padron: { status: "blocked" },
+                    finalization: { status: "pending" }
+                }
+            });
+        }
+
+        const result = await finalizeAffiliateCheckJobIfComplete({ jobId: job._id, now: NOW });
+        expect(result.status).toBe("pending");
+        expect(result.processedCount).toBe(10);
+        expect(result.eligibleCount).toBe(10);
+        expect(result.finishedAt).toBeFalsy();
     });
 
     test("does not finalize cancelled jobs", async () => {

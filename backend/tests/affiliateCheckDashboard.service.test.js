@@ -107,6 +107,60 @@ describe("affiliate check dashboard and result counters", () => {
         expect(result.summary.activeAssignments).toBe(1);
         expect(result.summary.eligibleRowsToday).toBe(1);
         expect(result.summary.assignedToStockToday).toBe(1);
+        expect(result.quota.checkNew.quotaUnlimited).toBe(false);
+    });
+
+    test.each(["gerencia", "desarrollador"])("%s sees unlimited quota and global daily activity metrics", async role => {
+        const manager = await User.create({ username: `mgr-${role}`, nombre: role, email: `mgr-${role}@example.com`, password: "password123", role, active: true });
+        const supervisor = await User.create({ username: `sup-${role}`, nombre: "Supervisor", email: `sup-${role}@example.com`, password: "password123", role: "supervisor", active: true });
+        const newJob = await AffiliateCheckJob.create({
+            requestedBy: supervisor._id,
+            requestedByRole: "supervisor",
+            mode: "check_new",
+            status: "completed",
+            requestedCount: 2,
+            selectedCount: 2,
+            createdAt: new Date("2026-06-16T12:00:00.000Z")
+        });
+        const reusableJob = await AffiliateCheckJob.create({
+            requestedBy: manager._id,
+            requestedByRole: role,
+            mode: "check_reusable",
+            status: "completed",
+            requestedCount: 1,
+            selectedCount: 1,
+            createdAt: new Date("2026-06-16T12:00:00.000Z")
+        });
+        const extractJob = await AffiliateCheckJob.create({
+            requestedBy: manager._id,
+            requestedByRole: role,
+            mode: "extract_base",
+            status: "completed",
+            requestedCount: 1,
+            selectedCount: 1,
+            createdAt: new Date("2026-06-16T12:00:00.000Z")
+        });
+        await AffiliateCheckRow.create({ jobId: newJob._id, affiliateId: oid(), cuilNormalized: "201", mode: "check_new", status: "assigned", canSell: true, stages: { finalization: { status: "done", finalizedAt: new Date("2026-06-16T13:00:00.000Z") } } });
+        await AffiliateCheckRow.create({ jobId: newJob._id, affiliateId: oid(), cuilNormalized: "202", mode: "check_new", status: "rejected", canSell: false, stages: { finalization: { status: "done", finalizedAt: new Date("2026-06-16T13:00:00.000Z") } } });
+        await AffiliateCheckRow.create({ jobId: reusableJob._id, affiliateId: oid(), cuilNormalized: "203", mode: "check_reusable", status: "eligible", canSell: true, stages: { finalization: { status: "done", finalizedAt: new Date("2026-06-16T14:00:00.000Z") } } });
+        await AffiliateCheckRow.create({ jobId: extractJob._id, affiliateId: oid(), cuilNormalized: "204", mode: "extract_base", status: "assigned", canSell: true, stages: { finalization: { status: "done", finalizedAt: new Date("2026-06-16T15:00:00.000Z") } } });
+
+        const result = await getAffiliateCheckDashboardSummary({
+            user: { _id: manager._id, role },
+            date: "2026-06-16",
+            now: new Date("2026-06-16T16:00:00.000Z")
+        });
+
+        expect(result.quotaUnlimited).toBe(true);
+        expect(result.activityScope).toBe("global");
+        expect(result.quota.checkNew).toMatchObject({ quotaUnlimited: true, limit: null, remaining: null, used: 2 });
+        expect(result.quota.checkReusable).toMatchObject({ quotaUnlimited: true, limit: null, remaining: null, used: 1 });
+        expect(result.quota.extract).toMatchObject({ quotaUnlimited: true, limit: null, remaining: null, used: 1 });
+        expect(result.dailyActivity).toEqual({
+            newAffiliatesCheckedToday: 2,
+            reusableAffiliatesCheckedToday: 1,
+            baseExtractionAffiliatesProcessedToday: 1
+        });
     });
 
     test("daily summary does not count check-job assignments outside the Argentina day", async () => {

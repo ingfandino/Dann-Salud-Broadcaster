@@ -72,6 +72,7 @@ function activeElapsedMs(job, now = new Date()) {
 function formatProgressAggregate(job, aggregate, now = new Date()) {
     const selectedCount = Math.max(0, Number(job.selectedCount || aggregate?.rowCount || 0));
     const rowCount = Number(aggregate?.rowCount || 0);
+    const terminalRows = Math.max(0, Number(aggregate?.terminalRows ?? job.processedCount ?? 0));
     const stageNames = ["arca", "dateas", "padron", "finalizer"];
     const stages = {};
     for (const stage of stageNames) {
@@ -84,10 +85,8 @@ function formatProgressAggregate(job, aggregate, now = new Date()) {
             skipped: Number(source.skipped || 0)
         };
     }
-    const totalRequiredStages = rowCount * 4;
-    const completedStages = stageNames.reduce((sum, stage) => sum + stages[stage].completed, 0);
-    let percent = totalRequiredStages > 0 ? (completedStages / totalRequiredStages) * 100 : 0;
-    if (["completed", "completed_with_errors"].includes(job.status) && selectedCount > 0) percent = 100;
+    let percent = selectedCount > 0 ? (Math.min(terminalRows, selectedCount) / selectedCount) * 100 : 0;
+    if (["completed", "completed_with_errors"].includes(job.status) && selectedCount > 0 && terminalRows >= selectedCount) percent = 100;
     percent = Math.min(100, Math.max(0, Number(percent.toFixed(2))));
 
     const activeStages = stageNames.filter(stage => stages[stage].processing > 0);
@@ -110,8 +109,10 @@ function formatProgressAggregate(job, aggregate, now = new Date()) {
 
     return {
         percent,
-        processedCount: Number(job.processedCount || 0),
+        rowCount,
+        processedCount: terminalRows,
         selectedCount,
+        remainingCount: Math.max(0, selectedCount - terminalRows),
         arcaCompleted: stages.arca.completed,
         dateasCompleted: stages.dateas.completed,
         padronCompleted: stages.padron.completed,
@@ -166,12 +167,14 @@ async function aggregateJobProgress(jobIds) {
             finalizerCompleted: stageAccumulator("stages.finalization.status").completed,
             finalizerFailed: stageAccumulator("stages.finalization.status").failed,
             finalizerSkipped: stageAccumulator("stages.finalization.status").skipped,
+            terminalRows: { $sum: { $cond: [{ $in: ["$status", TERMINAL_ROW_STATUSES] }, 1, 0] } },
             lastProgressAt: { $max: { $max: ["$stages.arca.finishedAt", "$stages.dateas.finishedAt", "$stages.padron.finishedAt", "$stages.finalization.finishedAt"] } },
             lastWorkerHeartbeatAt: { $max: { $max: ["$stages.arca.heartbeatAt", "$stages.dateas.heartbeatAt", "$stages.padron.heartbeatAt", "$stages.finalization.heartbeatAt"] } }
         } }
     ]);
     return new Map(rows.map(row => [String(row._id), {
         rowCount: row.rowCount,
+        terminalRows: row.terminalRows,
         lastProgressAt: row.lastProgressAt,
         lastWorkerHeartbeatAt: row.lastWorkerHeartbeatAt,
         stages: {
